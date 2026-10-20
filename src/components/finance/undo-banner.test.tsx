@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { UndoBanner } from "./undo-banner";
-import { ReopenReview } from "./reopen-review";
+import { ReopenFooter, ReopenReview } from "./reopen-review";
+import { requestReviewFocus, takeReviewFocus } from "./review-focus";
 
 // Markup tests never press a button: the router, the toast and the server actions are stand-ins.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
@@ -39,5 +40,54 @@ describe("ReopenReview", () => {
     const html = renderToStaticMarkup(<ReopenReview id="a1" tag="BR-LT-0201" />);
     expect(text(html)).toBe("Reopen review");
     expect(html).not.toContain("role=\"dialog\"");
+  });
+
+  const cancel = (html: string) => html.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Cancel(?:(?!<\/button>)[\s\S])*<\/button>/)![0];
+
+  it("Cancel is disabled while the reopen is on its way, and the confirm button is busy", () => {
+    const html = renderToStaticMarkup(<ReopenFooter pending onCancel={() => {}} onConfirm={() => {}} />);
+    expect(cancel(html)).toMatch(/<button[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*aria-busy="true"[^>]*>/);
+  });
+
+  it("both buttons work when nothing is pending", () => {
+    const html = renderToStaticMarkup(<ReopenFooter pending={false} onCancel={() => {}} onConfirm={() => {}} />);
+    expect(html).not.toContain('disabled=""');
+  });
+});
+
+describe("focus after a reopen (review-focus)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    takeReviewFocus();
+  });
+
+  it("the review box that mounts next takes focus, once", () => {
+    vi.useFakeTimers();
+    expect(takeReviewFocus()).toBe(false);
+    requestReviewFocus();
+    expect(takeReviewFocus()).toBe(true);
+    expect(takeReviewFocus()).toBe(false);
+  });
+
+  it("no review box came: focus left on the body goes to #main", () => {
+    vi.useFakeTimers();
+    const main = { focus: vi.fn() };
+    const body = {};
+    vi.stubGlobal("document", { body, activeElement: body, getElementById: (id: string) => (id === "main" ? main : null) });
+    requestReviewFocus(3000);
+    vi.advanceTimersByTime(3000);
+    expect(main.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("a review box took it: the fallback leaves focus alone", () => {
+    vi.useFakeTimers();
+    const main = { focus: vi.fn() };
+    vi.stubGlobal("document", { body: {}, activeElement: { isConnected: true }, getElementById: () => main });
+    requestReviewFocus(3000);
+    takeReviewFocus();
+    vi.advanceTimersByTime(3000);
+    expect(main.focus).not.toHaveBeenCalled();
   });
 });

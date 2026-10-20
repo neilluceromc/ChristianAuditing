@@ -29,7 +29,7 @@ vi.mock("@/server/auth/guards", () => ({
 vi.mock("@/server/rate-limit", () => ({ checkRate: async () => h.rate }));
 vi.mock("@/server/webhooks/emit", () => ({ emitWebhook: async () => {} }));
 vi.mock("@/server/modules/finance/queries", () => ({ nextToReview: async () => null }));
-vi.mock("@/server/modules/finance/review-queue", () => ({ toReviewCount: async () => 0 }));
+vi.mock("@/server/modules/finance/review-queue", () => ({ toReviewCount: vi.fn(async () => 0) }));
 vi.mock("@/server/db/client", () => {
   const same = (a: unknown, b: unknown) =>
     a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b || (a == null && b == null);
@@ -90,6 +90,7 @@ vi.mock("@/server/db/client", () => {
 import { confirmAssetDetails, resubmitAssetToFinance, returnAssetToIt } from "@/server/modules/inventory/actions";
 import { clearAssetOverride, setAssetOverride } from "./depreciation-actions";
 import { reopenFinanceReview, undoFinanceAction } from "./undo-actions";
+import { toReviewCount } from "./review-queue";
 
 const ANA = { id: "u-ana", name: "Ana Cruz", role: "finance_staff" };
 const BEN = { id: "u-ben", name: "Ben Reyes", role: "finance_staff" };
@@ -142,6 +143,16 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("approve's result (finance follow-up, Task 3)", () => {
+  it("names how many of the class are still To review, counted for the approved asset's class", async () => {
+    seed("0290", { cls: "PURCHASING" });
+    vi.mocked(toReviewCount).mockResolvedValueOnce(3);
+    const r = await confirmAssetDetails({ id: "0290" });
+    expect(r).toEqual({ ok: true, data: { tag: "BR-LT-0290", next: null, remaining: 3 } });
+    expect(toReviewCount).toHaveBeenLastCalledWith("PURCHASING");
+  });
 });
 
 describe("undo approve", () => {

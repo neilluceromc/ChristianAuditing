@@ -1,6 +1,6 @@
 import type { Role } from "@prisma/client";
 import type { ActionResult } from "@/server/action-result";
-import { monthLabel, type MonthIndex, type Policy } from "./depreciation";
+import { depreciate, monthLabel, type MonthIndex, type Policy } from "./depreciation";
 import { fmtMoneyExact } from "./format";
 import { cleanReason } from "./reason";
 import {
@@ -51,16 +51,17 @@ const shortMonth = (m: MonthIndex) => {
 };
 
 /**
- * Approve's first detail line: "Depreciation starts Oct 2026 · ₱2,131.11 a month", read from the policy the approval
- * will use and its start month (the purchase month). Null with no cost: approving it as not capitalised.
+ * Approve's first detail line: "Depreciation starts Oct 2026 · ₱2,131.11 a month", for the policy the approval will
+ * use and its start month (the purchase month, `depStartMonth` with the approval as now). The figure and the rules are
+ * the engine's (`depreciate`, read in the start month), never re-derived here. Null with no cost: approving it as not
+ * capitalised.
  */
-export function approveDetail(a: { costC: number | null; policy: Policy | null; startMonth: MonthIndex | null; category: string }): string | null {
+export function approveDetail(a: { costC: number | null; policy: Policy | null; startMonth: MonthIndex; category: string }): string | null {
   if (a.costC === null) return null;
-  if (!a.policy) return `No depreciation policy for ${a.category} yet`;
-  if (a.policy.salvage >= a.costC) return "Salvage is not below cost, so it does not depreciate";
-  const monthly = Math.floor((a.costC - a.policy.salvage) / a.policy.lifeMonths);
-  const starts = a.startMonth === null ? "Depreciation starts from the purchase month" : `Depreciation starts ${shortMonth(a.startMonth)}`;
-  return `${starts} · ${fmtMoneyExact(monthly / 100)} a month`;
+  const r = depreciate(a.costC, a.startMonth, a.policy, a.startMonth);
+  if (r.state === "no-policy") return `No depreciation policy for ${a.category} yet`;
+  if (r.state === "bad-salvage" || r.monthly === null) return "Salvage is not below cost, so it does not depreciate";
+  return `Depreciation starts ${shortMonth(a.startMonth)} · ${fmtMoneyExact(r.monthly / 100)} a month`;
 }
 
 const undoButton = (target: UndoTarget, deps: ReviewToastDeps): ToastButton => ({ label: "Undo", onAction: () => deps.undo(target) });
@@ -169,6 +170,25 @@ export function undoBanner(asset: UndoAsset, entries: readonly UndoEntry[], user
 /** The banner's countdown on the client: whole minutes rounded up, 0 once the window has ended. */
 export function minutesLeftAt(endsAt: number, now: number): number {
   return Math.max(0, Math.ceil((endsAt - now) / 60_000));
+}
+
+/** How often the banner re-reads the minutes left. */
+export const UNDO_TICK_MS = 30_000;
+
+/**
+ * The banner's countdown on this device's clock: the minutes are re-read every 30 s, and a timer at the deadline ends
+ * it exactly then (spec §4: it disappears when the window ends), not up to 30 s later. Returns the cleanup.
+ */
+export function startUndoCountdown(deadline: number, set: (minutesLeft: number) => void, tickMs = UNDO_TICK_MS): () => void {
+  const tick = setInterval(() => set(minutesLeftAt(deadline, Date.now())), tickMs);
+  const end = setTimeout(() => {
+    clearInterval(tick);
+    set(0);
+  }, Math.max(0, deadline - Date.now()));
+  return () => {
+    clearInterval(tick);
+    clearTimeout(end);
+  };
 }
 
 /** Reopen review: admins only, on an approved asset. */

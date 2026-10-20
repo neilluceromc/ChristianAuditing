@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { depreciate } from "./depreciation";
 import { fmtMoneyExact } from "./format";
 import type { UndoAsset, UndoEntry } from "./finance-undo";
 import {
   approveDetail, approveToast, canReopenReview, minutesLeftAt, reopenReasonError, runFinanceUndo, sendBackToast, settingsToast,
+  startUndoCountdown,
   undoBanner, type ReviewToastDeps,
 } from "./finance-review-ui";
 
@@ -25,7 +27,15 @@ describe("approveDetail (spec §4: 'Depreciation starts Oct 2026 · ₱2,131.11 
       .toBe("Salvage is not below cost, so it does not depreciate");
   });
   it("is null with no cost (approved as not capitalised)", () => {
-    expect(approveDetail({ costC: null, policy: null, startMonth: null, category: "Laptops" })).toBeNull();
+    expect(approveDetail({ costC: null, policy: null, startMonth: 2026 * 12, category: "Laptops" })).toBeNull();
+  });
+  it("the monthly figure is the engine's (depreciation.ts), whatever the rounding", () => {
+    const start = 2026 * 12 + 9;
+    for (const [costC, salvage, lifeMonths] of [[99_999, 1_234, 37], [5_000_000, 0, 7], [1_234_567, 99_999, 61]]) {
+      const policy = { lifeMonths, salvage, basis: "custom" as const };
+      const engine = depreciate(costC, start, policy, start).monthly!;
+      expect(approveDetail({ costC, policy, startMonth: start, category: "Laptops" })).toBe(`Depreciation starts Oct 2026 · ${fmtMoneyExact(engine / 100)} a month`);
+    }
   });
 });
 
@@ -160,6 +170,39 @@ describe("undoBanner (the asset page, server-computed)", () => {
     expect(minutesLeftAt(ends, ends - 1)).toBe(1);
     expect(minutesLeftAt(ends, ends)).toBe(0);
     expect(minutesLeftAt(ends, ends + 60_000)).toBe(0);
+  });
+});
+
+describe("startUndoCountdown (the banner's client clock)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("re-reads the minutes every 30 s, and ends exactly at the deadline, not up to 30 s later", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const deadline = 12 * 60_000 + 10_000; // 12 min 10 s from now
+    const set = vi.fn();
+    const stop = startUndoCountdown(deadline, set);
+    vi.advanceTimersByTime(30_000);
+    expect(set).toHaveBeenLastCalledWith(12);
+    vi.advanceTimersByTime(12 * 60_000 + 10_000 - 30_000 - 1); // 1 ms before the deadline
+    expect(set).not.toHaveBeenCalledWith(0);
+    vi.advanceTimersByTime(1);
+    expect(set).toHaveBeenLastCalledWith(0);
+    stop();
+  });
+
+  it("an already-passed deadline ends at once; stopping clears both timers", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const set = vi.fn();
+    startUndoCountdown(50_000, set);
+    vi.advanceTimersByTime(0);
+    expect(set).toHaveBeenCalledWith(0);
+    const later = vi.fn();
+    const stop = startUndoCountdown(100_000 + 5 * 60_000, later);
+    stop();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(later).not.toHaveBeenCalled();
   });
 });
 

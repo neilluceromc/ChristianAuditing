@@ -9,6 +9,7 @@ import { ReasonField } from "@/components/patterns/reason-field";
 import { reopenReasonError } from "@/lib/finance-review-ui";
 import { REOPEN_REASON_MAX, REOPEN_REASON_MIN } from "@/lib/finance-undo";
 import { reopenFinanceReview } from "@/server/modules/finance/undo-actions";
+import { requestReviewFocus } from "./review-focus";
 import { useFinanceRunner } from "./use-finance-runner";
 
 /**
@@ -36,7 +37,13 @@ export function ReopenReview({ id, tag }: { id: string; tag: string }) {
     run(
       () => reopenFinanceReview({ assetId: id, reason }),
       (d) => ({ message: `Reopened ${d.tag}'s review`, detail: "It is back in To review" }),
-      { onOk: () => setOpen(false) },
+      {
+        onOk: () => {
+          // the refresh takes this button away (no longer approved): the review box that appears takes focus
+          requestReviewFocus();
+          setOpen(false);
+        },
+      },
     );
   }
 
@@ -47,12 +54,7 @@ export function ReopenReview({ id, tag }: { id: string; tag: string }) {
         open={open}
         onClose={() => setOpen(false)}
         title={`Reopen ${tag}'s review`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button variant="danger" loading={pending} onClick={confirm}>Reopen review</Button>
-          </>
-        }
+        footer={<ReopenFooter pending={pending} onCancel={() => setOpen(false)} onConfirm={confirm} />}
       >
         <div className="flex flex-col gap-3">
           {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
@@ -72,6 +74,16 @@ export function ReopenReview({ id, tag }: { id: string; tag: string }) {
           />
         </div>
       </Dialog>
+    </>
+  );
+}
+
+/** The dialog's buttons: Cancel is disabled while the reopen is on its way, so it cannot close mid-request. */
+export function ReopenFooter({ pending, onCancel, onConfirm }: { pending: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <Button variant="ghost" onClick={onCancel} disabled={pending}>Cancel</Button>
+      <Button variant="danger" loading={pending} onClick={onConfirm}>Reopen review</Button>
     </>
   );
 }

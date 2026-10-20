@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { approveToast, financeAssetHref } from "@/lib/finance-review-ui";
 import { confirmAssetDetails } from "@/server/modules/inventory/actions";
 import { SendBackDialog } from "./send-back-dialog";
+import { takeReviewFocus } from "./review-focus";
 import { useFinanceRunner } from "./use-finance-runner";
 import { useFinanceUndo } from "./use-finance-undo";
 
@@ -27,6 +28,12 @@ export function ReviewBox({
   const { pending, error, retryAfter, setRetryAfter, run } = useFinanceRunner();
   const undo = useFinanceUndo();
   const [sending, setSending] = useState(false);
+  const box = useRef<HTMLElement>(null);
+
+  // after an admin's Reopen review, this box replaces the Reopen button: focus lands here, not on the body
+  useEffect(() => {
+    if (takeReviewFocus()) box.current?.focus();
+  }, []);
 
   function approve() {
     run(
@@ -40,7 +47,7 @@ export function ReviewBox({
   }
 
   return (
-    <section role="region" aria-label="Review" className="mb-4 rounded-(--radius-card) border border-accent-soft-border bg-accent-soft px-4 py-3">
+    <section ref={box} tabIndex={-1} role="region" aria-label="Review" className="mb-4 rounded-(--radius-card) border border-accent-soft-border bg-accent-soft px-4 py-3">
       <h2 className="text-[15px] font-semibold text-fg">Waiting for your review</h2>
       <p className="mt-1 text-[13px] text-fg-secondary">
         {hasCost

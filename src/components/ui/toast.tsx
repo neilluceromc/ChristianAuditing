@@ -13,9 +13,8 @@ export interface ToastAction {
 }
 
 /**
- * Finance follow-up (spec §4): a detail line under the message and up to two buttons (Undo, Open <tag>). The detail's
- * line breaks ("
-") show as lines.
+ * Finance follow-up (spec §4): a detail line under the message and up to two buttons (Undo, Open <tag>). A newline
+ * character in the detail starts a new line on screen.
  */
 export interface ToastOptions {
   detail?: string;
@@ -78,8 +77,9 @@ export function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss
 
   const sync = () => (hovered.current || focused.current ? timer.current?.pause() : timer.current?.resume());
 
-  const buttons = t.actions.map((a) => (
-    <Fragment key={a.label}>
+  // keyed by position: two buttons could share a label, and the list never reorders
+  const buttons = t.actions.map((a, i) => (
+    <Fragment key={i}>
       <span aria-hidden="true">·</span>
       <button
         type="button"

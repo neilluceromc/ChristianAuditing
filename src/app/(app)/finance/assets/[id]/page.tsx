@@ -111,7 +111,8 @@ export default async function FinanceAssetPage({
     ? approveDetail({
         costC: d.result ? d.costC : null,
         policy: d.result?.policy ?? null,
-        startMonth: depStartMonth({ purchasedAt: d.purchase.purchasedAt, financeConfirmedAt: now }),
+        // the engine's start rule with the approval as now (so never null; `?? asOf` only satisfies the type)
+        startMonth: depStartMonth({ purchasedAt: d.purchase.purchasedAt, financeConfirmedAt: now }) ?? asOf,
         category: d.category,
       })
     : null;
