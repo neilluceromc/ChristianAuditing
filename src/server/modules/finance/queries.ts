@@ -5,7 +5,7 @@ import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, pageOf } from "@/lib/paging";
 import { finWhere, regWhere, type FinFilter } from "@/lib/registration";
 import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
-  categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortFinanceRows,
+  categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortRows,
   type CategoryTile, type FinanceSort, type LifeFilter, type LifeStage,
 } from "@/lib/finance-list";
 import { depRows, type DepAssetRow } from "./depreciation-queries";
@@ -144,7 +144,7 @@ async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed
     shown.costedCount++; shown.costC += r.result.cost; shown.accC += r.result.accumulated; shown.bookC += r.result.bookValue;
   }
   return {
-    sorted: sortFinanceRows(matching, p.sort ?? "book"),
+    sorted: sortRows(matching, p.sort ?? "book"),
     category, categoryLabel, kpis, categoryTiles: tiles, statusTiles,
     finCounts: [...counts].map(([key, count]) => ({ key, count })),
     shown,

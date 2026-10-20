@@ -3,6 +3,7 @@ import { depreciate, monthLabel, stateNote, type DepResult, type MonthIndex } fr
 import { FIN_FILTERS, parseFin, type FinFilter, type RegState } from "./registration";
 import { isStatusOf, parseCls } from "./asset-class";
 import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, parsePage } from "./paging";
+import { fmtDayMonthYear } from "./format";
 
 /**
  * Phase 47 (spec §3): the pure half of Finance → Assets — life stage per row, the Life filter, the sort, the category
@@ -23,19 +24,36 @@ export const LIFE_LABEL: Record<LifeFilter, string> = {
   soon: "6 months or less left", full: "Fully depreciated", notstarted: "Not depreciating yet",
 };
 
-/** The Sort select: book value high first (default); life used, most first; tag. */
-export type FinanceSort = "book" | "life" | "tag";
-export const FINANCE_SORTS: readonly FinanceSort[] = ["book", "life", "tag"];
+/**
+ * The Sort select: book value high first (default); then book value low first, cost, date approved, date added and
+ * purchase date (each both ways, "-asc" is the other way); life used, most first; tag.
+ */
+export type FinanceSort =
+  | "book" | "book-asc" | "cost" | "cost-asc" | "approved" | "approved-asc"
+  | "added" | "added-asc" | "purchased" | "purchased-asc" | "life" | "tag";
 export const DEFAULT_FINANCE_SORT: FinanceSort = "book";
 
+/** The Sort select's options, in the spec's order (finance sort/undo spec §2). */
+export const SORT_OPTIONS: ReadonlyArray<{ value: FinanceSort; label: string }> = [
+  { value: "book", label: "Book value, high first" },
+  { value: "book-asc", label: "Book value, low first" },
+  { value: "cost", label: "Cost, high first" },
+  { value: "cost-asc", label: "Cost, low first" },
+  { value: "approved", label: "Date approved, newest first" },
+  { value: "approved-asc", label: "Date approved, oldest first" },
+  { value: "added", label: "Date added, newest first" },
+  { value: "added-asc", label: "Date added, oldest first" },
+  { value: "purchased", label: "Purchase date, newest first" },
+  { value: "purchased-asc", label: "Purchase date, oldest first" },
+  { value: "life", label: "Life used, most first" },
+  { value: "tag", label: "Tag" },
+];
+export const FINANCE_SORTS: readonly FinanceSort[] = SORT_OPTIONS.map((o) => o.value);
+
+/** An unknown value reads as the default (book value, high first). */
 export function parseSort(raw: string | null | undefined): FinanceSort {
   return raw && (FINANCE_SORTS as readonly string[]).includes(raw) ? (raw as FinanceSort) : DEFAULT_FINANCE_SORT;
 }
-
-/** The Sort select's words (spec §3 item 5). */
-export const SORT_LABEL: Record<FinanceSort, string> = {
-  book: "Book value, high first", life: "Life used, most first", tag: "Tag",
-};
 
 /** Months left at or below which a depreciating asset reads "soon" (the Life filter's "6 months or less left"). */
 export const SOON_MONTHS = 6;
@@ -102,19 +120,56 @@ export function monthCharge(r: DepResult, asOf: MonthIndex): number {
   return depreciate(r.cost, r.startMonth, r.policy, asOf).accumulated - depreciate(r.cost, r.startMonth, r.policy, asOf - 1).accumulated;
 }
 
-interface Sortable { tag: string; result: { bookValue: number } | null; lifeStage: LifeStage }
+interface Sortable {
+  tag: string;
+  costC: number | null;
+  approvedAt: Date | null;
+  addedAt: Date | null;
+  purchasedAt: Date | null;
+  result: { bookValue: number } | null;
+  lifeStage: LifeStage;
+}
 
 const byTag = (a: Sortable, b: Sortable) => a.tag.localeCompare(b.tag);
-/** Descending on a nullable number, nulls last. */
-const descNullsLast = (a: number | null, b: number | null) => (a === null ? (b === null ? 0 : 1) : b === null ? -1 : b - a);
+/** A nullable number, descending (`dir` -1) or ascending (`dir` 1); a missing value is last either way. */
+const nullsLast = (a: number | null, b: number | null, dir: 1 | -1) =>
+  a === null ? (b === null ? 0 : 1) : b === null ? -1 : (a - b) * dir;
 
-/** A sorted copy. Ties fall back to tag, so a page never depends on the database's row order. */
-export function sortFinanceRows<T extends Sortable>(rows: readonly T[], sort: FinanceSort): T[] {
-  const cmp: (a: T, b: T) => number =
-    sort === "tag" ? byTag
-    : sort === "life" ? (a, b) => descNullsLast(a.lifeStage.usedRatio, b.lifeStage.usedRatio) || byTag(a, b)
-    : (a, b) => descNullsLast(a.result?.bookValue ?? null, b.result?.bookValue ?? null) || byTag(a, b);
+/**
+ * A sorted copy. A row with no value for the sort key (not approved, no cost, no purchase date, not depreciating)
+ * goes last in both directions, and ties fall back to tag, so a page never depends on the database's row order.
+ */
+export function sortRows<T extends Sortable>(rows: readonly T[], sort: FinanceSort): T[] {
+  const time = (d: Date | null) => (d === null ? null : d.getTime());
+  const key = (r: T): number | null => {
+    switch (sort) {
+      case "book": case "book-asc": return r.result?.bookValue ?? null;
+      case "cost": case "cost-asc": return r.costC;
+      case "approved": case "approved-asc": return time(r.approvedAt);
+      case "added": case "added-asc": return time(r.addedAt);
+      case "purchased": case "purchased-asc": return time(r.purchasedAt);
+      case "life": return r.lifeStage.usedRatio;
+      case "tag": return null;
+    }
+  };
+  const dir: 1 | -1 = sort.endsWith("-asc") ? 1 : -1;
+  const cmp = sort === "tag" ? byTag : (a: T, b: T) => nullsLast(key(a), key(b), dir) || byTag(a, b);
   return [...rows].sort(cmp);
+}
+
+/**
+ * The small date under the Finance pill, following the sort: "Added …" under a date-added sort, "Bought …" under a
+ * purchase-date sort, otherwise "Approved …" (null for an asset not approved). Manila dates, e.g. "17 Oct 2026".
+ */
+export function financeDateLine(
+  row: { approvedAt: Date | null; addedAt: Date | null; purchasedAt: Date | null },
+  sort: FinanceSort,
+): { label: "Approved" | "Added" | "Bought"; date: string } | null {
+  const [label, at] =
+    sort === "added" || sort === "added-asc" ? (["Added", row.addedAt] as const)
+    : sort === "purchased" || sort === "purchased-asc" ? (["Bought", row.purchasedAt] as const)
+    : (["Approved", row.approvedAt] as const);
+  return at ? { label, date: fmtDayMonthYear(at) } : null;
 }
 
 export interface CategoryTile {

@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { fmtMoneyExact } from "@/lib/format";
 import { statusLabel } from "@/lib/asset-class";
 import { lifeLabel } from "@/lib/depreciation-input";
+import { financeDateLine, type FinanceSort } from "@/lib/finance-list";
 import { REG_LABEL_FINANCE } from "@/lib/registration";
 import type { FinanceRow } from "@/server/modules/finance/queries";
 import { Table, TBody, THead, Th, Td, Tr } from "@/components/ui/table";
@@ -38,9 +39,12 @@ const TABLE_MIN = ASSET_MIN + Object.values(COLS).reduce((a, b) => a + b, 0);
 export function FinanceTable({
   rows,
   shown,
+  sort,
 }: {
   rows: FinanceRow[];
   shown: { count: number; costedCount: number; costC: number; accC: number; bookC: number };
+  /** the list's sort: it decides which date shows under the Finance pill */
+  sort: FinanceSort;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const fitsCard = useFitsCard(boxRef, TABLE_MIN);
@@ -70,6 +74,7 @@ export function FinanceTable({
         <TBody>
           {rows.map((a) => {
             const sub = `${a.model} · ${a.holder ?? "not assigned"}`;
+            const dateLine = financeDateLine(a, sort);
             return (
               <Tr key={a.id} style={{ height: "var(--list-row-h)" }}>
                 <Td className={LIST.td}>
@@ -92,6 +97,12 @@ export function FinanceTable({
                     <span className="text-[12.5px] text-fg-secondary">Not capitalised</span>
                   ) : (
                     <StatusPill ns="registration" value={a.reg} label={REG_LABEL_FINANCE[a.reg]} />
+                  )}
+                  {/* the date that matters for the current sort: Approved, Added or Bought (Manila) */}
+                  {dateLine && (
+                    <span className={cn(LIST.sub, "block truncate font-normal tabular-nums")} data-date-line="">
+                      {dateLine.label} {dateLine.date}
+                    </span>
                   )}
                 </Td>
                 <Td className={num}>{money(a.costC)}</Td>

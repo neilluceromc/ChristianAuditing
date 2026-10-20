@@ -96,7 +96,7 @@ export default async function FinanceAssetsPage({
                   </div>
                 )}
                 {data.rows.length > 0 ? (
-                  <FinanceTable rows={data.rows} shown={data.shown} />
+                  <FinanceTable rows={data.rows} shown={data.shown} sort={state.sort} />
                 ) : chips.length > 0 ? (
                   <div className="border-t border-border">
                     <EmptyState

@@ -8,7 +8,7 @@ import { LIST } from "@/components/patterns/list-styles";
 import { cn } from "@/lib/cn";
 import { fmtMoneyExact } from "@/lib/format";
 import {
-  FINANCE_SORTS, LIFE_FILTERS, LIFE_LABEL, SORT_LABEL, financeListHref, parseLife, parseSort, withFinance,
+  LIFE_FILTERS, LIFE_LABEL, SORT_OPTIONS, financeListHref, parseLife, parseSort, withFinance,
   type FinanceListState,
 } from "@/lib/finance-list";
 
@@ -97,8 +97,8 @@ export function FinanceToolbar({
         ))}
       </LabelledSelect>
       <LabelledSelect label="Sort" value={state.sort} onChange={(v) => go("sort", v)}>
-        {FINANCE_SORTS.map((s) => (
-          <option key={s} value={s}>{SORT_LABEL[s]}</option>
+        {SORT_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </LabelledSelect>
       <p aria-live="polite" className="ml-auto whitespace-nowrap text-[12.5px] tabular-nums text-fg-muted">

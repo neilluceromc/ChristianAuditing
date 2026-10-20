@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { depreciate, type DepResult, type Policy } from "./depreciation";
 import {
   categoryTiles, clearFinanceFilters, financeClassHref, financeExportHref, financeListHref, finTabs, inFin, lifeStage,
-  matchesLife, monthCharge, parseFinanceListState, parseLife, parseSort, sortFinanceRows, withFinance,
-  type FinanceListState, type LifeStage,
+  financeDateLine, matchesLife, monthCharge, parseFinanceListState, parseLife, parseSort, sortRows, SORT_OPTIONS, withFinance,
+  type FinanceListState, type FinanceSort, type LifeStage,
 } from "./finance-list";
 
 const AS_OF = 2026 * 12 + 9; // October 2026
@@ -28,6 +28,22 @@ describe("parseLife / parseSort", () => {
     expect(parseSort("book")).toBe("book");
     expect(parseSort("-cost")).toBe("book");
     expect(parseSort(undefined)).toBe("book");
+  });
+  it("reads every sort the select offers, and an unknown value falls back to book", () => {
+    for (const v of ["book", "book-asc", "cost", "cost-asc", "approved", "approved-asc", "added", "added-asc", "purchased", "purchased-asc", "life", "tag"]) {
+      expect(parseSort(v)).toBe(v);
+    }
+    expect(parseSort("newest")).toBe("book");
+    expect(parseSort("")).toBe("book");
+    expect(parseSort(null)).toBe("book");
+  });
+  it("SORT_OPTIONS holds the spec's twelve labels in order", () => {
+    expect(SORT_OPTIONS.map((o) => o.value)).toEqual(["book", "book-asc", "cost", "cost-asc", "approved", "approved-asc", "added", "added-asc", "purchased", "purchased-asc", "life", "tag"]);
+    expect(SORT_OPTIONS.map((o) => o.label)).toEqual([
+      "Book value, high first", "Book value, low first", "Cost, high first", "Cost, low first",
+      "Date approved, newest first", "Date approved, oldest first", "Date added, newest first", "Date added, oldest first",
+      "Purchase date, newest first", "Purchase date, oldest first", "Life used, most first", "Tag",
+    ]);
   });
 });
 
@@ -181,35 +197,92 @@ describe("life filter", () => {
   });
 });
 
-describe("sortFinanceRows", () => {
+const d = (iso: string) => new Date(`${iso}T00:00:00+08:00`);
+
+describe("sortRows", () => {
   const rows = [
-    { tag: "IT-003", result: { bookValue: 500 }, lifeStage: stage("mid", 40) },
-    { tag: "IT-001", result: null, lifeStage: stage("notstarted", null) },
-    { tag: "IT-004", result: { bookValue: 900 }, lifeStage: stage("full", 100) },
-    { tag: "IT-002", result: { bookValue: 500 }, lifeStage: stage("soon", 90) },
-    { tag: "IT-005", result: { bookValue: 0 }, lifeStage: stage("mid", 40) },
+    { tag: "IT-003", costC: 500, approvedAt: d("2026-10-03"), addedAt: d("2026-01-03"), purchasedAt: d("2025-03-03"), result: { bookValue: 500 }, lifeStage: stage("mid", 40) },
+    { tag: "IT-001", costC: null, approvedAt: null, addedAt: d("2026-01-01"), purchasedAt: null, result: null, lifeStage: stage("notstarted", null) },
+    { tag: "IT-004", costC: 900, approvedAt: d("2026-10-04"), addedAt: d("2026-01-04"), purchasedAt: d("2025-03-04"), result: { bookValue: 900 }, lifeStage: stage("full", 100) },
+    { tag: "IT-002", costC: 500, approvedAt: d("2026-10-02"), addedAt: d("2026-01-02"), purchasedAt: d("2025-03-02"), result: { bookValue: 500 }, lifeStage: stage("soon", 90) },
+    { tag: "IT-005", costC: 100, approvedAt: null, addedAt: d("2026-01-05"), purchasedAt: null, result: { bookValue: 0 }, lifeStage: stage("mid", 40) },
   ];
-  it("book: book value high first, ties by tag, no book value last", () => {
-    expect(sortFinanceRows(rows, "book").map((r) => r.tag)).toEqual(["IT-004", "IT-002", "IT-003", "IT-005", "IT-001"]);
+  const order = (sort: FinanceSort) => sortRows(rows, sort).map((r) => r.tag);
+  it("book: high first, ties by tag, no book value last", () => {
+    expect(order("book")).toEqual(["IT-004", "IT-002", "IT-003", "IT-005", "IT-001"]);
+  });
+  it("book-asc: low first, ties by tag, no book value still last", () => {
+    expect(order("book-asc")).toEqual(["IT-005", "IT-002", "IT-003", "IT-004", "IT-001"]);
+  });
+  it("cost and cost-asc: ties by tag, no cost last in both directions", () => {
+    expect(order("cost")).toEqual(["IT-004", "IT-002", "IT-003", "IT-005", "IT-001"]);
+    expect(order("cost-asc")).toEqual(["IT-005", "IT-002", "IT-003", "IT-004", "IT-001"]);
+  });
+  it("approved and approved-asc: not approved last, in tag order, in both directions", () => {
+    expect(order("approved")).toEqual(["IT-004", "IT-003", "IT-002", "IT-001", "IT-005"]);
+    expect(order("approved-asc")).toEqual(["IT-002", "IT-003", "IT-004", "IT-001", "IT-005"]);
+  });
+  it("added and added-asc: newest or oldest first", () => {
+    expect(order("added")).toEqual(["IT-005", "IT-004", "IT-003", "IT-002", "IT-001"]);
+    expect(order("added-asc")).toEqual(["IT-001", "IT-002", "IT-003", "IT-004", "IT-005"]);
+  });
+  it("purchased and purchased-asc: no purchase date last, in tag order, in both directions", () => {
+    expect(order("purchased")).toEqual(["IT-004", "IT-003", "IT-002", "IT-001", "IT-005"]);
+    expect(order("purchased-asc")).toEqual(["IT-002", "IT-003", "IT-004", "IT-001", "IT-005"]);
+  });
+  it("two rows with the same date fall back to tag", () => {
+    const same = [
+      { ...rows[0], tag: "IT-009", approvedAt: d("2026-10-05") },
+      { ...rows[0], tag: "IT-007", approvedAt: d("2026-10-05") },
+    ];
+    expect(sortRows(same, "approved").map((r) => r.tag)).toEqual(["IT-007", "IT-009"]);
+    expect(sortRows(same, "approved-asc").map((r) => r.tag)).toEqual(["IT-007", "IT-009"]);
   });
   it("life: most used first, ties by tag, not started last", () => {
-    expect(sortFinanceRows(rows, "life").map((r) => r.tag)).toEqual(["IT-004", "IT-002", "IT-003", "IT-005", "IT-001"]);
+    expect(order("life")).toEqual(["IT-004", "IT-002", "IT-003", "IT-005", "IT-001"]);
   });
   it("life: two assets within the same whole percent order by the exact ratio, not by tag", () => {
     const P120: Policy = { lifeMonths: 120, salvage: 0, basis: "category" };
-    const a = { tag: "IT-001", result: { bookValue: 1 }, lifeStage: lifeStage(started(13), "registered", false, COST) }; // 14/36 = 38.9%
-    const b = { tag: "IT-002", result: { bookValue: 1 }, lifeStage: lifeStage(started(46, COST, P120), "registered", false, COST) }; // 47/120 = 39.2%
+    const a = { ...rows[0], tag: "IT-001", lifeStage: lifeStage(started(13), "registered", false, COST) }; // 14/36 = 38.9%
+    const b = { ...rows[0], tag: "IT-002", lifeStage: lifeStage(started(46, COST, P120), "registered", false, COST) }; // 47/120 = 39.2%
     expect(a.lifeStage.usedPct).toBe(39);
     expect(b.lifeStage.usedPct).toBe(39);
-    expect(sortFinanceRows([a, b], "life").map((r) => r.tag)).toEqual(["IT-002", "IT-001"]);
+    expect(sortRows([a, b], "life").map((r) => r.tag)).toEqual(["IT-002", "IT-001"]);
   });
   it("tag: ascending", () => {
-    expect(sortFinanceRows(rows, "tag").map((r) => r.tag)).toEqual(["IT-001", "IT-002", "IT-003", "IT-004", "IT-005"]);
+    expect(order("tag")).toEqual(["IT-001", "IT-002", "IT-003", "IT-004", "IT-005"]);
   });
   it("does not mutate its input", () => {
     const before = rows.map((r) => r.tag);
-    sortFinanceRows(rows, "tag");
+    sortRows(rows, "tag");
     expect(rows.map((r) => r.tag)).toEqual(before);
+  });
+});
+
+describe("financeDateLine", () => {
+  const row = { approvedAt: d("2026-10-17"), addedAt: d("2026-10-16"), purchasedAt: d("2026-08-03") };
+  it("approved sorts, and the book, cost, life and tag sorts, show Approved", () => {
+    for (const s of ["approved", "approved-asc", "book", "book-asc", "cost", "cost-asc", "life", "tag"] as const) {
+      expect(financeDateLine(row, s)).toEqual({ label: "Approved", date: "17 Oct 2026" });
+    }
+  });
+  it("added sorts show Added", () => {
+    expect(financeDateLine(row, "added")).toEqual({ label: "Added", date: "16 Oct 2026" });
+    expect(financeDateLine(row, "added-asc")).toEqual({ label: "Added", date: "16 Oct 2026" });
+  });
+  it("purchase sorts show Bought", () => {
+    expect(financeDateLine(row, "purchased")).toEqual({ label: "Bought", date: "3 Aug 2026" });
+    expect(financeDateLine(row, "purchased-asc")).toEqual({ label: "Bought", date: "3 Aug 2026" });
+  });
+  it("is null when the date that matters is missing", () => {
+    expect(financeDateLine({ ...row, approvedAt: null }, "book")).toBeNull();
+    expect(financeDateLine({ ...row, approvedAt: null }, "approved")).toBeNull();
+    expect(financeDateLine({ ...row, purchasedAt: null }, "purchased")).toBeNull();
+    expect(financeDateLine({ ...row, approvedAt: null }, "added")).toEqual({ label: "Added", date: "16 Oct 2026" });
+  });
+  it("uses the Manila calendar, not UTC", () => {
+    // 17 Oct 2026 23:30 UTC is already 18 Oct in Manila
+    expect(financeDateLine({ ...row, approvedAt: new Date("2026-10-17T23:30:00Z") }, "approved")?.date).toBe("18 Oct 2026");
   });
 });
 

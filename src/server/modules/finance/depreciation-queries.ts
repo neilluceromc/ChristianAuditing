@@ -15,6 +15,8 @@ export interface DepAssetRow {
   holder: string | null; reg: RegState; notCapitalised: boolean;
   costC: number | null; confirmedAt: Date | null; startMonth: MonthIndex | null; result: DepResult | null; note: string | null; custom: boolean; overrideNote: string | null;
   lifeMonths: number | null; salvageC: number | null; categoryLife: number | null; categorySalvagePercent: number | null;
+  /** Finance's approval (financeConfirmedAt), the asset's creation time, and the purchase date its Purchase card shows (Asset.purchasedAt) */
+  approvedAt: Date | null; addedAt: Date; purchasedAt: Date | null;
 }
 
 export async function depRows(
@@ -30,7 +32,7 @@ export async function depRows(
     ...(opts.take !== undefined ? { take: opts.take } : {}),
     select: {
       id: true, tag: true, model: true, categoryId: true, cls: true, status: true, cost: true,
-      itVerifiedAt: true, financeConfirmedAt: true, financeReturnedAt: true, financeNotCapitalised: true, purchasedAt: true,
+      itVerifiedAt: true, financeConfirmedAt: true, financeReturnedAt: true, financeNotCapitalised: true, purchasedAt: true, createdAt: true,
       depreciationLifeMonths: true, depreciationSalvage: true, depreciationNote: true,
       assignee: { select: { name: true } },
       category: { select: { name: true, depreciationLifeMonths: true, depreciationSalvagePercent: true } },
@@ -60,6 +62,7 @@ export async function depRows(
       holder: r.assignee?.name ?? null, reg: registrationState(r), notCapitalised: r.financeNotCapitalised,
       costC, confirmedAt: r.financeConfirmedAt, startMonth, result, note, custom, overrideNote: r.depreciationNote,
       lifeMonths: r.depreciationLifeMonths, salvageC, categoryLife: r.category.depreciationLifeMonths, categorySalvagePercent,
+      approvedAt: r.financeConfirmedAt, addedAt: r.createdAt, purchasedAt: r.purchasedAt,
     };
   });
 }

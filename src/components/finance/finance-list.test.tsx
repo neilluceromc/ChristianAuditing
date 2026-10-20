@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { CategoryTile, FinanceListState, LifeStage } from "@/lib/finance-list";
+import type { CategoryTile, FinanceListState, FinanceSort, LifeStage } from "@/lib/finance-list";
 import { CategoryTiles, StatusTiles, categoryGridClass } from "./category-tiles";
 import { FinanceTabs, financeTabDefs } from "./finance-tabs";
 import { FinanceToolbar, controlHref } from "./finance-toolbar";
@@ -139,6 +139,21 @@ describe("FinanceToolbar: the URL each control builds", () => {
   it("sort (book value is the default, so it is not written)", () => {
     expect(controlHref(s, "sort", "life")).toBe("/finance/assets?cls=PURCHASING&category=c1&fin=approved&q=desk&sort=life&per=50");
     expect(controlHref(s, "sort", "book")).toBe("/finance/assets?cls=PURCHASING&category=c1&fin=approved&q=desk&per=50");
+    expect(controlHref(s, "sort", "approved-asc")).toBe("/finance/assets?cls=PURCHASING&category=c1&fin=approved&q=desk&sort=approved-asc&per=50");
+    expect(controlHref(s, "sort", "nonsense")).toBe("/finance/assets?cls=PURCHASING&category=c1&fin=approved&q=desk&per=50");
+  });
+  it("the Sort select offers the twelve sorts in the spec's order", () => {
+    const html = renderToStaticMarkup(
+      <FinanceToolbar state={S} tiles={[]} categoryLabel={null} shown={{ count: 1, bookC: 100 }} />,
+    );
+    const sort = html.match(/<label for="([^"]+)"[^>]*>Sort<\/label>/)![1];
+    const select = html.match(new RegExp(`<select[^>]*id="${sort}"[\\s\\S]*?</select>`))![0];
+    const labels = [...select.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((m) => m[1]);
+    expect(labels).toHaveLength(12);
+    expect(labels[0]).toBe("Book value, high first");
+    expect(labels[4]).toBe("Date approved, newest first");
+    expect(labels[8]).toBe("Purchase date, newest first");
+    expect(labels[11]).toBe("Tag");
   });
   it("renders search, the three selects and the shown count with its book value", () => {
     const html = renderToStaticMarkup(
@@ -216,6 +231,7 @@ describe("FinanceTable (spec §3 item 6)", () => {
   const row = (over: Partial<FinanceRow>): FinanceRow => ({
     id: "a1", tag: "IT-0001", model: "Latitude 5440", categoryId: "lap", category: "Laptops", cls: "IT", status: "DEPLOYED",
     holder: "Ana Cruz", reg: "registered", notCapitalised: false, costC: 36_000_00, confirmedAt: null, startMonth: 24300,
+    approvedAt: new Date("2026-10-17T02:00:00Z"), addedAt: new Date("2026-10-16T02:00:00Z"), purchasedAt: new Date("2026-08-03T02:00:00Z"),
     result: { state: "depreciating", cost: 36_000_00, accumulated: 14_000_00, bookValue: 22_000_00, monthly: 1_000_00, startMonth: 24300, policy: { lifeMonths: 36, salvage: 0, basis: "category" } },
     note: null, custom: false, overrideNote: null, lifeMonths: null, salvageC: null, categoryLife: 36, categorySalvagePercent: 0,
     lifeStage: { key: "mid", text: "14 / 36 mo · 22 left", usedPct: 39, usedRatio: 14 / 36 },
@@ -225,6 +241,7 @@ describe("FinanceTable (spec §3 item 6)", () => {
     <FinanceTable
       rows={[row({}), row({ id: "a2", tag: "IT-0002", holder: null, costC: null, result: null, reg: "with-finance", lifeStage: { key: "notstarted", text: "No cost yet", usedPct: null, usedRatio: null } })]}
       shown={{ count: 40, costedCount: 39, costC: 1_000_000_00, accC: 250_000_00, bookC: 750_000_00 }}
+      sort="book"
     />,
   );
   const headers = [...html.matchAll(/<th[^>]*scope="col"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
@@ -254,6 +271,7 @@ describe("FinanceTable (spec §3 item 6)", () => {
           row({ id: "n2", tag: "IT-0013", custom: true, note: "Salvage is not below cost — check the override", lifeStage: { key: "notstarted", text: "Salvage is not below cost — check the override", usedPct: null, usedRatio: null } }),
         ]}
         shown={{ count: 2, costedCount: 2, costC: 0, accC: 0, bookC: 0 }}
+        sort="book"
       />,
     );
     const notes = [...h.matchAll(/<span [^>]*data-note=""[^>]*>([^<]*)<\/span>/g)].map((m) => m[1]);
@@ -261,6 +279,18 @@ describe("FinanceTable (spec §3 item 6)", () => {
     expect(h.match(/No policy for Docks/g)!.length).toBeGreaterThanOrEqual(2); // the note and the Life cell
     expect(h).toContain("Salvage is not below cost — check the override");
     expect(html).not.toContain('data-note=""'); // a depreciating row has no note
+  });
+  it("the Finance cell carries a date line that follows the sort", () => {
+    const shown = { count: 2, costedCount: 2, costC: 0, accC: 0, bookC: 0 };
+    const rows = [row({}), row({ id: "a2", tag: "IT-0002", approvedAt: null, purchasedAt: null, reg: "with-finance" })];
+    const line = (sort: FinanceSort) => [...renderToStaticMarkup(<FinanceTable rows={rows} shown={shown} sort={sort} />).matchAll(/data-date-line="">([^<]*)</g)].map((m) => m[1]);
+    // approved: only the approved row has one
+    expect(line("book")).toEqual(["Approved 17 Oct 2026"]);
+    expect(line("approved-asc")).toEqual(["Approved 17 Oct 2026"]);
+    // added: both rows were added
+    expect(line("added")).toEqual(["Added 16 Oct 2026", "Added 16 Oct 2026"]);
+    // purchased: only the row with a purchase date
+    expect(line("purchased")).toEqual(["Bought 3 Aug 2026"]);
   });
   it("a totals row for every row shown", () => {
     const foot = html.slice(html.indexOf("<tfoot"));

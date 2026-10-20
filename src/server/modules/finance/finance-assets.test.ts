@@ -252,6 +252,27 @@ describe("financeAssets — rows", () => {
     const tag = (await financeAssets(base({ sort: "tag" }), NOW)).rows.map((x) => x.tag);
     expect(tag).toEqual([...tag].sort());
   });
+  it("sorts by cost, date approved, date added and purchase date: the row model carries the dates, nulls last in tag order", async () => {
+    h.assets = [
+      asset("lap", { tag: "T-1", cost: "100.00", financeConfirmedAt: new Date("2026-10-03T02:00:00Z"), purchasedAt: new Date("2026-03-01T00:00:00Z"), createdAt: new Date("2026-01-03T02:00:00Z") }),
+      asset("lap", { tag: "T-2", cost: null, financeConfirmedAt: null, itVerifiedAt: null, purchasedAt: null, createdAt: new Date("2026-01-01T02:00:00Z") }),
+      asset("lap", { tag: "T-3", cost: "300.00", financeConfirmedAt: new Date("2026-10-05T02:00:00Z"), purchasedAt: new Date("2026-05-01T00:00:00Z"), createdAt: new Date("2026-01-05T02:00:00Z") }),
+      asset("lap", { tag: "T-4", cost: "200.00", financeConfirmedAt: null, itVerifiedAt: null, purchasedAt: null, createdAt: new Date("2026-01-02T02:00:00Z") }),
+    ];
+    const tags = async (sort: FinanceListParams["sort"]) => (await financeAssets(base({ sort }), NOW)).rows.map((x) => x.tag.slice(-1));
+    expect(await tags("cost")).toEqual(["3", "4", "1", "2"]);
+    expect(await tags("cost-asc")).toEqual(["1", "4", "3", "2"]);
+    expect(await tags("approved")).toEqual(["3", "1", "2", "4"]);
+    expect(await tags("approved-asc")).toEqual(["1", "3", "2", "4"]);
+    expect(await tags("added")).toEqual(["3", "1", "4", "2"]);
+    expect(await tags("added-asc")).toEqual(["2", "4", "1", "3"]);
+    expect(await tags("purchased")).toEqual(["3", "1", "2", "4"]);
+    expect(await tags("purchased-asc")).toEqual(["1", "3", "2", "4"]);
+    const first = (await financeAssets(base({ sort: "approved" }), NOW)).rows[0];
+    expect(first.approvedAt).toEqual(new Date("2026-10-05T02:00:00Z"));
+    expect(first.addedAt).toEqual(new Date("2026-01-05T02:00:00Z"));
+    expect(first.purchasedAt).toEqual(new Date("2026-05-01T00:00:00Z"));
+  });
   it("pages by per over the sorted rows", async () => {
     const all = (await financeAssets(base({ sort: "tag" }), NOW)).rows;
     const p2 = await financeAssets(base({ sort: "tag", per: 25, page: 1 }), NOW);
@@ -295,6 +316,19 @@ describe("financeExportRows (Task 3 review: the export is exactly the list's row
     expect(other.map((x) => x.categoryId)).toEqual(["b", "c", "d"]);
     const all = await financeExportRows(base({ per: 25 }), NOW);
     expect(all).toHaveLength(48);
+  });
+  it("the export order equals the list order for every date sort", async () => {
+    h.assets.forEach((a, i) => {
+      a.financeConfirmedAt = i % 3 === 0 ? null : new Date(Date.UTC(2026, 5, 1 + (i * 7) % 20));
+      a.purchasedAt = i % 4 === 0 ? null : new Date(Date.UTC(2026, 1, 1 + (i * 5) % 25));
+      a.createdAt = new Date(Date.UTC(2026, 0, 1 + (i * 3) % 28));
+    });
+    for (const sort of ["approved", "approved-asc", "added", "added-asc", "purchased", "purchased-asc", "cost", "cost-asc", "book-asc"] as const) {
+      const list = await financeAssets(base({ sort, per: 100 }), NOW);
+      const out = await financeExportRows(base({ sort, page: 3, per: 25 }), NOW);
+      expect(out.map((x) => x.id)).toEqual(list.rows.map((x) => x.id));
+      expect(out.length).toBeGreaterThan(1);
+    }
   });
 });
 
