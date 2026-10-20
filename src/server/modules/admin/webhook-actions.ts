@@ -15,6 +15,7 @@ import {
 } from "@/lib/webhooks";
 import { diffOf } from "@/lib/audit-diff";
 import { asActionResult } from "@/server/prisma-errors";
+import { kickWorker } from "@/server/worker-kick";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -454,6 +455,8 @@ export async function replayDelivery(input: unknown): Promise<ActionResult<null>
           await tx.job.create({
             data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
           });
+          // Cloud staging (spec §4.3): on Vercel, deliver it once the response is sent, not at the next cron minute.
+          kickWorker();
           await writeAudit(tx, {
             actorId: actor.id,
             actorLabel: actor.name,

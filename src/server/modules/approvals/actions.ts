@@ -13,6 +13,7 @@ import {
 import { approvalTransition, escalatePriority, type QueueAction } from "@/lib/approval-flow";
 import { canActOnApproval, isApprover } from "@/lib/approval-access";
 import { reasonRequired } from "@/lib/reason";
+import { kickWorker } from "@/server/worker-kick";
 
 const idSchema = z.object({ id: z.string().min(1) });
 const rejectSchema = z.object({
@@ -47,6 +48,7 @@ async function transition(
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
   let acted: Acted | null = null;
+  let queued = false;
   let failure;
   try {
     failure = await prisma.$transaction(async (tx) => {
@@ -68,6 +70,7 @@ async function transition(
 
     if (enqueue) {
       await tx.job.create({ data: { type: "EXECUTE_APPROVAL", payload: { approvalId: id } } });
+      queued = true;
     }
     await writeAudit(tx, {
       actorId: user.id,
@@ -93,6 +96,8 @@ async function transition(
 
   revalidatePath("/approvals");
   revalidatePath(`/approvals/${id}`);
+  // Cloud staging (spec §4.3): an approve/retry just committed an EXECUTE_APPROVAL job; on Vercel, work it now.
+  if (queued) kickWorker();
   return ok(acted!);
 }
 
@@ -259,5 +264,7 @@ export async function approveNow(input: unknown): Promise<ActionResult<Acted>> {
 
   revalidatePath("/approvals");
   revalidatePath(`/approvals/${id}`);
+  // Cloud staging (spec §4.3): the EXECUTE_APPROVAL job just committed; on Vercel, work it now.
+  kickWorker();
   return ok(acted!);
 }
