@@ -5,6 +5,11 @@
  * The loader is wrapped here rather than behind a React error boundary because
  * this is the failure the design is about — a query that didn't come back —
  * and because a typed result is testable without a browser.
+ *
+ * Phase 46: Home's Overview is read by one builder per workspace, so it degrades
+ * as ONE section — a failing builder shows the FAILED card under the header (the
+ * greeting, viewer pill and Focus toggle still render) instead of a partial page
+ * whose KPI numbers might disagree with each other.
  */
 export type SectionResult<T> =
   | { ok: true; data: T }

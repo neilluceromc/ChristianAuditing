@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { deltaTone, type KpiTile as Tile } from "@/lib/overview";
-import { deltaWords, fmtValue, sparkPoints } from "./chart-math";
+import { deltaWords, kpiValue, sparkPoints } from "./chart-math";
 import { Sparkline } from "./sparkline";
 
 const TONE_CLASS = {
@@ -19,15 +19,16 @@ const ARROW = { up: "▲", down: "▼", flat: "—" } as const;
  * shows no delta line at all.
  */
 export function KpiDelta({ tile }: { tile: Tile }) {
-  if (tile.spark.length === 0 && tile.delta.kind === "none") return null;
+  if (tile.spark.length === 0) return null;
   const words = deltaWords(tile.delta);
   if (!words || sparkPoints(tile.spark) < 2) {
-    return <span className="text-[12px] text-fg-muted" data-delta="none">collecting history</span>;
+    return <span className="min-w-0 text-[12px] text-fg-muted" data-delta="none">collecting history</span>;
   }
   const tone = deltaTone(tile);
   return (
-    <span className={cn("inline-flex items-baseline gap-1 text-[12px] font-medium whitespace-nowrap", TONE_CLASS[tone])} data-delta={tone}>
-      <span aria-hidden="true">{ARROW[words.dir]}</span>
+    // a block that wraps: "▲ 12% this week vs last week" is wider than a 6-across tile
+    <span className={cn("min-w-0 text-[12px] font-medium leading-snug", TONE_CLASS[tone])} data-delta={tone}>
+      <span aria-hidden="true">{ARROW[words.dir]}</span>{" "}
       {words.dir !== "flat" && <span className="sr-only">{words.dir} </span>}
       <span>{words.text}</span>
     </span>
@@ -37,22 +38,35 @@ export function KpiDelta({ tile }: { tile: Tile }) {
 /**
  * Spec §3.1: one KPI tile — label, value, sparkline, delta, hint. A tile with an `href` is a link to the page whose
  * count it shows; one without is a plain card (builder-check ruling: never a button that goes nowhere).
+ * Nothing overflows a 6-across tile (~121 px inside at 1280 px): the tile is a size container and the value scales
+ * from 26 px down to 18 px with its width; money from ₱1M is compact ("₱12.3M"), its exact amount in the value's
+ * tooltip and in the text a screen reader reads; every child may shrink (`min-w-0`) and the delta wraps.
  */
 export function KpiTile({ tile }: { tile: Tile }) {
+  const { shown, exact } = kpiValue(tile);
   const body = (
     <>
-      <span className="font-mono text-[11px] font-semibold uppercase leading-tight tracking-[.07em] text-fg-muted">{tile.label}</span>
-      <span className="flex flex-wrap items-end justify-between gap-x-2 gap-y-1">
-        <span className="text-[26px] font-semibold leading-none tracking-[-.01em] text-fg tabular-nums">
-          {tile.display ?? fmtValue(tile.value, tile.money)}
+      <span className="min-w-0 font-mono text-[11px] font-semibold uppercase leading-tight tracking-[.07em] text-fg-muted">{tile.label}</span>
+      <span className="flex min-w-0 flex-wrap items-end justify-between gap-x-2 gap-y-1">
+        <span
+          className="min-w-0 text-[length:clamp(18px,20cqi,26px)] font-semibold leading-none tracking-[-.01em] whitespace-nowrap text-fg tabular-nums"
+          title={exact}
+          data-kpi-value=""
+        >
+          {exact ? (
+            <>
+              <span aria-hidden="true">{shown}</span>
+              <span className="sr-only">{exact}</span>
+            </>
+          ) : shown}
         </span>
         {tile.spark.length > 0 && <Sparkline values={tile.spark} />}
       </span>
       <KpiDelta tile={tile} />
-      <span className="truncate text-[12px] text-fg-muted">{tile.hint}</span>
+      <span className="min-w-0 truncate text-[12px] text-fg-muted" title={tile.hint}>{tile.hint}</span>
     </>
   );
-  const base = "flex min-w-0 flex-col gap-1.5 rounded-(--radius-card) border border-border bg-surface px-4 py-3.5 shadow-card";
+  const base = "@container flex min-w-0 flex-col gap-1.5 rounded-(--radius-card) border border-border bg-surface px-4 py-3.5 shadow-card";
   if (tile.href) {
     return (
       <Link

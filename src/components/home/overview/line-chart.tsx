@@ -1,8 +1,8 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { TrendSeries } from "@/lib/overview";
-import { declutter, fmtTick, fmtValue, labelIndexes, niceTicks, PERIOD_WORDS } from "./chart-math";
+import { chartGutters, declutter, fmtTick, fmtValue, labelIndexes, niceTicks, PERIOD_WORDS } from "./chart-math";
 import { Panel } from "./panel";
 
 /** Series classes by index (static strings, so the Tailwind scan finds them): the chart tokens, nothing else. */
@@ -10,14 +10,15 @@ const STROKE = ["stroke-chart-1", "stroke-chart-2", "stroke-chart-3"] as const;
 const FILL = ["fill-chart-1", "fill-chart-2", "fill-chart-3"] as const;
 const SWATCH = ["bg-chart-1", "bg-chart-2", "bg-chart-3"] as const;
 
-const W = 640;
+/** The width drawn before the first measurement (server render). */
+const SSR_WIDTH = 640;
 const H = 240;
 const T = 12;
 const B = 26;
-/** room on the right for the direct end labels */
-const R = 104;
 /** the end labels' minimum spacing */
 const LABEL_GAP = 14;
+/** the least room an x label gets */
+const X_LABEL_SPACE = 56;
 
 /**
  * Spec §3.3: the workspace trend — hand-drawn SVG, up to 3 series in the chart tokens, 2 px lines with a 4 px end dot,
@@ -25,10 +26,15 @@ const LABEL_GAP = 14;
  * with a tooltip, and "Show table" for the same numbers as an accessible table. The SVG is one image with a name that
  * states the latest values; the tooltip is a pointer convenience (aria-hidden), the table is the full accessible view.
  * Text is drawn in the text tokens, never a series colour.
+ * The SVG is drawn at its container's measured width (ResizeObserver; 640 before the first measurement), so its
+ * viewBox is 1:1 with CSS pixels and 11 px text renders at 11 px in any column width. The gutters are real pixels
+ * sized to the widest tick and end label.
  */
 export function LineChart({ trend, className }: { trend: TrendSeries; className?: string }) {
   const [table, setTable] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
+  const [W, setW] = useState(SSR_WIDTH);
+  const plotRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const tableId = `${id}-table`;
 
@@ -38,6 +44,18 @@ export function LineChart({ trend, className }: { trend: TrendSeries; className?
   const period = trend.period ? PERIOD_WORDS[trend.period] : null;
   const sub = period ? `last ${n} ${period.plural}` : undefined;
   const fmt = (v: number) => fmtValue(v, money);
+  const drawable = n > 0 && series.length > 0;
+
+  useEffect(() => {
+    const el = plotRef.current;
+    if (!el) return;
+    // a hidden plot (the table is showing) measures 0: keep the last width
+    const measure = (w: number) => { if (w > 0) setW(Math.round(w)); };
+    measure(el.clientWidth);
+    const ro = new ResizeObserver((entries) => measure(entries[0]?.contentRect.width ?? 0));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [drawable]);
 
   const toggle = (
     <button
@@ -51,7 +69,7 @@ export function LineChart({ trend, className }: { trend: TrendSeries; className?
     </button>
   );
 
-  if (n === 0 || series.length === 0) {
+  if (!drawable) {
     return (
       <Panel title={trend.title} sub={sub} className={className}>
         <p className="py-10 text-center text-[12.5px] text-fg-muted">Nothing in this period.</p>
@@ -62,10 +80,12 @@ export function LineChart({ trend, className }: { trend: TrendSeries; className?
   const max = Math.max(0, ...series.flatMap((s) => s.values));
   const ticks = niceTicks(max, !money);
   const top = ticks[ticks.length - 1];
-  const L = money ? 52 : 36;
+  const last = n - 1;
+  const endLabel = (v: number) => (money ? fmtTick(v, true) : fmt(v));
+  const ends = series.map((s) => `${s.name} ${endLabel(s.values[last] ?? 0)}`);
+  const { left: L, right: R } = chartGutters(ticks.map((v) => fmtTick(v, money)), ends, W);
   const x = (i: number) => (n === 1 ? (L + W - R) / 2 : L + (i * (W - L - R)) / (n - 1));
   const y = (v: number) => T + (1 - v / top) * (H - T - B);
-  const last = n - 1;
   const endYs = declutter(series.map((s) => y(s.values[last] ?? 0)), LABEL_GAP, T + 4, H - B);
   const empty = max === 0;
 
@@ -94,15 +114,15 @@ export function LineChart({ trend, className }: { trend: TrendSeries; className?
         <span className="ml-auto text-fg-muted">{money ? "pesos" : trend.unit}</span>
       </div>
 
-      <div className="relative w-full" hidden={table} data-chart="">
-        <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label={label}>
+      <div ref={plotRef} className="relative w-full" hidden={table} data-chart="">
+        <svg viewBox={`0 0 ${W} ${H}`} height={H} className="block w-full" role="img" aria-label={label}>
           {ticks.map((v) => (
             <g key={v}>
               <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className={v === 0 ? "stroke-border-strong" : "stroke-border"} strokeWidth={1} />
               <text x={L - 8} y={y(v) + 4} textAnchor="end" fontSize={11} className="fill-fg-muted">{fmtTick(v, money)}</text>
             </g>
           ))}
-          {labelIndexes(n).map((i) => (
+          {labelIndexes(n, Math.max(2, Math.floor((W - L - R) / X_LABEL_SPACE))).map((i) => (
             <text key={i} x={x(i)} y={H - 6} textAnchor="middle" fontSize={11} className="fill-fg-muted">{trend.labels[i]}</text>
           ))}
           {series.map((s, si) => (
@@ -119,7 +139,7 @@ export function LineChart({ trend, className }: { trend: TrendSeries; className?
             <g key={s.name}>
               <circle cx={x(last)} cy={y(s.values[last] ?? 0)} r={4} className={`${FILL[si]} stroke-surface`} strokeWidth={2} />
               <text x={x(last) + 9} y={endYs[si] + 4} fontSize={11.5} fontWeight={500} className="fill-fg-secondary">
-                {`${s.name} ${money ? fmtTick(s.values[last] ?? 0, true) : fmt(s.values[last] ?? 0)}`}
+                {ends[si]}
               </text>
             </g>
           ))}

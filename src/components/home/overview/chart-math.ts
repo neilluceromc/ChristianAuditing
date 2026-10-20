@@ -13,6 +13,25 @@ export function fmtValue(n: number, money?: boolean): string {
   return money ? fmtMoney(n) : countFmt.format(n);
 }
 
+const kpiCompactFmt = new Intl.NumberFormat("en-PH", { notation: "compact", maximumSignificantDigits: 3 });
+
+/** From here a money tile's value is compacted: "₱1,234,567" does not fit a 6-across tile at 26 px. */
+export const KPI_COMPACT_FROM = 1_000_000;
+
+/**
+ * A KPI tile's value as shown, and the exact amount when that differs (for the tile's title and screen readers).
+ * Money at or above ₱1M is compact to 3 significant digits ("₱1.23M", "₱12.3M"); below that, whole pesos. A count
+ * shows `display` when the builder gave one ("6 of 9"), else the separated count.
+ */
+export function kpiValue(t: { value: number; money?: true; display?: string }): { shown: string; exact?: string } {
+  if (t.money) {
+    const exact = fmtMoney(t.value);
+    if (Math.abs(t.value) < KPI_COMPACT_FROM) return { shown: exact };
+    return { shown: `${t.value < 0 ? "-" : ""}₱${kpiCompactFmt.format(Math.abs(t.value))}`, exact };
+  }
+  return { shown: t.display ?? countFmt.format(t.value) };
+}
+
 /** An axis tick: compact so it fits the gutter ("1.2M", "₱1.2M"). */
 export function fmtTick(n: number, money?: boolean): string {
   return `${money ? "₱" : ""}${compactFmt.format(n)}`;
@@ -124,6 +143,22 @@ export function declutter(ys: number[], gap: number, min: number, max: number): 
   const out = Array<number>(ys.length);
   for (const o of order) out[o.i] = o.y;
   return out;
+}
+
+/** A text run's width estimate in px: 0.62 em per character covers Geist's digits and lower case with room to spare. */
+export function textWidth(text: string, fontSize: number): number {
+  return Math.ceil(text.length * fontSize * 0.62);
+}
+
+/**
+ * The plot's gutters in real pixels for a chart `width` px wide: the left one holds the widest tick label (11 px, 8 px
+ * clear of the axis), the right one the widest direct end label (11.5 px, 9 px clear of its dot) — capped at 40% of
+ * the width so a narrow card still has a plot, and never under 24 px.
+ */
+export function chartGutters(ticks: string[], ends: string[], width: number): { left: number; right: number } {
+  const left = Math.max(24, ...ticks.map((t) => textWidth(t, 11) + 10));
+  const right = Math.min(Math.floor(width * 0.4), Math.max(24, ...ends.map((t) => textWidth(t, 11.5) + 14)));
+  return { left, right };
 }
 
 /** Which x labels to print: about six, always the last. */

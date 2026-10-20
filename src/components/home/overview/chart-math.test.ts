@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { declutter, deltaWords, fmtTick, fmtValue, labelIndexes, niceTicks, sparkGeometry, sparkPoints } from "./chart-math";
+import {
+  chartGutters, declutter, deltaWords, fmtTick, fmtValue, kpiValue, labelIndexes, niceTicks, sparkGeometry, sparkPoints, textWidth,
+} from "./chart-math";
 
 describe("deltaWords", () => {
   it("none has no words of its own", () => expect(deltaWords({ kind: "none" })).toBeNull());
@@ -64,5 +66,29 @@ describe("labelIndexes", () => {
     expect(labelIndexes(14)).toEqual([0, 3, 6, 9, 13]);
     expect(labelIndexes(4)).toEqual([0, 1, 2, 3]);
     expect(labelIndexes(1)).toEqual([0]);
+  });
+});
+
+describe("kpiValue", () => {
+  it("money from ₱1M is compact to 3 significant digits, with the exact amount", () => {
+    expect(kpiValue({ value: 1_234_567, money: true })).toEqual({ shown: "₱1.23M", exact: "₱1,234,567" });
+    expect(kpiValue({ value: 12_345_678, money: true })).toEqual({ shown: "₱12.3M", exact: "₱12,345,678" });
+    expect(kpiValue({ value: 1_000_000, money: true })).toEqual({ shown: "₱1M", exact: "₱1,000,000" });
+  });
+  it("money under ₱1M is whole pesos; a count uses display, else separators", () => {
+    expect(kpiValue({ value: 999_999, money: true })).toEqual({ shown: "₱999,999" });
+    expect(kpiValue({ value: 6, display: "6 of 9" })).toEqual({ shown: "6 of 9" });
+    expect(kpiValue({ value: 1204 })).toEqual({ shown: "1,204" });
+  });
+});
+
+describe("chartGutters", () => {
+  it("sizes each gutter to its widest label in real pixels", () => {
+    const g = chartGutters(["0", "₱500K", "₱1.5M"], ["Capitalized ₱1.2M"], 460);
+    expect(g.left).toBe(textWidth("₱1.5M", 11) + 10);
+    expect(g.right).toBe(textWidth("Capitalized ₱1.2M", 11.5) + 14);
+  });
+  it("caps the right gutter at 40% of a narrow chart", () => {
+    expect(chartGutters(["0"], ["A very long series name 1,234"], 200).right).toBe(80);
   });
 });

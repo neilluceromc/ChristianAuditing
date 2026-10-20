@@ -112,11 +112,30 @@ describe("KpiTile", () => {
     expect(text(html)).not.toContain("collecting history");
   });
 
+  it("compacts money from ₱1M so a 6-across tile never overflows; the exact amount stays in the title and for screen readers", () => {
+    const html = renderToStaticMarkup(<KpiTile tile={tile({ value: 12_345_678, money: true, display: "₱12,345,678" })} />);
+    expect(html).toMatch(/title="₱12,345,678"[^>]*data-kpi-value=""><span aria-hidden="true">₱12.3M<\/span><span class="sr-only">₱12,345,678<\/span>/);
+    expect(seen(html)).not.toContain("₱12,345,678");
+    // under ₱1M the whole-peso amount fits and is shown as is, with no second copy
+    const small = renderToStaticMarkup(<KpiTile tile={tile({ value: 999_999, money: true })} />);
+    expect(seen(small)).toContain("₱999,999");
+    expect(small).not.toContain('class="sr-only">₱');
+  });
+
+  it("the tile is a size container and the value scales between 18 and 26 px with it", () => {
+    const html = renderToStaticMarkup(<KpiTile tile={tile()} />);
+    expect(html).toMatch(/^<div class="@container /);
+    expect(html).toContain("text-[length:clamp(18px,20cqi,26px)]");
+  });
+
   it("a history-less tile (empty spark, e.g. Flags on) shows neither a sparkline nor collecting history", () => {
     const html = renderToStaticMarkup(<KpiTile tile={tile({ display: "6 of 9", spark: [], delta: { kind: "none" } })} />);
     expect(html).not.toContain("data-sparkline");
     expect(text(html)).not.toContain("collecting history");
     expect(html).not.toContain("data-delta");
+    // keyed on the empty spark alone, whatever the delta says
+    const counted = renderToStaticMarkup(<KpiTile tile={tile({ spark: [], delta: { kind: "count", value: 2 } })} />);
+    expect(counted).not.toContain("data-delta");
   });
 });
 
@@ -187,6 +206,17 @@ describe("MakeUpBar", () => {
     // the legend link's name is the word alone (it-nav.spec.ts: name "Deployed" → /inventory?status=DEPLOYED)
     expect(html).toMatch(/<a [^>]*href="\/inventory\?status=DEPLOYED"[^>]*>Deployed<\/a>/);
     expect(html.match(/href="\/inventory\?status=DEPLOYED"/g)).toHaveLength(2);
+  });
+
+  it("one tab stop per row: the segment leaves the tab order but keeps its name", () => {
+    expect(html).toMatch(/<a [^>]*tabindex="-1"[^>]*><span class="sr-only">Deployed: 30 assets<\/span><\/a>/);
+    expect(html).toMatch(/<a class="truncate[^"]*" href="\/inventory\?status=DEPLOYED">Deployed<\/a>/);
+  });
+
+  it("a neutral row is a plain grey, not a status token", () => {
+    const neutral = renderToStaticMarkup(<MakeUpBar makeUp={{ title: "T", rows: [{ label: "Drafts", value: 1, tone: "neutral" }] }} />);
+    expect(neutral).toContain("bg-border-strong");
+    expect(neutral).not.toContain("--st-");
   });
 
   it("puts 2 px between segments and gives status rows an icon beside their word", () => {

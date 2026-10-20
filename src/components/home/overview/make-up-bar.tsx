@@ -5,14 +5,17 @@ import type { MakeUp, MakeUpTone } from "@/lib/overview";
 import { fmtValue } from "./chart-math";
 import { Panel } from "./panel";
 
-/** Segment fills: the chart series tokens, and the status dots for status rows. */
+/**
+ * Segment fills: the chart series tokens, the status dots for status rows (which always show an icon and their word),
+ * and a plain border grey for `neutral` — not a status token, since a neutral row has no icon to go with one.
+ */
 const FILL: Record<MakeUpTone, string> = {
   "chart-1": "bg-chart-1",
   "chart-2": "bg-chart-2",
   "chart-3": "bg-chart-3",
   warn: "bg-[color:var(--st-attention-dot)]",
   bad: "bg-[color:var(--st-fault-dot)]",
-  neutral: "bg-[color:var(--st-neutral-dot)]",
+  neutral: "bg-border-strong",
 };
 
 /** A status row's legend mark: an icon in the status text colour beside its word (never the colour alone). */
@@ -26,7 +29,9 @@ const STATUS_ICON: Partial<Record<MakeUpTone, string>> = {
  * `href` links both its segment and its legend word to its filter; the segment names itself ("Deployed: 12 assets")
  * with visually hidden text, and the legend link's name is the word alone (it-nav.spec.ts: "Deployed" →
  * /inventory?status=DEPLOYED). The bar is not an image when it holds links; its unlinked segments are decorative, the
- * legend says the same in words. The wrapper clips, so a segment draws its focus ring inside itself.
+ * legend says the same in words. One tab stop per row: the legend word is the keyboard's link, and the segment is
+ * taken out of the tab order (`tabIndex={-1}`) but keeps its name, so it is still a named link to pointers and to
+ * assistive tech's link lists. The wrapper clips, so a segment draws its focus ring inside itself.
  */
 export function MakeUpBar({ makeUp, className }: { makeUp: MakeUp; className?: string }) {
   const rows = makeUp.rows.filter((r) => r.value > 0);
@@ -54,6 +59,7 @@ export function MakeUpBar({ makeUp, className }: { makeUp: MakeUp; className?: s
                   key={r.label}
                   href={r.href}
                   title={named(r.label, r.value)}
+                  tabIndex={-1}
                   className={cn(cls, "hover:opacity-80 focus-visible:[outline-offset:-2px]")}
                   style={style}
                 >
