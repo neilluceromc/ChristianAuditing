@@ -1,6 +1,22 @@
 "use client";
 
-import { useState } from "react";
+/*
+ * Phase 45 (spec §2.3, §4): the Inventory list table — six default columns at the shared list scale (`LIST`),
+ * zebra rows (`striped`), a head that sticks under the list's toolbar (`stickyHeader`), row and head heights
+ * from `--list-row-h` / `--list-head-h`, and the floating bulk bar.
+ *
+ * Dense (spec §4.5) — the approach the Employees table reuses exactly:
+ *  1. Every visual change is a `dense:` class (`@custom-variant dense` in globals.css, `[data-density="dense"] &`).
+ *     `LIST.td` / `LIST.th` / `LIST.thSort` / `LIST.check` already carry the Dense padding and 13 px text; a
+ *     two-line cell turns into one line with its own `dense:` classes (`flex-col dense:flex-row`, `dense:hidden`).
+ *     The server renders `data-density` on <html> from the cookie, so the first paint is already right and a
+ *     Row size change restyles without a render.
+ *  2. Only what CSS cannot set — an attribute that must exist in Dense alone (here the row `title` and
+ *     `aria-describedby` carrying the Status reason) — reads `useDensity()`. It never changes a pixel, so the
+ *     server's "comfortable" snapshot during hydration costs nothing.
+ */
+
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AssetClass, Role } from "@prisma/client";
@@ -13,6 +29,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { Pill } from "@/components/ui/pill";
 import { HoldPill } from "@/components/ui/hold-pill";
+import { useDensity } from "@/components/ui/density-toggle";
 import { cn } from "@/lib/cn";
 import { BULK_MAX } from "@/lib/inventory-list";
 import { withClsQS } from "@/lib/asset-class";
@@ -27,6 +44,8 @@ import { AssignDialog, ReturnDialog } from "./holder-control";
 import { ChangeStatusDialog } from "./status-control";
 import { BulkDrawer, type BulkMode } from "./bulk-drawer";
 import { useListNavigation } from "@/components/patterns/list-navigation";
+import { FloatingBulkBar } from "@/components/patterns/floating-bulk-bar";
+import { LIST } from "@/components/patterns/list-styles";
 
 export interface ColumnDef {
   id: string;
@@ -36,23 +55,35 @@ export interface ColumnDef {
 }
 
 /**
- * README `1f`: ☐ · tag(104) · model(flex) · category(84) · assigned(168) · status · purchased(104) · warranty(72) · ⋯.
- * Phase 30 (spec §6.3): the status dot sits beside the status word, so the separate dot column is gone.
+ * Phase 45 (spec §2.3): ☐ · Tag · Serial number · Model · Category · Assigned · Status, then the optional columns
+ * (Registration, Purchased, Warranty — off by default) and the repair view's Stage and Down, then ⋯.
+ *
+ * The table lays out fixed (`table-fixed`): every column but Model keeps exactly its width (padding included),
+ * and Model takes the rest, truncating. A minimum table width (the shown columns plus MODEL_MIN) keeps Model
+ * readable: below it the card scrolls sideways (under 1280 px) instead of squeezing Model away. The default set
+ * is 794 px plus Model's 160, so it fits main's content width at 1280 px with the sidebar open (about 970 px).
+ * Each cell's content is sized (or truncates) to fit its width, since a fixed column never grows.
  */
 export const INVENTORY_COLUMNS: ColumnDef[] = [
-  { id: "tag", label: "Tag", width: 104, sortKey: "tag" },
+  { id: "tag", label: "Tag", width: 116, sortKey: "tag" },
+  { id: "serial", label: "Serial number", width: 140 },
   { id: "model", label: "Model", sortKey: "model" },
-  { id: "category", label: "Category", width: 84, sortKey: "category" },
-  { id: "assigned", label: "Assigned", width: 168 },
-  { id: "status", label: "Status", width: 128, sortKey: "status" },
+  { id: "category", label: "Category", width: 120, sortKey: "category" },
+  { id: "assigned", label: "Assigned", width: 176 },
+  { id: "status", label: "Status", width: 156, sortKey: "status" },
   // Phase 35 (spec §3.1): where Finance's registration review stands, and what to fix when it was sent back
-  { id: "registration", label: "Registration", width: 220 },
+  { id: "registration", label: "Registration", width: 232 },
+  { id: "purchased", label: "Purchased", width: 120, sortKey: "purchasedAt" },
+  { id: "warranty", label: "Warranty", width: 120, sortKey: "warrantyUntil" },
   // repairs saved view only (README 7b)
-  { id: "stage", label: "Stage", width: 108 },
-  { id: "down", label: "Down", width: 68, sortKey: "defectiveSince" },
-  { id: "purchased", label: "Purchased", width: 104, sortKey: "purchasedAt" },
-  { id: "warranty", label: "Warranty", width: 72, sortKey: "warrantyUntil" },
+  { id: "stage", label: "Stage", width: 128 },
+  { id: "down", label: "Down", width: 80, sortKey: "defectiveSince" },
 ];
+
+/** Model's narrowest width, and the fixed checkbox and row-actions columns (`LIST.check`, the ⋯ header). */
+const MODEL_MIN = 160;
+const CHECK_W = 36;
+const ACTIONS_W = 50;
 
 /** Columns that only exist in repair mode — never offered to the column chooser. */
 export const REPAIR_ONLY_COLUMNS = ["stage", "down"] as const;
@@ -62,6 +93,8 @@ export const HIDEABLE_COLUMNS = COLUMN_PREF_KEYS["columns:inventory"];
 
 /** Phase 30 (spec §6.3, plan P-11): what the row menu may offer, in this order, before Open record. */
 const ROW_MENU_ACTIONS: readonly RecordAction[] = ["return", "assign", "change-status", "print-label"];
+
+const stop = (e: React.MouseEvent) => e.stopPropagation();
 
 /** A list row read as the record rule's state. The rule only asks whether a date is set, so a sentinel stands in. */
 function rowState(row: AssetRow): RecordState {
@@ -83,6 +116,91 @@ function rowState(row: AssetRow): RecordState {
 function rowMenuActions(row: AssetRow, role: Role): RecordAction[] {
   const plan = recordActions(rowState(row), role);
   return ROW_MENU_ACTIONS.filter((a) => a === plan.primary || plan.more.includes(a));
+}
+
+/**
+ * Assigned (spec §2.3): the holder's name (13.5 px medium) over the EMP number (12 px mono), no avatar; a hold is
+ * the HOLD pill (and its expiry) over "for {name}"; nobody is "—". Dense: one line — the name, then the EMP number
+ * muted; a hold is HOLD plus "for {name}".
+ */
+function AssignedCell({ row, today }: { row: AssetRow; today: string }) {
+  if (row.assigneeId !== null && row.assignee !== null) {
+    return (
+      // The " · " separator is screen-reader only: the link's name and text stay "Name · EMP-…".
+      <Link
+        href={`/employees/${row.assigneeId}`}
+        className="group/name flex min-w-0 max-w-full flex-col dense:flex-row dense:items-baseline dense:gap-2"
+        title={row.assigneeNo ? `${row.assignee} · ${row.assigneeNo}` : row.assignee}
+        onClick={stop}
+      >
+        <span className="min-w-0 truncate font-medium text-fg group-hover/name:underline">{row.assignee}</span>
+        {row.assigneeNo && (
+          <span className={cn(LIST.empNo, "mt-0.5 truncate leading-[1.25] text-fg-muted dense:mt-0 dense:shrink-0")}>
+            <span className="sr-only"> · </span>
+            {row.assigneeNo}
+          </span>
+        )}
+      </Link>
+    );
+  }
+  if (row.hold) {
+    // README 5c: a hold never changes the status — the asset still reads SPARE, and the marker says who wants it.
+    return (
+      <span className="flex min-w-0 max-w-full flex-col items-start gap-1 dense:flex-row dense:items-center dense:gap-1.5">
+        <span className="inline-flex shrink-0 items-center gap-1.5">
+          <Pill tone="accent">HOLD</Pill>
+          {row.hold.expiresAt && (
+            <span className="inline-flex dense:hidden">
+              <HoldPill expiresAt={row.hold.expiresAt} today={today} />
+            </span>
+          )}
+        </span>
+        <span className={cn(LIST.sub, "max-w-full min-w-0 truncate")} title={`for ${row.hold.name}`}>
+          for{" "}
+          <Link href={`/employees/${row.hold.id}`} className="text-accent hover:underline" onClick={stop}>
+            {row.hold.name}
+          </Link>
+        </span>
+      </span>
+    );
+  }
+  return <span className="text-fg-faint">—</span>;
+}
+
+/**
+ * Status (spec §2.3): the dot and the sentence-case label (13 px medium), the attention reason on a 12 px line
+ * under it — the cell's one `span.block`, which e2e reads. Dense: the reason leaves the cell (display: none; the
+ * row's `title` and `aria-describedby` carry it) and a 6 px attention dot follows the label instead.
+ */
+function StatusCell({ row, reasonId }: { row: AssetRow; reasonId: string }) {
+  return (
+    <>
+      <span className="inline-flex items-center gap-2 text-[13px] font-medium">
+        <StatusDot value={row.status} />
+        {statusLabel(row.status)}
+        {row.attention && (
+          <span
+            aria-hidden
+            className="hidden size-1.5 shrink-0 rounded-full dense:inline-block"
+            style={{ background: "var(--st-attention-dot)" }}
+          />
+        )}
+      </span>
+      {/* the reason sits on its own line visually; a screen reader hears a pause, not "Deployedoverdue" */}
+      {row.attention && <span className="sr-only dense:hidden"> · </span>}
+      {row.attention && (
+        <span
+          id={reasonId}
+          className={cn(
+            "mt-0.5 block pl-[15px] text-[12px] leading-[1.25] dense:hidden",
+            row.attention.kind === "overdue" ? "text-[var(--st-attention-text)]" : "text-fg-muted",
+          )}
+        >
+          {row.attention.label}
+        </span>
+      )}
+    </>
+  );
 }
 
 export function InventoryTable({
@@ -133,6 +251,10 @@ export function InventoryTable({
   const router = useRouter();
   // Phase 30 (spec §6.5): a sort runs in the list's shared transition, so the region dims while it loads.
   const { navigate } = useListNavigation();
+  // Dense only moves the Status reason into row attributes here; every visual change is a `dense:` class.
+  const dense = useDensity() === "dense";
+  const idBase = useId();
+  const reasonId = (row: AssetRow) => `${idBase}-reason-${row.id}`;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
@@ -167,6 +289,7 @@ export function InventoryTable({
     if ((REPAIR_ONLY_COLUMNS as readonly string[]).includes(c.id)) return repairMode;
     return !(HIDEABLE_COLUMNS as readonly string[]).includes(c.id) || visible.includes(c.id);
   });
+  const tableMin = columns.reduce((sum, c) => sum + (c.width ?? MODEL_MIN), 0) + (canMutate ? CHECK_W + ACTIONS_W : 0);
 
   function onSort(sortKey: string) {
     navigate(sortHrefs[sortKey]);
@@ -199,48 +322,12 @@ export function InventoryTable({
   const active = dialog?.row ?? null;
 
   return (
-    <div className="flex flex-col gap-2">
-      {canMutate && selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-(--radius-card) border border-accent-soft-border bg-accent-tint px-3 py-2 text-xs text-fg-secondary">
-          <span className="font-mono text-[11px]">
-            {allMatching ? `all ${total} matching selected` : `${selected.size} selected on this page`}
-          </span>
-          {/* Never offer a selection the server will refuse: the bulk cap is BULK_MAX. */}
-          {!allMatching && total > rows.length && total <= BULK_MAX && (
-            <button type="button" className="text-accent hover:underline" onClick={() => setAllMatching(true)}>
-              Select all {total} matching
-            </button>
-          )}
-          {!allMatching && total > BULK_MAX && (
-            <span className="font-mono text-[10px] text-fg-faint">
-              select-all capped at {BULK_MAX} — narrow the filter
-            </span>
-          )}
-          {/* Labels need an explicit id list: "all matching" would make one click a many-sheet print
-              job, so Print labels is absent then — and this says why. */}
-          {allMatching && <span className="font-mono text-[10px] text-fg-faint">Labels need an explicit selection.</span>}
-          {/* Phase 30 (spec §6.4): the bar acts directly; Change status… and Assign… open the drawer in that mode. */}
-          <span className="ml-auto flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={clearSelection}>Clear</Button>
-            {!allMatching && (
-              <ButtonLink size="sm" href={"/inventory/labels" + withClsQS(`?ids=${selectedIds.join(",")}`, cls)}>Print labels</ButtonLink>
-            )}
-            {/* a route handler that streams a file: a plain navigation, never prefetched */}
-            <ButtonLink size="sm" native href={exportHref}>Export</ButtonLink>
-            <Button size="sm" variant={canAssign ? "secondary" : "primary"} onClick={() => setDrawerMode("status")}>
-              Change status…
-            </Button>
-            {canAssign && (
-              <Button size="sm" variant="primary" onClick={() => setDrawerMode("assign")}>Assign…</Button>
-            )}
-          </span>
-        </div>
-      )}
-      <Table>
+    <div className="flex flex-col" style={{ "--inventory-table-min": `${tableMin}px` } as React.CSSProperties}>
+      <Table striped stickyHeader className="[&>table]:table-fixed [&>table]:min-w-(--inventory-table-min)">
       <THead>
-        <Tr>
+        <Tr style={{ height: "var(--list-head-h)" }}>
           {canMutate && (
-            <Th width={30}>
+            <Th className={LIST.check}>
               <Checkbox
                 aria-label="Select all on this page"
                 checked={allOnPage}
@@ -250,11 +337,16 @@ export function InventoryTable({
             </Th>
           )}
           {columns.map((col) => (
-            <Th key={col.id} width={col.width} {...sortProps(col)}>
+            <Th
+              key={col.id}
+              width={col.width}
+              className={cn(LIST.head, col.sortKey ? LIST.thSort : LIST.th, "whitespace-nowrap")}
+              {...sortProps(col)}
+            >
               {col.label}
             </Th>
           ))}
-          {canMutate && <Th width={40} aria-label="Row actions" />}
+          {canMutate && <Th className={cn(LIST.head, LIST.th, "w-[50px]")} aria-label="Row actions" />}
         </Tr>
       </THead>
       <TBody>
@@ -267,18 +359,23 @@ export function InventoryTable({
             })),
             { label: "Open record", onSelect: () => pushGuarded(router, `/inventory/${row.id}`) },
           ];
+          // Dense: the Status reason leaves its cell; the row's tooltip and description carry it.
+          const reason = dense && row.attention ? row.attention.label : undefined;
           return (
             <Tr
               key={row.id}
               className="cursor-pointer"
+              style={{ height: "var(--list-row-h)" }}
               selected={selected.has(row.id)}
+              title={reason}
+              aria-describedby={reason ? reasonId(row) : undefined}
               {...rowOpenProps(() => pushGuarded(router, `/inventory/${row.id}`))}
             >
               {canMutate && (
                 // The whole cell is the checkbox's target (Fitts): a click on the input toggles through
                 // its own onChange, a click on the cell around it toggles here; neither opens the row.
                 <Td
-                  className="cursor-default pr-0"
+                  className={cn(LIST.check, "cursor-default")}
                   onClick={(e: React.MouseEvent) => {
                     e.stopPropagation();
                     if (e.target === e.currentTarget) toggleRow(row.id);
@@ -295,90 +392,55 @@ export function InventoryTable({
                 switch (col.id) {
                   case "tag":
                     return (
-                      <Td key={col.id} mono>
+                      <Td key={col.id} className={cn(LIST.td, LIST.code)}>
                         <Link
                           href={`/inventory/${row.id}`}
-                          className="text-accent hover:underline"
-                          onClick={(e) => e.stopPropagation()}
+                          className="block truncate text-accent hover:underline"
+                          title={row.tag}
+                          onClick={stop}
                         >
                           {row.tag}
                         </Link>
                       </Td>
                     );
-                  case "model":
-                    return <Td key={col.id}><span className="block max-w-[13rem] truncate" title={row.model}>{row.model}</span></Td>;
-                  case "category":
-                    return <Td key={col.id}>{row.category}</Td>;
-                  case "assigned":
+                  case "serial":
                     return (
-                      <Td key={col.id}>
-                        {row.assigneeId !== null && row.assignee !== null ? (
-                          // spec §6.3: the holder is a link to their profile, with the employee number —
-                          // stacked name over number (like the Employees list) so the column stays narrow.
-                          // The " · " separator is screen-reader only: the link's name and text stay "Name · EMP-…".
-                          <Link
-                            href={`/employees/${row.assigneeId}`}
-                            className="flex flex-col leading-tight text-accent hover:underline"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <span className="block max-w-[12rem] truncate" title={row.assignee}>{row.assignee}</span>
-                            {row.assigneeNo && (
-                              <span className="block max-w-[12rem] truncate font-mono text-[11px] text-fg-muted" title={row.assigneeNo}>
-                                <span className="sr-only"> · </span>
-                                {row.assigneeNo}
-                              </span>
-                            )}
-                          </Link>
-                        ) : row.hold ? (
-                          // README 5c: a hold never changes the status — the asset
-                          // still reads SPARE, and the marker says who wants it.
-                          // Stacked like the person branch: the markers on line 1, who it's for on line 2.
-                          <span className="flex flex-col items-start gap-0.5 py-1 leading-tight">
-                            <span className="inline-flex items-center gap-1.5">
-                              <Pill tone="accent">HOLD</Pill>
-                              {row.hold.expiresAt && <HoldPill expiresAt={row.hold.expiresAt} today={today} />}
-                            </span>
-                            <span className="block max-w-[12rem] truncate text-[11px] text-fg-muted" title={`for ${row.hold.name}`}>
-                              for{" "}
-                              <Link
-                                href={`/employees/${row.hold.id}`}
-                                className="text-accent hover:underline"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {row.hold.name}
-                              </Link>
-                            </span>
-                          </span>
+                      <Td key={col.id} className={cn(LIST.td, LIST.code, "text-fg-secondary")}>
+                        {row.serial ? (
+                          <span className="block truncate" title={row.serial}>{row.serial}</span>
                         ) : (
                           <span className="text-fg-faint">—</span>
                         )}
                       </Td>
                     );
+                  case "model":
+                    // no width of its own: in the fixed layout it takes the table's slack, and truncates
+                    return (
+                      <Td key={col.id} className={LIST.td}>
+                        <span className="block truncate font-medium" title={row.model}>{row.model}</span>
+                      </Td>
+                    );
+                  case "category":
+                    return (
+                      <Td key={col.id} className={LIST.td}>
+                        <span className="block truncate" title={row.category}>{row.category}</span>
+                      </Td>
+                    );
+                  case "assigned":
+                    return (
+                      <Td key={col.id} className={LIST.td}>
+                        <AssignedCell row={row} today={today} />
+                      </Td>
+                    );
                   case "status":
                     return (
-                      <Td key={col.id} mono className="py-1 text-[10.5px]">
-                        {/* spec §6.3: the dot beside the word, and the row's one attention reason under it */}
-                        <span className="inline-flex items-center gap-1.5">
-                          <StatusDot value={row.status} />
-                          {statusLabel(row.status)}
-                        </span>
-                        {/* the reason sits on its own line visually; a screen reader hears a pause, not "DEPLOYEDoverdue" */}
-                        {row.attention && <span className="sr-only"> · </span>}
-                        {row.attention && (
-                          <span
-                            className={cn(
-                              "block font-sans text-[10.5px] leading-tight",
-                              row.attention.kind === "overdue" ? "text-[var(--st-attention-text)]" : "text-fg-muted",
-                            )}
-                          >
-                            {row.attention.label}
-                          </span>
-                        )}
+                      <Td key={col.id} className={LIST.td}>
+                        <StatusCell row={row} reasonId={reasonId(row)} />
                       </Td>
                     );
                   case "registration":
                     return (
-                      <Td key={col.id} className="py-1.5">
+                      <Td key={col.id} className={cn(LIST.td, "py-1.5")}>
                         <RegistrationCell
                           row={row}
                           canMutate={canMutate}
@@ -387,24 +449,31 @@ export function InventoryTable({
                       </Td>
                     );
                   case "stage":
-                    return <Td key={col.id} mono className="text-[10.5px]">{row.stageLabel ?? "—"}</Td>;
+                    return (
+                      <Td key={col.id} className={cn(LIST.td, "font-mono text-[11px] text-fg-secondary dense:text-[11px]")}>
+                        {row.stageLabel ?? "—"}
+                      </Td>
+                    );
                   case "down":
                     return (
-                      <Td key={col.id} mono>
+                      <Td key={col.id} className={cn(LIST.td, "tabular-nums text-fg-secondary")}>
                         {row.down === null ? <span className="text-fg-faint">—</span> : `${row.down} d`}
                       </Td>
                     );
                   case "purchased":
-                    return <Td key={col.id} mono>{row.purchased}</Td>;
+                    return <Td key={col.id} className={cn(LIST.td, "tabular-nums text-fg-secondary")}>{row.purchased}</Td>;
                   case "warranty":
-                    return <Td key={col.id} mono>{row.warranty}</Td>;
+                    return <Td key={col.id} className={cn(LIST.td, "tabular-nums text-fg-secondary")}>{row.warranty}</Td>;
                   default:
-                    return <Td key={col.id} />;
+                    return <Td key={col.id} className={LIST.td} />;
                 }
               })}
               {canMutate && (
                 // Not part of the row click: the menu, and everything it opens, stays out of the row's handler.
-                <Td className="cursor-default px-1 text-right" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                <Td
+                  className={cn(LIST.td, "cursor-default pl-1 text-right last:pr-3 dense:pl-1 dense:last:pr-3")}
+                  onClick={stop}
+                >
                   {/* plan P-11: a menu whose only item is Open record would just repeat the row click */}
                   {menuActions.length > 0 && (
                     <Menu
@@ -420,6 +489,39 @@ export function InventoryTable({
         })}
       </TBody>
       </Table>
+      {/* Phase 45 (spec §2.4): the bulk bar floats at the bottom centre while rows are ticked — every action and
+          rule as before. Phase 30 (spec §6.4): it acts directly; Change status… and Assign… open the drawer. */}
+      {canMutate && (
+        <FloatingBulkBar count={allMatching ? total : selected.size} onClear={clearSelection}>
+          {/* with the bar's own "N selected": "… on this page", or the whole filtered view */}
+          <span className="text-[12px] text-fg-muted">{allMatching ? `all ${total} matching` : "on this page"}</span>
+          {/* Never offer a selection the server will refuse: the bulk cap is BULK_MAX. */}
+          {!allMatching && total > rows.length && total <= BULK_MAX && (
+            <button type="button" className="px-1 text-[12px] text-accent hover:underline" onClick={() => setAllMatching(true)}>
+              Select all {total} matching
+            </button>
+          )}
+          {!allMatching && total > BULK_MAX && (
+            <span className="font-mono text-[10px] text-fg-faint">
+              select-all capped at {BULK_MAX} — narrow the filter
+            </span>
+          )}
+          {/* Labels need an explicit id list: "all matching" would make one click a many-sheet print
+              job, so Print labels is absent then — and this says why. */}
+          {allMatching && <span className="font-mono text-[10px] text-fg-faint">Labels need an explicit selection.</span>}
+          {canAssign && (
+            <Button size="sm" variant="primary" onClick={() => setDrawerMode("assign")}>Assign…</Button>
+          )}
+          <Button size="sm" variant={canAssign ? "secondary" : "primary"} onClick={() => setDrawerMode("status")}>
+            Change status…
+          </Button>
+          {!allMatching && (
+            <ButtonLink size="sm" href={"/inventory/labels" + withClsQS(`?ids=${selectedIds.join(",")}`, cls)}>Print labels</ButtonLink>
+          )}
+          {/* a route handler that streams a file: a plain navigation, never prefetched */}
+          <ButtonLink size="sm" native href={exportHref}>Export</ButtonLink>
+        </FloatingBulkBar>
+      )}
       {/* The row menu's dialogs (plan P-3's shared ones) render outside the table, so no click inside
           one can bubble to a row. Mounted only while open, keyed by the row, so each opens fresh. */}
       {dialog && active && dialog.kind === "assign" && (

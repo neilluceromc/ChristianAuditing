@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Phase 45 (spec §4.5): `dense:` styles an element while the Dense row size is on (html data-density="dense").
+   The Inventory and Employees lists express every Dense change with it (see LIST in list-styles.ts). */
+@custom-variant dense ([data-density="dense"] &);
+
 /* ── Colour tokens — light (design_handover/README.md "Design tokens") ── */
 :root {
   --canvas: #f6f7f9;
@@ -109,21 +113,48 @@
 }
 
 /* Table `striped`: no row dividers, every even body row on the zebra tint, a hover tint, and a ticked row
-   (aria-selected) keeps its accent tint. */
-.list-striped tbody tr {
+   (aria-selected) keeps its accent tint. The tints are painted by the cells, not the row (which stays clear),
+   so the rounded corner cells below clip them to the card's corners. */
+.list-striped tbody tr,
+.list-striped tbody tr:hover {
   border-bottom-width: 0;
+  background-color: transparent;
 }
-.list-striped tbody tr:nth-child(even):not([aria-selected]) {
+.list-striped tbody td {
+  transition: background-color var(--dur-1) linear;
+}
+.list-striped tbody tr:nth-child(even):not([aria-selected]) > td {
   background-color: var(--zebra);
 }
-.list-striped tbody tr:not([aria-selected]):hover {
+.list-striped tbody tr:not([aria-selected]):hover > td {
   background-color: var(--row-hover);
+}
+.list-striped tbody tr[aria-selected] > td {
+  background-color: var(--accent-tint);
 }
 
 /* Table `stickyHeader`: the head pins under whatever sits above it. A list's sticky toolbar measures its own
-   height into --list-sticky-top; with none, the head pins to the top of the window. */
+   height into --list-sticky-top; with none, the head pins to the top of the window. From 1280 px the card no
+   longer clips (overflow visible), so the head's colour sits on its cells and the four corner cells round
+   themselves to the card's inner radius: neither the head nor a tinted last row shows past the corners. */
 .list-sticky-head thead {
   top: var(--list-sticky-top, 0px);
+  background-color: transparent;
+}
+.list-sticky-head thead th {
+  background-color: var(--surface-subtle);
+}
+.list-sticky-head thead tr:first-child > th:first-child {
+  border-top-left-radius: calc(var(--radius-card) - 1px);
+}
+.list-sticky-head thead tr:first-child > th:last-child {
+  border-top-right-radius: calc(var(--radius-card) - 1px);
+}
+.list-sticky-head tbody tr:last-child > td:first-child {
+  border-bottom-left-radius: calc(var(--radius-card) - 1px);
+}
+.list-sticky-head tbody tr:last-child > td:last-child {
+  border-bottom-right-radius: calc(var(--radius-card) - 1px);
 }
 
 /* ── Colour tokens — dark (re-derived, not inverted) ── */

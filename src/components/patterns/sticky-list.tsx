@@ -2,19 +2,19 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
-import { PER_PAGE_OPTIONS, rowsRange } from "@/lib/paging";
+import { PER_PAGE_OPTIONS } from "@/lib/paging";
 import type { Density } from "@/lib/density";
 import { setDensity, useDensity } from "@/components/ui/density-toggle";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
-import { Pagination } from "@/components/ui/pagination";
-import { NavLink, useListNavigation } from "@/components/patterns/list-navigation";
+import { useListNavigation } from "@/components/patterns/list-navigation";
 
 /*
  * Phase 45 (spec §4.3): the sticky list chrome. The window is the scroller (the app sidebar is sticky top-0
  * h-dvh), so everything here is page-level `position: sticky`, never a nested scroll box. The toolbar and the
  * footer run edge to edge across main's 24 px padding (-mx-6 px-6). Put the toolbar, the table and the footer
- * inside one StickyList: the toolbar and footer then stick only while the list is on screen, and the table's
+ * (`ListFooter`, in list-footer.tsx so a Server Component can pass it its href builders) inside one
+ * StickyList: the toolbar and footer then stick only while the list is on screen, and the table's
  * `stickyHeader` head pins under the toolbar through `--list-sticky-top`.
  */
 
@@ -106,8 +106,9 @@ export function RowSizeControl() {
 /**
  * "Rows per page": 25, 50 or 100; a change goes through the list's shared transition. Uncontrolled and keyed on
  * `per`, so the picked value stays shown while the next page renders instead of snapping back to the old one.
+ * `hrefs` maps each size to its URL (plain data, so a Server Component can render the footer around it).
  */
-function PerPageSelect({ per, perHrefFor }: { per: number; perHrefFor: (per: number) => string }) {
+export function PerPageSelect({ per, hrefs }: { per: number; hrefs: Record<number, string> }) {
   const id = useId();
   const { navigate } = useListNavigation();
   return (
@@ -117,7 +118,7 @@ function PerPageSelect({ per, perHrefFor }: { per: number; perHrefFor: (per: num
         key={per}
         id={id}
         defaultValue={String(per)}
-        onChange={(e) => navigate(perHrefFor(Number(e.target.value)))}
+        onChange={(e) => navigate(hrefs[Number(e.target.value)])}
         className="h-8 w-auto py-0 pl-2.5 text-[12.5px]"
       >
         {PER_PAGE_OPTIONS.map((n) => (
@@ -126,50 +127,6 @@ function PerPageSelect({ per, perHrefFor }: { per: number; perHrefFor: (per: num
           </option>
         ))}
       </Select>
-    </div>
-  );
-}
-
-/**
- * The pagination row as a bar pinned to the bottom of the window while the list is on screen: "Rows 1–25 of
- * 900", then Row size, Rows per page and the pages. With one page the pages hide; Rows per page shows whenever
- * there are more rows than the smallest size, so a list at 100 per page with 60 rows can still go back to 25.
- */
-export function ListFooter({
-  page,
-  per,
-  total,
-  pageCount,
-  hrefFor,
-  perHrefFor,
-}: {
-  page: number;
-  per: number;
-  total: number;
-  pageCount: number;
-  hrefFor: (page: number) => string;
-  perHrefFor: (per: number) => string;
-}) {
-  const { from, to } = rowsRange(page, per, total);
-  const paged = pageCount > 1;
-  const perChoice = total > PER_PAGE_OPTIONS[0];
-  const fmt = (n: number) => n.toLocaleString("en-US");
-  return (
-    <div className="sticky bottom-0 z-20 -mx-6 mt-1 flex min-h-12 flex-wrap items-center gap-x-6 gap-y-1 border-t border-border bg-canvas/95 px-6 py-2 backdrop-blur">
-      <span className="text-[12.5px] tabular-nums text-fg-muted" aria-live="polite">
-        {total === 0 ? (
-          "No rows"
-        ) : (
-          <>
-            Rows <span className="font-medium text-fg-secondary">{fmt(from)}–{fmt(to)}</span> of {fmt(total)}
-          </>
-        )}
-      </span>
-      <div className="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1">
-        <RowSizeControl />
-        {perChoice && <PerPageSelect per={per} perHrefFor={perHrefFor} />}
-        {paged && <Pagination page={page} pageCount={pageCount} hrefFor={hrefFor} linkComponent={NavLink} />}
-      </div>
     </div>
   );
 }

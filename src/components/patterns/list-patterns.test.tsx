@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CountTiles, type TileDef } from "./count-tiles";
 import { ListTabs, type TabDef } from "./list-tabs";
 import { FloatingBulkBar } from "./floating-bulk-bar";
-import { ListFooter, StickyList, StickyToolbar } from "./sticky-list";
+import { StickyList, StickyToolbar } from "./sticky-list";
+import { ListFooter } from "./list-footer";
 
 // NavLink and the footer's select reach for the router; markup tests never navigate.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
@@ -124,5 +126,9 @@ describe("ListFooter", () => {
   });
   it("says No rows for an empty list", () => {
     expect(footer(1, 0)).toContain("No rows");
+  });
+  it("is not a Client Component, so a Server Component page can hand it its href builders", () => {
+    const source = readFileSync(new URL("./list-footer.tsx", import.meta.url), "utf8");
+    expect(source).not.toMatch(/^\s*["']use client["']/);
   });
 });
