@@ -371,6 +371,12 @@ test.describe.serial("Finance → one asset", () => {
     const kind = upload.getByLabel("Kind", { exact: true });
     await waitForHydration(kind);
 
+    // a phone photo over the 4 MB cap is refused in the browser, in the server's words; nothing is staged or sent
+    await kind.selectOption({ label: "Photo" });
+    await upload.getByLabel("Attachment file").setInputFiles({ name: "IMG_2041.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(4_000_001) });
+    await expect(upload.getByRole("alert")).toContainText("Too big — the cap is 4 MB");
+    await expect(upload.getByRole("button", { name: "Upload", exact: true })).toHaveCount(0);
+
     await kind.selectOption({ label: "Quotation" });
     await upload.getByLabel("Attachment file").setInputFiles(PDF);
     await upload.getByRole("button", { name: "Upload", exact: true }).click();
@@ -475,6 +481,10 @@ test.describe.serial("Finance → one asset", () => {
       expect(p.y + p.height, `${tab}: the panel above the tabs`).toBeLessThanOrEqual(t.y + 1);
       expect(await noSidewaysScroll(page), `${tab}: no sideways scroll`).toBe(true);
     }
+    // the phone top bar carries the compact CRIS mark, not the old BR logo
+    const bar = page.locator("header", { has: page.getByRole("button", { name: "Open menu" }) });
+    await expect(bar.getByText("CRIS", { exact: true })).toBeVisible();
+    await expect(bar.getByText("BR", { exact: true })).toHaveCount(0);
   });
 });
 
