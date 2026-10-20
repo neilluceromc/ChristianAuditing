@@ -5,7 +5,8 @@ import { Icon } from "@/components/ui/icon";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/cn";
 import { bracketTogglesSidebar, readSingleKey } from "@/lib/shortcuts";
-import { nextSidebar, sidebarCookie, type SidebarState } from "@/lib/sidebar-state";
+import { nextSidebar, sidebarCookie, sidebarSteps, type SidebarAnim, type SidebarState, type SidebarStep } from "@/lib/sidebar-state";
+import { saveUiPref } from "@/server/ui-prefs";
 
 interface SidebarContextValue {
   state: SidebarState;
@@ -22,31 +23,67 @@ export function useSidebar(): SidebarContextValue | null {
 /** The desktop sidebar, found inside the shell (hidden below `lg`, where the drawer takes over). */
 const SIDEBAR = 'aside[aria-label="Primary"]';
 
+const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /**
  * Phase 46 spec §4.1: the app shell. It carries `data-sidebar="rail|full"` (the sidebar's width keys off it with
  * `group-data-[sidebar=rail]/shell:`), starts from the `br.sidebar` cookie the layout read (so the first paint is
  * right), and owns the one toggle: the collapse button and the `[` key both write the cookie and flip the attribute.
  * The nav and the brand row read the same state through `useSidebar`.
+ *
+ * Phase 47 spec §5.1: the toggle animates (sidebarSteps): the shell carries `data-sidebar-anim` only while it runs,
+ * so the first paint and a server render never animate, and under prefers-reduced-motion it is one instant step.
+ * `state` is what is drawn; the person's choice (written to the cookie at once) can run ahead of it mid-animation.
+ * Spec §5.4: the choice is also saved to the person's prefs, so it follows them to another browser.
  */
 export function SidebarShell({ initial, children }: { initial: SidebarState; children: React.ReactNode }) {
   const [state, setState] = useState(initial);
+  const [anim, setAnim] = useState<SidebarAnim | null>(null);
   // A server render (router.refresh, say after another tab toggled and rewrote the cookie) brings a new `initial`:
-  // adopt it (state adjusted in render).
+  // adopt it, unanimated (state adjusted in render; the refs follow in the effect below).
   const [seenInitial, setSeenInitial] = useState(initial);
   if (initial !== seenInitial) {
     setSeenInitial(initial);
     setState(initial);
+    setAnim(null);
   }
   const shellRef = useRef<HTMLDivElement>(null);
   // A toggle while the focus sat in the sidebar: the focused link may not exist in the other layout.
   const refocus = useRef(false);
+  /** What is drawn now, and what the person last chose: they differ only mid-animation. */
+  const shown = useRef(initial);
+  const chosen = useRef(initial);
+  const timers = useRef<number[]>([]);
+
+  const stopTimers = useCallback(() => {
+    for (const t of timers.current) window.clearTimeout(t);
+    timers.current = [];
+  }, []);
+
+  useEffect(() => {
+    stopTimers();
+    shown.current = seenInitial;
+    chosen.current = seenInitial;
+  }, [seenInitial, stopTimers]);
+  useEffect(() => stopTimers, [stopTimers]);
 
   const toggle = useCallback(() => {
-    const next = nextSidebar(state);
+    const next = nextSidebar(chosen.current);
+    chosen.current = next;
     refocus.current = !!shellRef.current?.querySelector(SIDEBAR)?.contains(document.activeElement);
     document.cookie = sidebarCookie(next);
-    setState(next);
-  }, [state]);
+    void saveUiPref({ sidebar: next }).catch(() => {}); // a missed save only costs the next browser this choice
+    stopTimers();
+    const apply = (step: SidebarStep) => {
+      shown.current = step.state;
+      setState(step.state);
+      setAnim(step.anim);
+    };
+    for (const step of sidebarSteps(shown.current, next, prefersReducedMotion())) {
+      if (step.at === 0) apply(step);
+      else timers.current.push(window.setTimeout(() => apply(step), step.at));
+    }
+  }, [stopTimers]);
 
   // The focused nav link was swapped for its other-layout twin: land on the toggle rather than on <body>.
   useEffect(() => {
@@ -73,7 +110,7 @@ export function SidebarShell({ initial, children }: { initial: SidebarState; chi
 
   const value = useMemo(() => ({ state, toggle }), [state, toggle]);
   return (
-    <div ref={shellRef} data-sidebar={state} className="group/shell flex min-h-screen">
+    <div ref={shellRef} data-sidebar={state} data-sidebar-anim={anim ?? undefined} className="group/shell flex min-h-screen">
       <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>
     </div>
   );

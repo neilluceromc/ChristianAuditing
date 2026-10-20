@@ -9,6 +9,8 @@ import { WorkspaceTag } from "./workspace-switcher";
 
 // The tag's menu switches by a server action; markup tests never call it, and its module pulls in auth and the db.
 vi.mock("@/server/auth/actions", () => ({ switchWorkspace: vi.fn() }));
+// The collapse toggle saves to the person's prefs by a server action (Phase 47); same reason.
+vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn(async () => null) }));
 
 const sections = filterSectionsForRole(WORKSPACE_NAV.it, "it_staff");
 const items = sections.flatMap((s) => s.items);
@@ -190,6 +192,11 @@ describe("SidebarShell and the collapse control", () => {
     expect(shell("rail")).toMatch(/^<div data-sidebar="rail" class="group\/shell flex min-h-screen">/);
   });
 
+  it("never animates the first paint: no animation attribute on the shell", () => {
+    expect(shell("full")).not.toContain("data-sidebar-anim");
+    expect(shell("rail")).not.toContain("data-sidebar-anim");
+  });
+
   it("mounts only the rendering in use", () => {
     expect(shell("full")).toContain("full brand");
     expect(shell("full")).not.toContain("rail brand");
@@ -211,19 +218,22 @@ describe("SidebarShell and the collapse control", () => {
 });
 
 describe("WorkspaceTag in the rail (variant logo)", () => {
-  it("is the plain BR mark for one workspace", () => {
+  // Phase 47 spec §5.3: the BR mark is gone; the rail's mark is the compact "CRIS" text.
+  it("is the plain CRIS mark for one workspace", () => {
     const html = renderToStaticMarkup(<WorkspaceTag current="it" allowed={["it"]} meta={WORKSPACE_META} variant="logo" />);
-    expect(html).toContain(">BR<");
+    expect(html).toMatch(/<span class="[^"]*text-\[11px\][^"]*font-bold[^"]*">CRIS<\/span>/);
+    expect(html).not.toContain(">BR<");
     expect(html).not.toContain("<button");
   });
 
-  it("is the BR mark as the workspace menu button, with the same name, for several", () => {
+  it("is the CRIS mark as the workspace menu button, with the same name, for several", () => {
     const html = renderToStaticMarkup(
       <WorkspaceTag current="it" allowed={["it", "purchasing", "finance", "admin"]} meta={WORKSPACE_META} variant="logo" />,
     );
     const button = html.slice(html.indexOf("<button"), html.indexOf(">", html.indexOf("<button")) + 1);
     expect(button).toContain('aria-label="Switch workspace — IT, 4 workspaces"');
     expect(button).toContain('aria-haspopup="menu"');
-    expect(html).toContain(">BR<");
+    expect(html).toMatch(/<span aria-hidden="true" class="[^"]*text-\[11px\][^"]*font-bold[^"]*">CRIS<\/span>/);
+    expect(html).not.toContain(">BR<");
   });
 });

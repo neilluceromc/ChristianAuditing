@@ -4,13 +4,14 @@ import { AuthError } from "next-auth";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
-import { signIn, signOut } from "./index";
+import { auth, signIn, signOut } from "./index";
 import { requireUser } from "./guards";
 import { prisma } from "../db/client";
 import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
 import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
+import { saveUiPref } from "@/server/ui-prefs";
 
 export interface AuthFormState {
   error?: string;
@@ -63,7 +64,28 @@ export async function quickSignIn(formData: FormData): Promise<void> {
 }
 
 export async function signOutAction() {
+  // TEMPORARY (owner, 2026-10-21): clear Cris chats on sign-out; remove when history should persist.
+  await clearCrisChats();
   await signOut({ redirectTo: "/login" });
+}
+
+/**
+ * Phase 47 spec §5.5: a soft clear. The conversations are stamped `clearedAt` (the Cris box lists and resumes only
+ * uncleared ones) and never deleted, because the daily question limit and the admin's monthly usage and cost are
+ * counted from their CrisMessage rows. Pending Confirm/Undo actions go by userId: they have no foreign key. Read
+ * from the session, not the DB guard, so a stale account's chats clear too; a failure never blocks signing out.
+ */
+async function clearCrisChats(): Promise<void> {
+  try {
+    const userId = (await auth())?.user?.id;
+    if (!userId) return;
+    await prisma.$transaction([
+      prisma.crisConversation.updateMany({ where: { userId, clearedAt: null }, data: { clearedAt: new Date() } }),
+      prisma.crisPendingAction.deleteMany({ where: { userId } }),
+    ]);
+  } catch (err: unknown) {
+    console.error("[cris] clearing chats on sign-out failed:", err);
+  }
 }
 
 export async function signUp(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
@@ -173,5 +195,7 @@ export async function switchWorkspace(ws: WorkspaceId) {
   if (!ROLE_WORKSPACES[user.role].includes(ws)) redirect(ROLE_LANDING[user.role]);
   const jar = await cookies();
   jar.set("br.dept", ws, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
+  // Phase 47 spec §5.4: the workspace follows the person, not the browser.
+  await saveUiPref({ workspace: ws });
   redirect(WORKSPACE_META[ws].landing);
 }

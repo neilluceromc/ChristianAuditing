@@ -12,6 +12,8 @@ vi.mock("next/navigation", () => ({
 }));
 // The dialogs and the drawer call server actions (auth, database); none of them render until opened.
 vi.mock("./bulk-drawer", () => ({ BulkDrawer: () => null }));
+// The density control saves to the person's prefs by a server action (Phase 47), whose module pulls in auth and the db.
+vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn(async () => null) }));
 vi.mock("./holder-control", () => ({ AssignDialog: () => null, ReturnDialog: () => null }));
 vi.mock("./status-control", () => ({ ChangeStatusDialog: () => null }));
 vi.mock("./registration-cell", () => ({ RegistrationCell: () => null }));

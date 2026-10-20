@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { parseDensity, topbarNext, type Density } from "@/lib/density";
+import { saveUiPref } from "@/server/ui-prefs";
 
 function subscribe(cb: () => void) {
   const obs = new MutationObserver(cb);
@@ -10,10 +11,14 @@ function subscribe(cb: () => void) {
 }
 const getDensity = (): Density => parseDensity(document.documentElement.dataset.density);
 
-/** The one way density changes: the html attribute (live) and the br.density cookie (the next server render). */
+/**
+ * The one way density changes: the html attribute (live), the br.density cookie (the next server render), and the
+ * person's saved prefs (Phase 47 spec §5.4: it follows them, not the browser).
+ */
 export function setDensity(d: Density) {
   document.documentElement.dataset.density = d;
   document.cookie = `br.density=${d};path=/;max-age=31536000;samesite=lax`;
+  void saveUiPref({ density: d }).catch(() => {});
 }
 
 /** The live row size (html data-density), re-rendering on every change; comfortable on the server. */

@@ -7,7 +7,8 @@ export type IconName =
   | "workstation" | "mouse" | "hub" | "bag" | "other" | "scan"
   | "keyboard" | "webcam" | "ups" | "license" | "menu"
   | "home" | "worklist" | "offboarding" | "reservations" | "reports" | "activity" | "setup"
-  | "requests" | "suppliers" | "stock" | "depreciation" | "users" | "webhooks" | "flags" | "chevron" | "sidebar";
+  | "requests" | "suppliers" | "stock" | "depreciation" | "users" | "webhooks" | "flags" | "chevron" | "sidebar"
+  | "disposal";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   laptop: (<><rect x="3" y="4" width="12" height="8" /><line x1="1.5" y1="14.5" x2="16.5" y2="14.5" /></>),
@@ -56,6 +57,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   flags: (<><line x1="4" y1="2" x2="4" y2="16" /><polyline points="4,3 14.5,3 12,6.5 14.5,10 4,10" /></>),
   chevron: (<><polyline points="7,4 12,9 7,14" /></>),
   sidebar: (<><rect x="2.5" y="3" width="13" height="12" /><line x1="7" y1="3" x2="7" y2="15" /></>),
+  // Phase 47: Finance › Disposal — a bin.
+  disposal: (<><line x1="2.5" y1="4.5" x2="15.5" y2="4.5" /><polyline points="7,4.5 7,2.5 11,2.5 11,4.5" /><polyline points="4,4.5 5,15.5 13,15.5 14,4.5" /><line x1="7.5" y1="7.5" x2="7.5" y2="12.5" /><line x1="10.5" y1="7.5" x2="10.5" y2="12.5" /></>),
 };
 
 export function Icon({

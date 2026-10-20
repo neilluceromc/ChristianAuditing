@@ -14,7 +14,7 @@ const geistSans = Geist({ subsets: ["latin"], display: "swap", variable: "--font
 const geistMono = Geist_Mono({ subsets: ["latin"], display: "swap", variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
-  // Spec §5: the fallback when a page sets no title; every page sets "{Page} · Backroom IT".
+  // Spec §5: the fallback when a page sets no title; every page sets "{Page} · CRIS" (Phase 47 spec §5.3).
   title: APP_NAME,
   description: "IT asset management for The Backroom Offshoring",
 };
@@ -24,6 +24,9 @@ export default async function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   // br.theme / br.density are written by the Phase 1 toggles; reading them
   // here is what makes the choice survive a reload (the cookie contract).
+  // Phase 47 spec §5.4: they now follow the person — the toggles also save
+  // them to UserPreference `ui:prefs`, and UiPrefsSync (the app layout)
+  // rewrites them when someone else signs in on this browser.
   const jar = await cookies();
   const theme = jar.get("br.theme")?.value === "dark" ? "dark" : "light";
   const density = parseDensity(jar.get("br.density")?.value);

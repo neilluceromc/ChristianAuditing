@@ -447,6 +447,22 @@ body {
     var(--surface);
 }
 
+/* Phase 47 spec §5.1: the sidebar's collapse animation. Only while the shell carries data-sidebar-anim (set by
+   SidebarShell's toggle, never on the first paint, never under reduced motion): the panel's width moves over
+   --dur-4 with --ease-std, clipped so the other layout's content never spills, and the text (labels, counts, kbd)
+   fades over --dur-2 — out before the width shrinks, in after it grows (src/lib/sidebar-state.ts sidebarSteps).
+   Icons are SVG and stay; the avatar opts out with .sidebar-keep. */
+[data-sidebar-anim] .sidebar-panel {
+  overflow: hidden;
+  transition: width var(--dur-4) var(--ease-std);
+}
+[data-sidebar-anim] .sidebar-panel :is(span, p, kbd):not(.sidebar-keep) {
+  transition: opacity var(--dur-2) var(--ease-std);
+}
+[data-sidebar-anim="hide"] .sidebar-panel :is(span, p, kbd):not(.sidebar-keep) {
+  opacity: 0;
+}
+
 /* Hard requirement, not an enhancement. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

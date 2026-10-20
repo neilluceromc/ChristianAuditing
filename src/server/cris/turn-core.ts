@@ -87,17 +87,25 @@ function offRefusal(settings: CrisSettings): ActionResult<never> | null {
   return crisAvailabilityFrom(settings, process.env).on ? null : conflict(CRIS_OFF_SWITCH);
 }
 
-/** The conversation the browser sent, when it is the person's own (checked by id and owner); otherwise null. */
+/**
+ * Phase 47 spec §5.5 (TEMPORARY, owner 2026-10-21): sign-out stamps the person's conversations `clearedAt`. Every
+ * read that lists or resumes a conversation for the box takes this filter; the counts (usedToday below, and the
+ * admin's monthly usage in settings-read.ts) deliberately don't, so signing out never resets the limit or the cost.
+ */
+const NOT_CLEARED = { clearedAt: null } as const;
+
+/** The conversation the browser sent, when it is the person's own (checked by id and owner) and not cleared; otherwise null. */
 async function ownedConversationId(userId: string, raw: unknown): Promise<string | null> {
   const v = typeof raw === "object" && raw !== null ? (raw as { conversationId?: unknown }).conversationId : undefined;
   if (typeof v !== "string" || v.length === 0 || v.length > 64) return null;
-  const c = await prisma.crisConversation.findFirst({ where: { id: v, userId }, select: { id: true } });
+  const c = await prisma.crisConversation.findFirst({ where: { id: v, userId, ...NOT_CLEARED }, select: { id: true } });
   return c?.id ?? null;
 }
 
 /**
- * Questions asked today (Manila): the person's saved messages since Manila midnight, in every conversation. The
- * daily limit here, and the "{n} questions left today" a page load starts from (./widget-read.ts).
+ * Questions asked today (Manila): the person's saved messages since Manila midnight, in every conversation — cleared
+ * ones included (Phase 47: signing out must not reset the limit). The daily limit here, and the "{n} questions left
+ * today" a page load starts from (./widget-read.ts).
  */
 export function usedToday(userId: string, now: Date): Promise<number> {
   return prisma.crisMessage.count({ where: { role: "user", createdAt: { gte: manilaDayStart(now) }, conversation: { userId } } });
@@ -106,23 +114,23 @@ export function usedToday(userId: string, now: Date): Promise<number> {
 /** Newest first: the person's open conversation is their most recently used one (spec §7, one per person). */
 const latestFirst = (): Prisma.CrisConversationOrderByWithRelationInput[] => [{ updatedAt: "desc" }, { id: "desc" }];
 
-/** The person's open conversation, as crisSend picks it when the browser sends none; null when they have none. */
+/** The person's open conversation, as crisSend picks it when the browser sends none; null when they have none (or only cleared ones). */
 export async function latestConversationId(userId: string): Promise<string | null> {
-  const c = await prisma.crisConversation.findFirst({ where: { userId }, orderBy: latestFirst(), select: { id: true } });
+  const c = await prisma.crisConversation.findFirst({ where: { userId, ...NOT_CLEARED }, orderBy: latestFirst(), select: { id: true } });
   return c?.id ?? null;
 }
 
 /**
  * The conversation to answer in:
- *  - with an id: that conversation when it is the person's own; an id that is not theirs (or no longer exists)
- *    gets a NEW conversation — someone else's is never used, and theirs is never guessed;
- *  - without one: their most recent (one open conversation per person), or a new one if they have none;
+ *  - with an id: that conversation when it is the person's own; an id that is not theirs (or no longer exists, or
+ *    was cleared at sign-out) gets a NEW conversation — someone else's is never used, and theirs is never guessed;
+ *  - without one: their most recent uncleared one (one open conversation per person), or a new one if they have none;
  *  - one that has reached CRIS_MAX_TURNS moves on to a new one, carrying over the person's picks and the pick
  *    card still open in it (a spares or "Which one?" list), so the pick that answers that card still works.
  */
 async function openConversation(userId: string, requested: string | undefined): Promise<string> {
   const found = await prisma.crisConversation.findFirst({
-    where: requested ? { id: requested, userId } : { userId },
+    where: requested ? { id: requested, userId, ...NOT_CLEARED } : { userId, ...NOT_CLEARED },
     orderBy: latestFirst(),
     select: { id: true, picks: true },
   });
@@ -382,8 +390,8 @@ export async function crisHistoryFor(user: SessionUser, raw: unknown): Promise<A
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { conversationId, before } = parsed.data;
 
-  // Chats are private to their person (spec §7).
-  const conv = await prisma.crisConversation.findFirst({ where: { id: conversationId, userId: user.id }, select: { id: true } });
+  // Chats are private to their person (spec §7); a cleared one (Phase 47, sign-out) is no longer shown.
+  const conv = await prisma.crisConversation.findFirst({ where: { id: conversationId, userId: user.id, ...NOT_CLEARED }, select: { id: true } });
   if (!conv) return forbidden();
 
   const where: Prisma.CrisMessageWhereInput = { conversationId, role: { in: ["user", "cris", "assistant"] } };

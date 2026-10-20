@@ -9,6 +9,8 @@ import { ListFooter } from "./list-footer";
 
 // NavLink and the footer's select reach for the router; markup tests never navigate.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+// The density control saves to the person's prefs by a server action (Phase 47), whose module pulls in auth and the db.
+vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn(async () => null) }));
 
 const tile = (over: Partial<TileDef>): TileDef => ({
   key: "spare", label: "In stock", caption: "Spare, ready to assign", family: "neutral",
