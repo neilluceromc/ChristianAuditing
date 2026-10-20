@@ -47,6 +47,15 @@ function isMissingBody(body: string): boolean {
   }
 }
 
+/**
+ * Auth headers for the service key. Supabase's new secret keys (`sb_secret_…`) are not JWTs and go in `apikey`
+ * only; the legacy `service_role` key is a JWT and goes in both `apikey` and `Authorization: Bearer`.
+ */
+export function authHeaders(): Record<string, string> {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  return key.startsWith("eyJ") ? { apikey: key, authorization: `Bearer ${key}` } : { apikey: key };
+}
+
 function objectUrl(kind: "object" | "object/authenticated", relPath: string): string {
   const base = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
   const encoded = relPath.split("/").map(encodeURIComponent).join("/");
@@ -59,7 +68,7 @@ export async function writeObject(relPath: string, bytes: Buffer, contentType: s
     const res = await fetch(objectUrl("object", relPath), {
       method: "POST",
       headers: {
-        authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        ...authHeaders(),
         "content-type": contentType,
         "x-upsert": "false",
       },
@@ -79,7 +88,7 @@ export async function readUpload(relPath: string): Promise<Buffer | null> {
   if (!isSafeRelPath(relPath)) return null;
   if (storageDriver() === "supabase") {
     const res = await fetch(objectUrl("object/authenticated", relPath), {
-      headers: { authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
+      headers: authHeaders(),
     });
     if (res.status === 404) return null;
     if (!res.ok) {

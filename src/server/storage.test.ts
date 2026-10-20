@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readUpload, storageDriver, writeObject } from "./storage";
+import { authHeaders, readUpload, storageDriver, writeObject } from "./storage";
 
 const fetchMock = vi.fn();
 
@@ -44,17 +44,30 @@ describe("storageDriver", () => {
   });
 });
 
+describe("authHeaders", () => {
+  it("a new secret key (sb_secret_…) goes in apikey only", () => {
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "sb_secret_abc");
+    expect(authHeaders()).toEqual({ apikey: "sb_secret_abc" });
+  });
+
+  it("a legacy service_role JWT goes in apikey and Authorization: Bearer", () => {
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "eyJhbGciOi.x.y");
+    expect(authHeaders()).toEqual({ apikey: "eyJhbGciOi.x.y", authorization: "Bearer eyJhbGciOi.x.y" });
+  });
+});
+
 describe("supabase driver", () => {
   beforeEach(useSupabase);
 
-  it("writes with POST to the documents bucket, bearer auth, content-type and no upsert", async () => {
+  it("writes with POST to the documents bucket, apikey auth, content-type and no upsert", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
     await writeObject("lots/1/123-a b.pdf", Buffer.from("hi"), "application/pdf");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://proj.supabase.co/storage/v1/object/documents/lots/1/123-a%20b.pdf");
     expect(init.method).toBe("POST");
-    expect(init.headers.authorization).toBe("Bearer service-key");
+    expect(init.headers.apikey).toBe("service-key");
+    expect(init.headers.authorization).toBeUndefined();
     expect(init.headers["content-type"]).toBe("application/pdf");
     expect(init.headers["x-upsert"]).toBe("false");
     expect(Buffer.from(init.body).toString()).toBe("hi");
@@ -71,7 +84,8 @@ describe("supabase driver", () => {
     expect(out).toEqual(Buffer.from([1, 2, 3]));
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://proj.supabase.co/storage/v1/object/authenticated/documents/lots/1/a.pdf");
-    expect(init.headers.authorization).toBe("Bearer service-key");
+    expect(init.headers.apikey).toBe("service-key");
+    expect(init.headers.authorization).toBeUndefined();
   });
 
   it("reads 404 -> null", async () => {
