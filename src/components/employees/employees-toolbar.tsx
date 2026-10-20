@@ -4,15 +4,16 @@ import { usePathname } from "next/navigation";
 import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { NavLink, useListNavigation } from "@/components/patterns/list-navigation";
 import { SearchBox } from "@/components/patterns/search-box";
+import { LabelledSelect } from "@/components/patterns/labelled-select";
 import { LIST } from "@/components/patterns/list-styles";
-import { EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
+import { EMPLOYEE_SORT_OPTIONS, EMPLOYEES_LIST_CONFIG, employeeSortValue, withEmployeeSort } from "@/lib/employees-list";
 import { TAB_FACETS } from "@/lib/employee-tabs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { EmployeeFacets } from "@/server/modules/employees/queries";
 
 /**
  * Phase 45 (spec §3.2): the Employees filter row, meant for a StickyToolbar — Search (flexible, up to 420 px) and
- * Works for, then on the right Clear filters (only while a search, Works for or tab is set), the people count with
+ * Works for and Sort, then on the right Clear filters (only while a search, Works for or tab is set), the people count with
  * the number in bold, and the leavers clause: "· N leavers hidden" (a link that shows them) or "· leavers shown ·
  * Hide". The Staff and Employment facets and the Show leavers / Policy gaps only pills are gone: the tabs and the
  * leavers link replace them, and their URL params (`kind`, `employment`, `leavers`, `gaps`) still filter.
@@ -71,6 +72,18 @@ export function EmployeesToolbar({
           onApply={(values) => navigate(href(withFilter(state, "department", values), gapsOnly))}
         />
       </div>
+      {/* Spec §7.3: the sort options are the list's own URL sorts; a column-header sort the options don't name shows
+          "Column order" (disabled: it is a state, not a pick). */}
+      <LabelledSelect
+        label="Sort"
+        value={employeeSortValue(state.sort)}
+        onChange={(v) => navigate(href(withEmployeeSort(state, v), gapsOnly))}
+      >
+        {employeeSortValue(state.sort) === "" && <option value="" disabled>Column order</option>}
+        {EMPLOYEE_SORT_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </LabelledSelect>
       <div className="ml-auto flex items-center gap-3 whitespace-nowrap text-[12.5px] tabular-nums text-fg-muted">
         {filtered && (
           <NavLink href={href(cleared, false)} className="font-medium text-accent hover:underline">

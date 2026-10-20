@@ -1,5 +1,6 @@
 import type { EmploymentStatus, GroupKind, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
+import { withSort } from "./url-state";
 import { monthStartManila } from "./cris-limits";
 
 export const EMPLOYMENT_STATUSES = ["ACTIVE", "OFFBOARDING", "OFFBOARDED"] as const satisfies readonly EmploymentStatus[];
@@ -13,6 +14,40 @@ export const EMPLOYEES_LIST_CONFIG: ListConfig = {
   sortable: ["name", "employeeNo", "joinedAt", "loadout"],
   defaultSort: [{ key: "name", dir: "asc" }],
 };
+
+/**
+ * Spec §7.3: the toolbar's Sort select. Each value is the list's own URL `sort` value (`-` = descending), over the
+ * sort keys EMPLOYEES_LIST_CONFIG already accepts; Name A–Z is the default and adds no param.
+ */
+export const EMPLOYEE_SORT_OPTIONS = [
+  { value: "name", label: "Name A–Z" },
+  { value: "-name", label: "Name Z–A" },
+  { value: "-joinedAt", label: "Recently joined" },
+  { value: "joinedAt", label: "Earliest joined" },
+  { value: "employeeNo", label: "Employee no." },
+] as const;
+
+const sortValueOf = (s: SortKey) => (s.dir === "desc" ? `-${s.key}` : s.key);
+
+/** The option the URL's sort is exactly, or "" (a column-header sort, or two keys: the select claims nothing). */
+export function employeeSortValue(sort: SortKey[]): string {
+  if (sort.length !== 1) return "";
+  const v = sortValueOf(sort[0]);
+  return EMPLOYEE_SORT_OPTIONS.some((o) => o.value === v) ? v : "";
+}
+
+/** The state a Sort pick leads to: that sort (an unknown value is the default), page 1; search, filters and tab stay. */
+export function withEmployeeSort(state: ListState, value: string): ListState {
+  const opt = EMPLOYEE_SORT_OPTIONS.find((o) => o.value === value);
+  if (!opt) return withSort(state, EMPLOYEES_LIST_CONFIG.defaultSort);
+  const desc = opt.value.startsWith("-");
+  return withSort(state, [{ key: desc ? opt.value.slice(1) : opt.value, dir: desc ? "desc" : "asc" }]);
+}
+
+/** The join date shows under the name when Joined is the primary sort (Recently / Earliest joined, or the Joined header). */
+export function showsJoinedLine(sort: SortKey[]): boolean {
+  return sort[0]?.key === "joinedAt";
+}
 
 export function buildEmployeeWhere(state: ListState, now: Date = new Date()): Prisma.EmployeeWhereInput {
   const where: Prisma.EmployeeWhereInput = {};

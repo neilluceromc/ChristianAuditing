@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEES_LIST_CONFIG, orderByLoadout } from "./employees-list";
+import {
+  buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEE_SORT_OPTIONS, EMPLOYEES_LIST_CONFIG, employeeSortValue,
+  orderByLoadout, showsJoinedLine, withEmployeeSort,
+} from "./employees-list";
 import { monthStartManila } from "./cris-limits";
-import { parseListState } from "./url-state";
+import { parseListState, serializeListState } from "./url-state";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), EMPLOYEES_LIST_CONFIG);
 
@@ -100,5 +103,47 @@ describe("the Loadout sort key (spec decision 8)", () => {
   });
   it("descending: fewest gaps first, no policy still last", () => {
     expect(orderByLoadout(rows, "desc").map((r) => r.id)).toEqual(["1", "4", "2", "5", "3"]);
+  });
+});
+
+// Spec §7.3: the Sort select, over the list's own sort keys and URL state.
+describe("employee sort options", () => {
+  it("are Name A–Z, Name Z–A, Recently joined, Earliest joined, Employee no., in that order", () => {
+    expect(EMPLOYEE_SORT_OPTIONS.map((o) => [o.value, o.label])).toEqual([
+      ["name", "Name A–Z"], ["-name", "Name Z–A"], ["-joinedAt", "Recently joined"], ["joinedAt", "Earliest joined"],
+      ["employeeNo", "Employee no."],
+    ]);
+  });
+  it("every option is a sort the list already accepts", () => {
+    for (const o of EMPLOYEE_SORT_OPTIONS) expect(parse(`sort=${o.value}`).sort).toHaveLength(1);
+    expect(parse("sort=-joinedAt").sort).toEqual([{ key: "joinedAt", dir: "desc" }]);
+  });
+  it("picking one builds the URL: the default adds no sort param, the others carry theirs, and q, filters and tab stay, at page 1", () => {
+    const base = parse("q=ana&kind=CLIENT&page=3");
+    const href = (v: string) => serializeListState(withEmployeeSort(base, v), EMPLOYEES_LIST_CONFIG);
+    expect(href("name")).toBe("?q=ana&kind=CLIENT");
+    expect(href("-name")).toBe("?q=ana&kind=CLIENT&sort=-name");
+    expect(href("-joinedAt")).toBe("?q=ana&kind=CLIENT&sort=-joinedAt");
+    expect(href("joinedAt")).toBe("?q=ana&kind=CLIENT&sort=joinedAt");
+    expect(href("employeeNo")).toBe("?q=ana&kind=CLIENT&sort=employeeNo");
+    expect(withEmployeeSort(base, "-joinedAt").page).toBe(1);
+  });
+  it("an unknown value falls back to the default sort", () => {
+    expect(withEmployeeSort(parse("sort=-joinedAt"), "bogus").sort).toEqual(EMPLOYEES_LIST_CONFIG.defaultSort);
+  });
+  it("the select shows the option the URL's sort is, or none for a column-header sort", () => {
+    expect(employeeSortValue(parse("").sort)).toBe("name");
+    expect(employeeSortValue(parse("sort=-name").sort)).toBe("-name");
+    expect(employeeSortValue(parse("sort=-joinedAt").sort)).toBe("-joinedAt");
+    expect(employeeSortValue(parse("sort=loadout").sort)).toBe("");
+    expect(employeeSortValue(parse("sort=joinedAt,name").sort)).toBe("");
+  });
+  it("the join-date line shows only when joined is the primary sort", () => {
+    expect(showsJoinedLine(parse("sort=-joinedAt").sort)).toBe(true);
+    expect(showsJoinedLine(parse("sort=joinedAt").sort)).toBe(true);
+    expect(showsJoinedLine(parse("sort=joinedAt,name").sort)).toBe(true);
+    expect(showsJoinedLine(parse("").sort)).toBe(false);
+    expect(showsJoinedLine(parse("sort=employeeNo").sort)).toBe(false);
+    expect(showsJoinedLine(parse("sort=name,joinedAt").sort)).toBe(false);
   });
 });

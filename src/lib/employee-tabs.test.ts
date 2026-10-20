@@ -107,4 +107,11 @@ describe("buildEmployeeTabs", () => {
       joined: "?q=mar&joined=month",
     });
   });
+
+  it("every tab keeps the sort", () => {
+    const state = parse("q=mar&sort=-joinedAt");
+    for (const t of EMPLOYEE_TABS) expect(employeeTabState(state, false, t.key).state.sort).toEqual([{ key: "joinedAt", dir: "desc" }]);
+    const hrefs = buildEmployeeTabs(state, false, counts, hrefFor).map((t) => t.href);
+    for (const h of hrefs) expect(h).toContain("sort=-joinedAt");
+  });
 });

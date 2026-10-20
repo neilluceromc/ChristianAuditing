@@ -29,6 +29,8 @@ export interface EmployeeListRow {
   /** null only when neither a resolved policy nor an ADD exception applies */
   missingRequired: number | null;
   joined: string;
+  /** the raw join instant: the "Joined 3 Mar 2025" line under the name (Manila time) on the joined sorts */
+  joinedAt: Date;
 }
 
 const rowInclude = {
@@ -203,6 +205,7 @@ export async function listEmployees(state: ListState, gapsOnly: boolean, now: Da
       items: e.assets.length,
       missingRequired: missing.get(e.id) ?? null,
       joined: fmtDate(e.joinedAt),
+      joinedAt: e.joinedAt,
     })),
     total: pg.total,
     page: pg.page,

@@ -1,11 +1,8 @@
 "use client";
 
-import { useId } from "react";
-import { Select } from "@/components/ui/select";
 import { useListNavigation } from "@/components/patterns/list-navigation";
 import { SearchBox } from "@/components/patterns/search-box";
-import { LIST } from "@/components/patterns/list-styles";
-import { cn } from "@/lib/cn";
+import { LabelledSelect } from "@/components/patterns/labelled-select";
 import { fmtMoneyExact } from "@/lib/format";
 import {
   LIFE_FILTERS, LIFE_LABEL, SORT_OPTIONS, financeListHref, parseLife, parseSort, withFinance,
@@ -25,30 +22,6 @@ export function controlHref(state: FinanceListState, control: ToolbarControl, va
     case "life": return financeListHref(withFinance(state, { life: parseLife(value) }));
     case "sort": return financeListHref(withFinance(state, { sort: parseSort(value) }));
   }
-}
-
-function LabelledSelect({
-  label, value, onChange, children,
-}: {
-  label: string; value: string; onChange: (v: string) => void; children: React.ReactNode;
-}) {
-  const id = useId();
-  return (
-    <div className="flex items-center gap-1.5 text-[12.5px] text-fg-muted">
-      <label htmlFor={id} className="whitespace-nowrap">{label}</label>
-      <Select
-        // Uncontrolled and keyed on the URL's value: the pick stays shown while its navigation is in flight, and the
-        // select takes the URL's value again once the next view lands (or on Back).
-        key={value}
-        id={id}
-        defaultValue={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(LIST.control, "w-auto max-w-[220px] pl-2.5")}
-      >
-        {children}
-      </Select>
-    </div>
-  );
 }
 
 /**
