@@ -85,8 +85,8 @@ async function derivedIds(
 }
 
 /** Spec §4: the plain list pages in SQL; the gaps filter and the Loadout sort (Phase 29, plan P-4) cut a NARROW candidate pass first, then page in memory. */
-async function pageEmployees(state: ListState, gapsOnly: boolean) {
-  const where = buildEmployeeWhere(state);
+async function pageEmployees(state: ListState, gapsOnly: boolean, now: Date) {
+  const where = buildEmployeeWhere(state, now);
   const orderBy = buildEmployeeOrderBy(state.sort);
   // Only as the PRIMARY key (Phase 31): a secondary `loadout` left behind by a header click is dropped,
   // as buildEmployeeOrderBy already drops it in SQL, so the clicked column really orders the rows.
@@ -118,18 +118,18 @@ async function pageEmployees(state: ListState, gapsOnly: boolean) {
  * needs policy resolution + slot fill per employee), so that path cuts a
  * narrow candidate pass first and pages the kept ids.
  */
-export async function listEmployees(state: ListState, gapsOnly: boolean): Promise<{
+export async function listEmployees(state: ListState, gapsOnly: boolean, now: Date = new Date()): Promise<{
   rows: EmployeeListRow[];
   total: number;
   page: number;
   pageCount: number;
   hiddenLeavers: number;
 }> {
-  const { pg, employees, missing } = await pageEmployees(state, gapsOnly);
+  const { pg, employees, missing } = await pageEmployees(state, gapsOnly, now);
   const hiddenLeavers = state.filters.employment?.length || (state.filters.leavers ?? []).includes("1")
     ? 0
     : await prisma.employee.count({
-        where: { ...buildEmployeeWhere({ ...state, filters: { ...state.filters, leavers: ["1"] } }), employment: "OFFBOARDED" },
+        where: { ...buildEmployeeWhere({ ...state, filters: { ...state.filters, leavers: ["1"] } }, now), employment: "OFFBOARDED" },
       });
   return {
     rows: employees.map((e): EmployeeListRow => ({
@@ -215,7 +215,7 @@ export interface EmployeeFacets {
   employment: Array<{ value: string; label: string; count: number }>;
 }
 
-export async function employeeFacetOptions(state: ListState): Promise<EmployeeFacets> {
+export async function employeeFacetOptions(state: ListState, now: Date = new Date()): Promise<EmployeeFacets> {
   // NOTE on the gaps toggle, and the same note inventory/queries.ts carries
   // about repair mode: this function never receives `gapsOnly`, so when the
   // toggle is on these groupBy queries count the CANDIDATE set (everyone
@@ -233,16 +233,16 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
   // (leavers=1) on top of clearing the employment facet itself. Department
   // counts keep the default (they should agree with what the list shows).
   const employmentState = without("employment");
-  const employmentWhere = buildEmployeeWhere({ ...employmentState, filters: { ...employmentState.filters, leavers: ["1"] } });
+  const employmentWhere = buildEmployeeWhere({ ...employmentState, filters: { ...employmentState.filters, leavers: ["1"] } }, now);
   const [deptGroups, empGroups, departments] = await Promise.all([
-    prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("department")), _count: true }),
+    prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("department"), now), _count: true }),
     prisma.employee.groupBy({ by: ["employment"], where: employmentWhere, _count: true }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
   ]);
   // Phase 37 (spec §2.3): the Works for facet lists internal rows first, then clients ("{name} (client)").
   // The Staff counts are per-department counts under every other facet (its own is excluded, as
   // `department`'s is for its counts), summed by the department's kind.
-  const kindGroups = await prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("kind")), _count: true });
+  const kindGroups = await prisma.employee.groupBy({ by: ["departmentId"], where: buildEmployeeWhere(without("kind"), now), _count: true });
   const kindCount = (kind: "INTERNAL" | "CLIENT") =>
     kindGroups.reduce((n, g) => n + (departments.find((d) => d.id === g.departmentId)?.kind === kind ? g._count : 0), 0);
   const sorted = [...departments.filter((d) => d.kind === "INTERNAL"), ...departments.filter((d) => d.kind === "CLIENT")];
@@ -268,12 +268,12 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
  * is exactly what clicking the tab lists. Missing kit needs per-person policy resolution, so it is the list's own
  * gaps cut (`listEmployees(base, true).total`), not a SQL count.
  */
-export async function employeeTabCounts(state: ListState): Promise<Record<string, number>> {
+export async function employeeTabCounts(state: ListState, now: Date = new Date()): Promise<Record<string, number>> {
+  // one clock for every count (the page passes the list's own), so "New this month" cannot straddle midnight against the rest
   const base = employeeTabBase(state);
-  const now = new Date(); // one clock for every count, so "New this month" cannot straddle midnight against the rest
   const entries = await Promise.all(EMPLOYEE_TABS.map(async (t): Promise<[string, number]> => {
     const tab = employeeTabState(base, false, t.key);
-    if (tab.gapsOnly) return [t.key, (await listEmployees(tab.state, true)).total];
+    if (tab.gapsOnly) return [t.key, (await listEmployees(tab.state, true, now)).total];
     return [t.key, await prisma.employee.count({ where: buildEmployeeWhere(tab.state, now) })];
   }));
   return Object.fromEntries(entries);

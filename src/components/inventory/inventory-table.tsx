@@ -16,7 +16,7 @@
  *     server's "comfortable" snapshot during hydration costs nothing.
  */
 
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AssetClass, Role } from "@prisma/client";
@@ -46,6 +46,7 @@ import { BulkDrawer, type BulkMode } from "./bulk-drawer";
 import { useListNavigation } from "@/components/patterns/list-navigation";
 import { FloatingBulkBar } from "@/components/patterns/floating-bulk-bar";
 import { LIST } from "@/components/patterns/list-styles";
+import { useFitsCard } from "@/components/patterns/use-fits-card";
 
 export interface ColumnDef {
   id: string;
@@ -90,27 +91,6 @@ export const INVENTORY_COLUMNS: ColumnDef[] = [
 const MODEL_MIN = 160;
 const CHECK_W = 36;
 const ACTIONS_W = 50;
-/** main's content width at 1280 px with the sidebar open and a classic scrollbar: what a table may assume before it measures. */
-const CONTENT_W_AT_XL = 970;
-
-/**
- * Whether a table of `minWidth` fits inside the card around it (`box`, the card's own wrapper; its 1 px borders
- * excluded). Before the first measurement it assumes the narrowest `xl` content width, so a table that might not
- * fit starts out scrolling inside its card rather than spilling past it.
- */
-function useFitsCard(box: React.RefObject<HTMLDivElement | null>, minWidth: number): boolean {
-  const [fits, setFits] = useState(minWidth <= CONTENT_W_AT_XL);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const measure = () => setFits(minWidth <= el.clientWidth - 2);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [box, minWidth]);
-  return fits;
-}
 
 /** Columns that only exist in repair mode — never offered to the column chooser. */
 export const REPAIR_ONLY_COLUMNS = ["stage", "down"] as const;
