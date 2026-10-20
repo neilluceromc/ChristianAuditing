@@ -204,7 +204,14 @@ test.describe("inventory list", () => {
     // "Status" also matches the sortable column header button in the table
     // below — scope to the facet trigger (aria-haspopup="dialog") to avoid a
     // strict-mode violation across the two matches.
-    const statusFacetTrigger = page.getByRole("button", { name: /^Status/ }).and(page.locator("[aria-haspopup]"));
+    // Phase 45 (spec §2.2): Status lives inside the "More filters" popover — opened first, retried until hydrated.
+    const more = page.getByRole("button", { name: /^More filters/ });
+    const morePanel = page.getByRole("dialog", { name: "More filters" });
+    await expect(async () => {
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await expect(morePanel).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+    const statusFacetTrigger = morePanel.getByRole("button", { name: /^Status/ }).and(page.locator("[aria-haspopup]"));
     await statusFacetTrigger.click();
     await page.getByRole("dialog", { name: /Filter by Status/ }).getByLabel(/^DEFECTIVE/i).check();
     await expect(page).not.toHaveURL(/status=/);
@@ -506,7 +513,8 @@ test.describe("employees & loadout", () => {
     // by loan" instead of plainly missing — BR-PH-0287 covers it, so only
     // headset counts. 2 missing -> back to 1.
     await expect(marites).toContainText("1 missing");
-    await page.getByRole("link", { name: "Policy gaps only" }).click();
+    // Phase 45 (spec §3.1): the "Missing kit" tab (gaps=1) replaced the Policy gaps only pill.
+    await page.getByRole("navigation", { name: "Filter employees" }).getByRole("link", { name: /^Missing kit/ }).click();
     await expect(page).toHaveURL(/gaps=1/);
     await expect(page.getByRole("row", { name: /Marites Bautista/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /Carlo Dizon/ })).toHaveCount(0); // Operations — no policy

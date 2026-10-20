@@ -391,7 +391,8 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     const row = page.getByRole("row", { name: new RegExp(name) });
     await expect(row).toBeVisible({ timeout: 20_000 });
     await expect(row).toContainText("Bluepeak Telecom");
-    await expect(row.getByText("Client", { exact: true })).toBeVisible();
+    // Phase 45 (spec §3.3): the Works for cell names the kind under the group — "Client account" (it was a pill).
+    await expect(row).toContainText("Client account");
     await expect(page.getByRole("row", { name: /EMP-0042/ })).toHaveCount(0);
 
     // EMP-0042 is Finance, an internal department: it shows under no filter with no pill.
@@ -399,6 +400,7 @@ test.describe("Phase 37 — notes, IT setup, clients and the Works for filter", 
     const marites = page.getByRole("row", { name: /EMP-0042/ });
     await expect(marites).toBeVisible({ timeout: 20_000 });
     await expect(marites).toContainText("Finance");
-    await expect(marites.getByText("Client", { exact: true })).toHaveCount(0);
+    await expect(marites).toContainText("Internal department");
+    await expect(marites).not.toContainText("Client account");
   });
 });

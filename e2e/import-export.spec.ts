@@ -575,7 +575,8 @@ test.describe.serial("the employee import wizard", () => {
     await page.goto("/employees?q=Marites");
     const row = page.getByRole("row", { name: /EMP-0042/ });
     await expect(row).toContainText("Senior Accountant");
-    await expect(row).toContainText("ACTIVE");
+    // Phase 45 (spec §3.3): the Employment cell reads its label ("Active"), not the enum.
+    await expect(row).toContainText("Active");
   });
 
   test("a CREATE may set employment straight, and stamps the offboarding anchor with it", async ({ page }) => {
@@ -658,7 +659,14 @@ test.describe("export", () => {
     // Phase 30 (plan P-8): the year chips folded into one Purchased menu whose items read
     // "{year} · {count}". The `\d{4}` filter skips "Any year" and the "No date" item, which the
     // imports above bring into existence.
-    await page.locator('button[aria-haspopup="menu"]').filter({ hasText: /^Purchased/ }).click();
+    // Phase 45 (spec §2.2): Purchased moved into the "More filters" popover (retried until it has hydrated).
+    const more = page.getByRole("button", { name: /^More filters/ });
+    const morePanel = page.getByRole("dialog", { name: "More filters" });
+    await expect(async () => {
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await expect(morePanel).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+    await morePanel.locator('button[aria-haspopup="menu"]').filter({ hasText: /^Purchased/ }).click();
     const chip = page.getByRole("menuitem", { name: /^\d{4} · \d+$/ }).first();
     await expect(chip).toBeVisible({ timeout: 30_000 });
     const chipCount = Number((await chip.innerText()).split("·")[1].trim());
@@ -687,7 +695,8 @@ test.describe("export", () => {
 
     await page.goto("/employees");
     const allPeople = await screenCount(page, PEOPLE);
-    await page.getByRole("link", { name: "Policy gaps only" }).click();
+    // Phase 45 (spec §3.1): the "Missing kit" tab (gaps=1) replaced the Policy gaps only pill.
+    await page.getByRole("navigation", { name: "Filter employees" }).getByRole("link", { name: /^Missing kit/ }).click();
     await expect(page).toHaveURL(/gaps=1/, { timeout: 30_000 });
     const gapsPeople = await screenCount(page, PEOPLE);
     expect(gapsPeople).toBeGreaterThan(0);

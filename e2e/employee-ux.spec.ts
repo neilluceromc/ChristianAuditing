@@ -134,6 +134,19 @@ const IT = "it@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 
 /**
+ * Phase 45: every body cell's text under the named column header, top to bottom — by header, never a fixed
+ * index (IT's list leads with a checkbox column, so positions shift by role).
+ */
+async function columnTexts(page: Page, header: string): Promise<string[]> {
+  await expect(page.locator("tbody tr").first()).toBeVisible();
+  const idx = await page
+    .locator("thead th")
+    .evaluateAll((ths, h) => ths.findIndex((th) => (th.textContent ?? "").trim().startsWith(h)), header);
+  expect(idx, `a "${header}" column`).toBeGreaterThanOrEqual(0);
+  return page.locator(`tbody tr td:nth-child(${idx + 1})`).allInnerTexts();
+}
+
+/**
  * Phase 37 (spec §5): Add employee is three steps — Next past Details, wait for Equipment to load its
  * lines, Next again to Check & create. Copied per file (house rule: no helpers across spec files).
  */
@@ -350,8 +363,8 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
     // toggleSort keeps the old primary as a tiebreak: sort=loadout,name.
     await expect(page).toHaveURL(/sort=loadout/);
 
-    // Third column (Employee · Department · Loadout · Items · …).
-    const cells = await page.locator("tbody tr td:nth-child(3)").allInnerTexts();
+    // Phase 45: the Loadout column, found by its header (IT's list leads with a checkbox column).
+    const cells = await columnTexts(page, "Loadout");
     const firstNoPolicy = cells.findIndex((c) => c.trim() === "no policy");
     const lastMissing = cells.map((c) => /missing/.test(c)).lastIndexOf(true);
     // orderByLoadout, ascending: most required gaps first, `null` (no policy)
@@ -377,8 +390,10 @@ test.describe("Phase 29 — the employee area obeys the laws", () => {
 
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(financeCount);
-    const departments = await page.locator("tbody tr td:nth-child(2)").allInnerTexts();
-    expect(departments.map((d) => d.trim())).toEqual(Array(financeCount).fill("Finance"));
+    // Phase 45: Works for is the group's name over its kind ("Internal department"); the name is the first line.
+    const departments = await columnTexts(page, "Works for");
+    // (the kind line carries a screen-reader-only " · " before it, so either break ends the name)
+    expect(departments.map((d) => d.split(/\n|·/)[0].trim())).toEqual(Array(financeCount).fill("Finance"));
 
     // The × inside the field: the search comes off without retyping the URL —
     // and off the BOX too. A search change is a soft navigation, so the

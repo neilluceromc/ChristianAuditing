@@ -109,6 +109,16 @@ async function waitForHydration(target: Locator) {
  */
 async function facetCounts(page: Page, facet: string): Promise<Record<string, string>> {
   const trigger = page.locator('button[aria-haspopup="dialog"]').filter({ hasText: facet });
+  // Phase 45 (spec §2.2): on /inventory every facet but Category sits inside the "More filters" popover, which
+  // renders its facets only while open. Other lists (offboarding's Progress, Due) have no such popover.
+  const more = page.getByRole("button", { name: /^More filters/ });
+  if ((await trigger.count()) === 0 && (await more.count()) > 0) {
+    const panel = page.getByRole("dialog", { name: "More filters" });
+    await expect(async () => {
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await expect(panel).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+  }
   await waitForHydration(trigger);
   await trigger.click();
   const dropdown = page.getByRole("dialog", { name: `Filter by ${facet}` });
@@ -485,9 +495,13 @@ test.describe("it navigation sweep (Phase 25)", () => {
     await page.waitForURL(/sort=-joinedAt/);
     const backRow = page.locator("tbody tr").first();
     await waitForHydration(backRow);
-    // The Department cell — a plain cell, no link of its own: the ROW is what
-    // carries the click.
-    await backRow.locator("td").nth(1).click();
+    // The Works for cell — a plain cell, no link of its own: the ROW is what
+    // carries the click. Phase 45: found by its header, since IT's list leads with a checkbox column.
+    const worksForIdx = await page
+      .locator("thead th")
+      .evaluateAll((ths) => ths.findIndex((th) => (th.textContent ?? "").trim().startsWith("Works for")));
+    expect(worksForIdx, 'a "Works for" column').toBeGreaterThanOrEqual(0);
+    await backRow.locator("td").nth(worksForIdx).click();
     await page.waitForURL(`**/employees/${nina.id}`);
     await expect(page.getByRole("heading", { name: "Nina Robles", level: 1 })).toBeVisible();
     await expectNoSeriousAxe(page);
