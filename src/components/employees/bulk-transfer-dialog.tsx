@@ -55,6 +55,8 @@ export function BulkTransferDialog({
   function submit() {
     run(
       async () => {
+        // cleared first, so a stale blocked list never sits under a new error
+        setBlocked([]);
         const res = await bulkTransferEmployees({ ids, toDepartmentId, effectiveAt, note });
         setBlocked(!res.ok && res.blocked ? res.blocked : []);
         return res;

@@ -105,6 +105,13 @@ describe("bulkTransferSchema", () => {
     expect(res.success && res.data.ids).toEqual(["e1", "e2"]);
   });
 
+  it("refuses a raw payload over twice the cap before the dedupe, and takes one at it", () => {
+    const huge = bulkTransferSchema.safeParse({ ...base, ids: Array.from({ length: 401 }, () => "e1") });
+    expect(!huge.success && huge.error.issues[0]).toMatchObject({ path: ["ids"], message: "Pick no more than 200 people" });
+    const atLimit = bulkTransferSchema.safeParse({ ...base, ids: Array.from({ length: 400 }, () => "e1") });
+    expect(atLimit.success && atLimit.data.ids).toEqual(["e1"]);
+  });
+
   it("refuses a malformed or future date with the single transfer's messages", () => {
     const bad = bulkTransferSchema.safeParse({ ...base, effectiveAt: "01/10/2026" });
     expect(!bad.success && bad.error.issues[0].message).toBe("Use the date picker");

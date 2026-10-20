@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BULK_MAX } from "./inventory-list";
 import { reasonOptional } from "./reason";
 import { dateStr, todayStr } from "./transfer-schema";
 
@@ -8,8 +9,10 @@ import { dateStr, todayStr } from "./transfer-schema";
  * title, so the input has no title; `note` is stored as each transfer row's reason, as the single transfer does.
  */
 export const bulkTransferSchema = z.object({
-  // repeated ids collapse, so a person is never transferred twice in one go
-  ids: z.array(z.string().min(1)).transform((ids) => [...new Set(ids)]),
+  // A huge payload is refused before the dedupe (twice the cap leaves room for repeats; the exact cap is the
+  // action's `bulkCountMessage`). Repeated ids then collapse, so a person is never transferred twice in one go.
+  ids: z.array(z.string().min(1)).max(BULK_MAX * 2, `Pick no more than ${BULK_MAX} people`)
+    .transform((ids) => [...new Set(ids)]),
   toDepartmentId: z.string().min(1, "Pick a department"),
   effectiveAt: dateStr,
   note: reasonOptional({ max: 300 }).default(""),

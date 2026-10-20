@@ -203,8 +203,11 @@ export async function bulkTransferEmployees(
   try {
     // Sequential per-person writes (3 round trips each, up to BULK_MAX people): the long-transaction budget the
     // other bulk and batch writers use, not Prisma's 5 s default.
+    // Written in id order, not page order: two overlapping bulk transfers then take their row locks in the same
+    // order, so they queue rather than deadlock. (The blocked list above keeps the page order.)
+    const writeOrder = [...people].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     await prisma.$transaction(async (tx) => {
-      for (const employee of people) {
+      for (const employee of writeOrder) {
         await recordTransfer(tx, {
           employee, toDepartment: dest, toTitle: employee.title, effectiveAt, reason: d.note || null, actor: user,
           raceMessage: `Someone else just transferred ${employee.name} — reload and try again.`,
