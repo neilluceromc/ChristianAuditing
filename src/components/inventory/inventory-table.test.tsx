@@ -26,7 +26,7 @@ const row = (over: Partial<AssetRow>): AssetRow => ({
 
 const state: ListState = { q: "", filters: {}, sort: [], page: 1, per: 25 };
 
-const table = (rows: AssetRow[], visible = ["serial", "category", "assigned"], canMutate = true) =>
+const table = (rows: AssetRow[], visible = ["serial", "category", "assigned"], canMutate = true, repairMode = false) =>
   renderToStaticMarkup(
     <InventoryTable
       rows={rows}
@@ -41,8 +41,12 @@ const table = (rows: AssetRow[], visible = ["serial", "category", "assigned"], c
       recentPeople={[]}
       sortHrefs={{}}
       today="2026-10-20"
+      repairMode={repairMode}
     />,
   );
+
+/** The card's (the table wrapper's) class list. */
+const cardClass = (html: string) => html.match(/<div class="([^"]*list-sticky-head[^"]*)"/)?.[1].split(/\s+/) ?? [];
 
 /** The text of each header cell, in order. */
 const headers = (html: string) =>
@@ -70,6 +74,23 @@ describe("InventoryTable", () => {
     expect(html).toContain("height:var(--list-head-h)");
   });
 
+  it("lets the default set's card stop clipping from 1280 px (so the head sticks), its minimum fitting 1280 px", () => {
+    const html = table([row({})]);
+    expect(html).toContain("--inventory-table-min:954px");
+    expect(cardClass(html)).toContain("xl:overflow-visible");
+    expect(cardClass(html)).not.toContain("xl:overflow-auto");
+  });
+
+  it("keeps a wider view (Repairs, Registration shown) scrolling inside its card, so it never runs past it", () => {
+    for (const html of [
+      table([row({})], undefined, true, true),
+      table([row({})], ["serial", "category", "assigned", "registration"]),
+    ]) {
+      expect(cardClass(html)).toContain("xl:overflow-auto");
+      expect(cardClass(html)).not.toContain("xl:overflow-visible");
+    }
+  });
+
   it("keeps the Status reason in the cell's one span.block, collapsed (display none) in Dense", () => {
     const html = table([row({ attention: { kind: "queued", label: "queued APR-2041", severity: 2000 } })]);
     const blocks = html.match(/<span[^>]*class="[^"]*\bblock\b[^"]*"[^>]*>queued APR-2041<\/span>/g) ?? [];
@@ -77,7 +98,7 @@ describe("InventoryTable", () => {
     expect(blocks[0]).toContain("dense:hidden");
     expect(blocks[0]).toMatch(/id="[^"]+-reason-a1"/);
     // the 6 px attention dot shows only in Dense
-    expect(html).toContain("hidden size-1.5 shrink-0 rounded-full dense:inline-block");
+    expect(html).toMatch(/<span aria-hidden="true" class="(?:[^"]*\s)?dense:inline-block(?:\s[^"]*)?"/);
     // outside Dense (the server's snapshot) the row carries no title or description
     expect(html).not.toMatch(/<tr[^>]*aria-describedby/);
   });

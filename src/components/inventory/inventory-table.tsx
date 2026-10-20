@@ -16,7 +16,7 @@
  *     server's "comfortable" snapshot during hydration costs nothing.
  */
 
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AssetClass, Role } from "@prisma/client";
@@ -60,9 +60,15 @@ export interface ColumnDef {
  *
  * The table lays out fixed (`table-fixed`): every column but Model keeps exactly its width (padding included),
  * and Model takes the rest, truncating. A minimum table width (the shown columns plus MODEL_MIN) keeps Model
- * readable: below it the card scrolls sideways (under 1280 px) instead of squeezing Model away. The default set
- * is 794 px plus Model's 160, so it fits main's content width at 1280 px with the sidebar open (about 970 px).
- * Each cell's content is sized (or truncates) to fit its width, since a fixed column never grows.
+ * readable; when the card is narrower than that, the card scrolls sideways instead of squeezing Model away.
+ * The default set is 794 px plus Model's 160 = 954 px, which fits main's content width at 1280 px with the
+ * sidebar open (about 970 px). Each cell's content is sized (or truncates) to fit its width, since a fixed
+ * column never grows.
+ *
+ * From 1280 px the card is normally `overflow-visible` (so the head can stick to the window), which would let a
+ * wider table run past the card. So the card keeps scrolling sideways at every width whenever the table's
+ * minimum does not fit it (`fitsCard`): measured after hydration, and assumed from the 1280 px width before
+ * that, so a wide view (Repairs, Registration shown) never overflows the card, even on first paint.
  */
 export const INVENTORY_COLUMNS: ColumnDef[] = [
   { id: "tag", label: "Tag", width: 116, sortKey: "tag" },
@@ -84,6 +90,27 @@ export const INVENTORY_COLUMNS: ColumnDef[] = [
 const MODEL_MIN = 160;
 const CHECK_W = 36;
 const ACTIONS_W = 50;
+/** main's content width at 1280 px with the sidebar open and a classic scrollbar: what a table may assume before it measures. */
+const CONTENT_W_AT_XL = 970;
+
+/**
+ * Whether a table of `minWidth` fits inside the card around it (`box`, the card's own wrapper; its 1 px borders
+ * excluded). Before the first measurement it assumes the narrowest `xl` content width, so a table that might not
+ * fit starts out scrolling inside its card rather than spilling past it.
+ */
+function useFitsCard(box: React.RefObject<HTMLDivElement | null>, minWidth: number): boolean {
+  const [fits, setFits] = useState(minWidth <= CONTENT_W_AT_XL);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setFits(minWidth <= el.clientWidth - 2);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [box, minWidth]);
+  return fits;
+}
 
 /** Columns that only exist in repair mode — never offered to the column chooser. */
 export const REPAIR_ONLY_COLUMNS = ["stage", "down"] as const;
@@ -290,6 +317,8 @@ export function InventoryTable({
     return !(HIDEABLE_COLUMNS as readonly string[]).includes(c.id) || visible.includes(c.id);
   });
   const tableMin = columns.reduce((sum, c) => sum + (c.width ?? MODEL_MIN), 0) + (canMutate ? CHECK_W + ACTIONS_W : 0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const fitsCard = useFitsCard(boxRef, tableMin);
 
   function onSort(sortKey: string) {
     navigate(sortHrefs[sortKey]);
@@ -322,8 +351,13 @@ export function InventoryTable({
   const active = dialog?.row ?? null;
 
   return (
-    <div className="flex flex-col" style={{ "--inventory-table-min": `${tableMin}px` } as React.CSSProperties}>
-      <Table striped stickyHeader className="[&>table]:table-fixed [&>table]:min-w-(--inventory-table-min)">
+    <div ref={boxRef} className="flex flex-col" style={{ "--inventory-table-min": `${tableMin}px` } as React.CSSProperties}>
+      <Table
+        striped
+        stickyHeader
+        // too wide for the card: keep scrolling inside it from 1280 px too (the head then scrolls with the rows)
+        className={cn("[&>table]:table-fixed [&>table]:min-w-(--inventory-table-min)", !fitsCard && "xl:overflow-auto")}
+      >
       <THead>
         <Tr style={{ height: "var(--list-head-h)" }}>
           {canMutate && (

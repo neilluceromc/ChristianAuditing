@@ -11,25 +11,35 @@ import { ResubmitDialog } from "./resubmit-dialog";
 /**
  * Phase 35 (spec §3.1/§3.4): the list's Registration cell — the pill, and for a needs-correction row what
  * Finance flagged, with Edit (when the viewer may edit) and Mark corrected… (when the viewer manages the class).
+ *
+ * Phase 45 (spec §4.5): in the Dense row size (`dense:` classes) it is one line — the pill, then "not
+ * capitalised" or a truncated "Finance flagged: …" summary with the whole of it in `title`. The flagged block
+ * and its actions are hidden there; the record (one click on the row) still offers Edit and Mark corrected….
  */
 export function RegistrationCell({ row, canEdit, canMutate }: { row: AssetRow; canEdit: boolean; canMutate: boolean }) {
   const [open, setOpen] = useState(false);
   const flagged = row.reg === "needs-correction";
   const notCapitalised = row.reg === "registered" && row.regNotCapitalised;
+  const by = [row.regBy, row.regAt].filter(Boolean).join(", ");
+  const flaggedSummary = [
+    `Finance flagged: ${row.regItems.length > 0 ? row.regItems.join(", ") : "see the record"}`,
+    row.regNote ? `“${row.regNote}”` : null,
+    by ? `— ${by}` : null,
+  ].filter(Boolean).join(" ");
   return (
-    <div className="flex flex-col items-start gap-1">
+    <div className="flex min-w-0 flex-col items-start gap-1 dense:flex-row dense:items-center dense:gap-1.5">
       {/* The pill carries the state alone; "not capitalised" sits on its own muted line under it (like
           the Status cell's attention reason) so the column stays narrow. The sr-only " · " keeps the
           text "Fully registered · not capitalised" for a screen reader and for the row's text. */}
-      <StatusPill value={row.reg} label={regLabel(row.reg, false)} ns="registration" />
+      <StatusPill value={row.reg} label={regLabel(row.reg, false)} ns="registration" className="shrink-0" />
       {notCapitalised && (
         <>
           <span className="sr-only"> · </span>
-          <span className="block text-[10.5px] leading-tight text-fg-muted">not capitalised</span>
+          <span className="block min-w-0 truncate text-[10.5px] leading-tight text-fg-muted dense:text-[12px]">not capitalised</span>
         </>
       )}
       {flagged && (
-        <div className="flex min-w-[12rem] max-w-[18rem] flex-col gap-1 whitespace-normal text-[11px] leading-snug text-fg-secondary">
+        <div className="flex min-w-[12rem] max-w-[18rem] flex-col gap-1 whitespace-normal text-[11px] leading-snug text-fg-secondary dense:hidden">
           {row.regItems.length > 0 && (
             <div>
               <span className="font-medium">Finance flagged:</span>
@@ -53,6 +63,12 @@ export function RegistrationCell({ row, canEdit, canMutate }: { row: AssetRow; c
             </div>
           )}
         </div>
+      )}
+      {flagged && (
+        // Dense only: the flagged block above, as one truncated line
+        <span className="hidden min-w-0 truncate text-[12px] text-fg-muted dense:inline" title={flaggedSummary}>
+          {flaggedSummary}
+        </span>
       )}
       {flagged && canMutate && (
         // outside the row's click handler: nothing inside the dialog may open the record

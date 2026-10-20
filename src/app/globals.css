@@ -136,7 +136,14 @@
 /* Table `stickyHeader`: the head pins under whatever sits above it. A list's sticky toolbar measures its own
    height into --list-sticky-top; with none, the head pins to the top of the window. From 1280 px the card no
    longer clips (overflow visible), so the head's colour sits on its cells and the four corner cells round
-   themselves to the card's inner radius: neither the head nor a tinted last row shows past the corners. */
+   themselves to the card's inner radius: neither the head nor a tinted last row shows past the corners. The table
+   uses the separated border model for that (border-radius on cells is undefined under border-collapse: collapse,
+   and Firefox ignores it); with no spacing it draws the same, since the header's bottom rule is on its cells and
+   striped rows have no borders. */
+.list-sticky-head table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
 .list-sticky-head thead {
   top: var(--list-sticky-top, 0px);
   background-color: transparent;
