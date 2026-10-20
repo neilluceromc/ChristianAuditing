@@ -47,7 +47,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
       data: {
         assetId, kind,
         fileName: stored.fileName,
-        path: stored.relPath, checksum: stored.checksum,
+        path: stored.relPath, checksum: stored.checksum, size: stored.size,
         uploadedById: user.id,
       },
     });
@@ -87,7 +87,7 @@ export async function uploadBatchDocument(formData: FormData): Promise<ActionRes
   const created = await prisma.$transaction(async (tx) => {
     for (const a of assets) {
       const doc = await tx.assetDocument.create({
-        data: { assetId: a.id, kind, fileName: stored.fileName, path: stored.relPath, checksum: stored.checksum, uploadedById: user.id },
+        data: { assetId: a.id, kind, fileName: stored.fileName, path: stored.relPath, checksum: stored.checksum, size: stored.size, uploadedById: user.id },
       });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: a.id,

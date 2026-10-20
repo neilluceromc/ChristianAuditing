@@ -37,11 +37,11 @@ export function contentDisposition(fileName: string): string {
 }
 
 /** Writes under uploads/<relDir>/<timestamp>-<safeName>; returns the relative posix path the row stores. */
-export async function storeUpload(relDir: string, file: File): Promise<{ relPath: string; checksum: string; fileName: string }> {
+export async function storeUpload(relDir: string, file: File): Promise<{ relPath: string; checksum: string; fileName: string; size: number }> {
   const bytes = Buffer.from(await file.arrayBuffer());
   const checksum = createHash("sha256").update(bytes).digest("hex");
   const safeName = path.basename(file.name).replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
   const relPath = path.posix.join(relDir, `${Date.now()}-${safeName}`);
   await writeObject(relPath, bytes, UPLOAD_TYPES[path.extname(safeName).toLowerCase()] ?? "application/octet-stream");
-  return { relPath, checksum, fileName: path.basename(file.name) };
+  return { relPath, checksum, fileName: path.basename(file.name), size: bytes.length };
 }

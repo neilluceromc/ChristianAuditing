@@ -178,6 +178,7 @@ model User {
   purchaseRecordsCreated   PurchaseRecord[]        @relation("purchaseRecordsCreated")
   employeeNotes            EmployeeNote[]
   crisConversations        CrisConversation[]
+  assetNotesAuthored       AssetNote[]             @relation("assetNoteAuthor")
 }
 
 model UserPreference {
@@ -421,6 +422,28 @@ model EmployeeNote {
 
 // ── Assets ────────────────────────────────────────────────────────────
 
+/// Phase 47 (spec §4.3): the shared note thread on an asset, one level of replies. Append-only:
+/// no code path updates or deletes a row except stamping resolvedAt/resolvedById on a root note.
+model AssetNote {
+  id           String      @id @default(cuid())
+  assetId      String
+  asset        Asset       @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  parentId     String?
+  parent       AssetNote?  @relation("assetNoteReplies", fields: [parentId], references: [id], onDelete: Restrict)
+  replies      AssetNote[] @relation("assetNoteReplies")
+  authorId     String?
+  author       User?       @relation("assetNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  /// Denormalized display name, survives user deletion.
+  authorLabel  String
+  body         String      @db.Text
+  resolvedAt   DateTime?
+  resolvedById String?
+  createdAt    DateTime    @default(now())
+
+  @@index([assetId, createdAt])
+  @@index([parentId])
+}
+
 model Asset {
   id                   String           @id @default(cuid())
   tag                  String           @unique // BR-LT-0148
@@ -506,6 +529,7 @@ model Asset {
   purchaseRecord       PurchaseRecord?  @relation(fields: [purchaseRecordId], references: [id], onDelete: Restrict)
   secrets              AssetSecret[]
   documents            AssetDocument[]
+  assetNotes           AssetNote[]
   reservations         Reservation[]
   approvals            Approval[]
   createdAt            DateTime         @default(now())
@@ -554,6 +578,8 @@ model AssetDocument {
   fileName     String
   path         String // relative path under uploads/ volume
   checksum     String
+  /// Phase 47: bytes on disk; NULL on rows uploaded before it.
+  size         Int?
   signed       Boolean  @default(false)
   uploadedById String?
   uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
@@ -722,6 +748,10 @@ model AuditEntry {
   entityId   String
   action     String // "create" | "update" | "SECRET_READ" | ...
   diff       Json? // { field: { from, to } } per changed field
+  /// Phase 47: "web" | "import" | "cris" | "system"; NULL on rows written before it.
+  source     String?
+  /// Phase 47: the note, comment or reason that came with the action.
+  reason     String?
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
@@ -1062,6 +1092,8 @@ model CrisConversation {
   title     String?
   /// What the person has picked in the box so far (person, slot, spare), carried between turns.
   picks     Json          @default("{}")
+  /// Phase 47: sign-out stamps this; the panel shows only what came after it. Messages are kept for usage counts.
+  clearedAt DateTime?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   messages  CrisMessage[]

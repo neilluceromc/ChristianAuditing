@@ -60,4 +60,9 @@ describe("storeUpload", () => {
     expect(Buffer.from(bytes).equals(Buffer.from([1, 2, 3]))).toBe(true);
     expect(contentType).toBe(type);
   });
+
+  it("returns the byte length as size", async () => {
+    const out = await storeUpload("lots/1", new File([new Uint8Array([1, 2, 3, 4, 5])], "scan.pdf"));
+    expect(out.size).toBe(5);
+  });
 });
