@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  FIN_FILTERS, REGISTRATION_FIELDS, REG_STATES, fieldLabels, finWhere, pageAcross, parseFin, parseRegState,
+  FIN_FILTERS, REGISTRATION_FIELDS, REG_STATES, fieldLabels, finWhere, parseFin, parseRegState,
   regLabel, regWhere, registrationState, returnSummary, shouldReopen,
 } from "./registration";
 
@@ -61,18 +61,6 @@ describe("fin filters", () => {
     expect(finWhere("approved")).toEqual({ ...regWhere("registered"), financeNotCapitalised: false });
     expect(finWhere("not-capitalised")).toEqual({ ...regWhere("registered"), financeNotCapitalised: true });
     expect(finWhere("no-cost")).toEqual({ cost: null });
-  });
-});
-
-describe("pageAcross", () => {
-  it("a page entirely inside the first group", () => {
-    expect(pageAcross(30, 0, 25)).toEqual({ first: { skip: 0, take: 25 }, rest: { skip: 0, take: 0 } });
-  });
-  it("a page straddling both groups", () => {
-    expect(pageAcross(30, 25, 25)).toEqual({ first: { skip: 25, take: 5 }, rest: { skip: 0, take: 20 } });
-  });
-  it("a page entirely in the rest", () => {
-    expect(pageAcross(30, 50, 25)).toEqual({ first: { skip: 0, take: 0 }, rest: { skip: 20, take: 25 } });
   });
 });
 

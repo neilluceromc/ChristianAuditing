@@ -31,8 +31,10 @@ export const SOON_MONTHS = 6;
 export interface LifeStage {
   key: "notstarted" | "mid" | "soon" | "full";
   text: string;
-  /** 0–100, rounded; null when the asset is not depreciating */
+  /** 0–100, rounded, for display; null when the asset is not depreciating */
   usedPct: number | null;
+  /** months used ÷ life, unrounded (0–1): what the Life sort orders by; null when the asset is not depreciating */
+  usedRatio: number | null;
 }
 
 /**
@@ -41,7 +43,7 @@ export interface LifeStage {
  * as of the result's month while the asset is still depreciating.
  */
 export function lifeStage(r: DepResult | null, reg: RegState, notCapitalised: boolean, costC: number | null): LifeStage {
-  const off = (text: string): LifeStage => ({ key: "notstarted", text, usedPct: null });
+  const off = (text: string): LifeStage => ({ key: "notstarted", text, usedPct: null, usedRatio: null });
   if (notCapitalised) return off("Expensed, not depreciated");
   if (costC === null || r === null) return off("No cost yet");
   switch (r.state) {
@@ -49,7 +51,7 @@ export function lifeStage(r: DepResult | null, reg: RegState, notCapitalised: bo
       return off(reg !== "registered" || r.startMonth === null ? "Starts when approved" : `Starts ${monthLabel(r.startMonth)}`);
     case "no-policy": return off("No depreciation policy");
     case "bad-salvage": return off("Salvage is not below cost");
-    case "fully-depreciated": return { key: "full", text: "Fully depreciated", usedPct: 100 };
+    case "fully-depreciated": return { key: "full", text: "Fully depreciated", usedPct: 100, usedRatio: 1 };
     case "depreciating": {
       const life = r.policy!.lifeMonths;
       const used = r.monthly ? Math.min(life, Math.round(r.accumulated / r.monthly)) : 0;
@@ -58,13 +60,20 @@ export function lifeStage(r: DepResult | null, reg: RegState, notCapitalised: bo
         key: left <= SOON_MONTHS ? "soon" : "mid",
         text: `${used} / ${life} mo · ${left} left`,
         usedPct: Math.round((used / life) * 100),
+        usedRatio: used / life,
       };
     }
   }
 }
 
-export function matchesLife(stage: LifeStage, life: LifeFilter | null): boolean {
-  return life === null || stage.key === life;
+/**
+ * The Life select. "Not depreciating yet" leaves out expensed (not-capitalised) assets: they never will, and they have
+ * their own Not capitalised tab. Their life text stays "Expensed, not depreciated".
+ */
+export function matchesLife(row: { lifeStage: LifeStage; notCapitalised: boolean }, life: LifeFilter | null): boolean {
+  if (life === null) return true;
+  if (life === "notstarted" && row.notCapitalised) return false;
+  return row.lifeStage.key === life;
 }
 
 /**
@@ -87,7 +96,7 @@ const descNullsLast = (a: number | null, b: number | null) => (a === null ? (b =
 export function sortFinanceRows<T extends Sortable>(rows: readonly T[], sort: FinanceSort): T[] {
   const cmp: (a: T, b: T) => number =
     sort === "tag" ? byTag
-    : sort === "life" ? (a, b) => descNullsLast(a.lifeStage.usedPct, b.lifeStage.usedPct) || byTag(a, b)
+    : sort === "life" ? (a, b) => descNullsLast(a.lifeStage.usedRatio, b.lifeStage.usedRatio) || byTag(a, b)
     : (a, b) => descNullsLast(a.result?.bookValue ?? null, b.result?.bookValue ?? null) || byTag(a, b);
   return [...rows].sort(cmp);
 }
@@ -102,20 +111,19 @@ export interface CategoryTile {
 }
 
 /**
- * Spec §3 item 3: "All categories" plus one tile per category. A class with fewer tiles than `columns` keeps them all;
- * otherwise the tile count is floored to a multiple of `columns` and the smallest categories (fewest assets, then
- * least book value, then name) fold into one "Other" tile — which therefore always holds at least two. Tiles are in
- * that same order, largest first. `rows` is one per asset; `categories` adds the class's categories that hold none.
- * `selected` is `?category=`: an id, "other", or null for All. A folded id lights Other.
+ * Spec §3 item 3: "All categories" plus one tile per category that holds assets (an empty category gets none, so it can
+ * never push a real one into Other). A class with fewer tiles than `columns` keeps them all; otherwise the tile count
+ * is floored to a multiple of `columns` and the smallest categories (fewest assets, then least book value, then name)
+ * fold into one "Other" tile, which therefore always holds at least two. Tiles are in that same order, largest first.
+ * `rows` is one per asset. `selected` is `?category=`: an id, "other", or null for All. A folded id lights Other; an
+ * id with no assets here, or "other" with nothing folded, lights All (the caller reads the selection back from `on`).
  */
 export function categoryTiles(
   rows: ReadonlyArray<{ categoryId: string; categoryName: string; costC: number | null; bookC: number | null }>,
   selected: string | null,
   columns = 6,
-  categories: ReadonlyArray<{ id: string; name: string }> = [],
 ): CategoryTile[] {
   const groups = new Map<string, { id: string; name: string; count: number; costC: number; bookC: number }>();
-  for (const c of categories) groups.set(c.id, { id: c.id, name: c.name, count: 0, costC: 0, bookC: 0 });
   const all = { count: 0, costC: 0, bookC: 0 };
   for (const r of rows) {
     const g = groups.get(r.categoryId) ?? { id: r.categoryId, name: r.categoryName, count: 0, costC: 0, bookC: 0 };
@@ -129,9 +137,10 @@ export function categoryTiles(
   const kept = fold ? ranked.slice(0, Math.floor(tilesWanted / columns) * columns - 2) : ranked;
   const folded = fold ? ranked.slice(kept.length) : [];
   const foldedIds = new Set(folded.map((g) => g.id));
+  const sel = selected === "other" ? (folded.length ? selected : null) : selected !== null && groups.has(selected) ? selected : null;
   const tiles: CategoryTile[] = [
-    { id: "all", name: "All categories", ...all, on: selected === null },
-    ...kept.map((g) => ({ ...g, on: selected === g.id })),
+    { id: "all", name: "All categories", ...all, on: sel === null },
+    ...kept.map((g) => ({ ...g, on: sel === g.id })),
   ];
   if (folded.length) {
     tiles.push({
@@ -139,7 +148,7 @@ export function categoryTiles(
       count: folded.reduce((a, g) => a + g.count, 0),
       costC: folded.reduce((a, g) => a + g.costC, 0),
       bookC: folded.reduce((a, g) => a + g.bookC, 0),
-      on: selected === "other" || (selected !== null && foldedIds.has(selected)),
+      on: sel === "other" || (sel !== null && foldedIds.has(sel)),
     });
   }
   return tiles;

@@ -32,7 +32,7 @@ describe("parseLife / parseSort", () => {
 
 describe("lifeStage (spec §3 item 6: Life used)", () => {
   it("mid-life reads used / life and months left", () => {
-    expect(lifeStage(started(13), "registered", false, COST)).toEqual({ key: "mid", text: "14 / 36 mo · 22 left", usedPct: 39 });
+    expect(lifeStage(started(13), "registered", false, COST)).toEqual({ key: "mid", text: "14 / 36 mo · 22 left", usedPct: 39, usedRatio: 14 / 36 });
   });
   it("6 months or less left is 'soon'; 7 left is still mid", () => {
     expect(lifeStage(started(29), "registered", false, COST)).toMatchObject({ key: "soon", text: "30 / 36 mo · 6 left" });
@@ -40,30 +40,30 @@ describe("lifeStage (spec §3 item 6: Life used)", () => {
     expect(lifeStage(started(28), "registered", false, COST)).toMatchObject({ key: "mid", text: "29 / 36 mo · 7 left" });
   });
   it("fully depreciated, including the month the last charge lands", () => {
-    expect(lifeStage(started(40), "registered", false, COST)).toEqual({ key: "full", text: "Fully depreciated", usedPct: 100 });
-    expect(lifeStage(started(35), "registered", false, COST)).toEqual({ key: "full", text: "Fully depreciated", usedPct: 100 });
+    expect(lifeStage(started(40), "registered", false, COST)).toEqual({ key: "full", text: "Fully depreciated", usedPct: 100, usedRatio: 1 });
+    expect(lifeStage(started(35), "registered", false, COST)).toEqual({ key: "full", text: "Fully depreciated", usedPct: 100, usedRatio: 1 });
   });
   it("Review Focus 1: not yet approved (with a cost) starts when approved", () => {
     for (const reg of ["with-finance", "needs-correction", "awaiting-it"] as const) {
-      expect(lifeStage(depreciate(COST, null, P36, AS_OF), reg, false, COST)).toEqual({ key: "notstarted", text: "Starts when approved", usedPct: null });
+      expect(lifeStage(depreciate(COST, null, P36, AS_OF), reg, false, COST)).toEqual({ key: "notstarted", text: "Starts when approved", usedPct: null, usedRatio: null });
     }
   });
   it("approved with a purchase date still ahead starts that month", () => {
     expect(lifeStage(depreciate(COST, AS_OF + 2, P36, AS_OF), "registered", false, COST))
-      .toEqual({ key: "notstarted", text: "Starts December 2026", usedPct: null });
+      .toEqual({ key: "notstarted", text: "Starts December 2026", usedPct: null, usedRatio: null });
   });
   it("Review Focus 1: not capitalised is expensed, not depreciated", () => {
-    expect(lifeStage(null, "registered", true, COST)).toEqual({ key: "notstarted", text: "Expensed, not depreciated", usedPct: null });
-    expect(lifeStage(null, "registered", true, null)).toEqual({ key: "notstarted", text: "Expensed, not depreciated", usedPct: null });
+    expect(lifeStage(null, "registered", true, COST)).toEqual({ key: "notstarted", text: "Expensed, not depreciated", usedPct: null, usedRatio: null });
+    expect(lifeStage(null, "registered", true, null)).toEqual({ key: "notstarted", text: "Expensed, not depreciated", usedPct: null, usedRatio: null });
   });
   it("Review Focus 1: no cost reads 'No cost yet'", () => {
-    expect(lifeStage(null, "with-finance", false, null)).toEqual({ key: "notstarted", text: "No cost yet", usedPct: null });
-    expect(lifeStage(null, "registered", false, null)).toEqual({ key: "notstarted", text: "No cost yet", usedPct: null });
+    expect(lifeStage(null, "with-finance", false, null)).toEqual({ key: "notstarted", text: "No cost yet", usedPct: null, usedRatio: null });
+    expect(lifeStage(null, "registered", false, null)).toEqual({ key: "notstarted", text: "No cost yet", usedPct: null, usedRatio: null });
   });
   it("no policy and salvage at or above cost are not depreciating", () => {
-    expect(lifeStage(started(5, COST, null), "registered", false, COST)).toEqual({ key: "notstarted", text: "No depreciation policy", usedPct: null });
+    expect(lifeStage(started(5, COST, null), "registered", false, COST)).toEqual({ key: "notstarted", text: "No depreciation policy", usedPct: null, usedRatio: null });
     expect(lifeStage(started(5, COST, { lifeMonths: 36, salvage: COST, basis: "custom" }), "registered", false, COST))
-      .toEqual({ key: "notstarted", text: "Salvage is not below cost", usedPct: null });
+      .toEqual({ key: "notstarted", text: "Salvage is not below cost", usedPct: null, usedRatio: null });
   });
 });
 
@@ -129,12 +129,11 @@ describe("categoryTiles (spec §3 item 3: fold the smallest into Other so rows s
       else expect(kept).toBe(n);
     }
   });
-  it("categories with no assets show (count 0) and fold first", () => {
-    const cats = Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, name: `Cat ${String(i).padStart(2, "0")}` }));
-    const tiles = categoryTiles(catRows([5, 4, 3, 2, 1]), null, 6, cats);
-    // 7 categories → 8 tiles → fold to 6: All + 4 + Other(c4, c5, c6)
-    expect(tiles.map((t) => t.id)).toEqual(["all", "c0", "c1", "c2", "c3", "other"]);
-    expect(tiles[5].count).toBe(1);
+  it("only categories with assets get a tile, so an empty one never pushes a real one into Other", () => {
+    // 5 used categories (and, in the class, 2 empty ones that are never passed in): All + 5 = 6, nothing folds
+    const tiles = categoryTiles(catRows([5, 4, 3, 2, 1, 0, 0]), null);
+    expect(tiles.map((t) => t.id)).toEqual(["all", "c0", "c1", "c2", "c3", "c4"]);
+    expect(tiles.every((t) => t.count > 0)).toBe(true);
   });
   it("marks the selected tile; Other is on for 'other' and for a folded category", () => {
     const rows = catRows([13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
@@ -142,21 +141,35 @@ describe("categoryTiles (spec §3 item 3: fold the smallest into Other so rows s
     expect(categoryTiles(rows, "other").filter((t) => t.on).map((t) => t.id)).toEqual(["other"]);
     expect(categoryTiles(rows, "c12").filter((t) => t.on).map((t) => t.id)).toEqual(["other"]);
   });
+  it("an unknown id, or 'other' when nothing folds, lights All", () => {
+    expect(categoryTiles(catRows([13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]), "nope").filter((t) => t.on).map((t) => t.id)).toEqual(["all"]);
+    expect(categoryTiles(catRows([4, 3, 2, 1]), "other").filter((t) => t.on).map((t) => t.id)).toEqual(["all"]);
+  });
   it("null cost and book read as zero", () => {
     const tiles = categoryTiles([{ categoryId: "a", categoryName: "A", costC: null, bookC: null }], null);
     expect(tiles[1]).toMatchObject({ id: "a", count: 1, costC: 0, bookC: 0 });
   });
 });
 
-const stage = (key: LifeStage["key"], usedPct: number | null): LifeStage => ({ key, text: "", usedPct });
+const stage = (key: LifeStage["key"], usedPct: number | null): LifeStage =>
+  ({ key, text: "", usedPct, usedRatio: usedPct === null ? null : usedPct / 100 });
 
 describe("life filter", () => {
+  const row = (key: LifeStage["key"], notCapitalised = false) => ({ lifeStage: stage(key, null), notCapitalised });
   it("each filter keeps its stage; none keeps all", () => {
     const keys = ["notstarted", "mid", "soon", "full"] as const;
-    expect(keys.filter((k) => matchesLife(stage(k, null), "soon"))).toEqual(["soon"]);
-    expect(keys.filter((k) => matchesLife(stage(k, null), "full"))).toEqual(["full"]);
-    expect(keys.filter((k) => matchesLife(stage(k, null), "notstarted"))).toEqual(["notstarted"]);
-    expect(keys.filter((k) => matchesLife(stage(k, null), null))).toEqual([...keys]);
+    expect(keys.filter((k) => matchesLife(row(k), "soon"))).toEqual(["soon"]);
+    expect(keys.filter((k) => matchesLife(row(k), "full"))).toEqual(["full"]);
+    expect(keys.filter((k) => matchesLife(row(k), "notstarted"))).toEqual(["notstarted"]);
+    expect(keys.filter((k) => matchesLife(row(k), null))).toEqual([...keys]);
+  });
+  it("Not depreciating yet leaves out expensed assets; Any keeps them", () => {
+    const expensed = { lifeStage: lifeStage(null, "registered", true, COST), notCapitalised: true };
+    expect(expensed.lifeStage.text).toBe("Expensed, not depreciated");
+    expect(matchesLife(expensed, "notstarted")).toBe(false);
+    expect(matchesLife(expensed, null)).toBe(true);
+    const noCost = { lifeStage: lifeStage(null, "with-finance", false, null), notCapitalised: false };
+    expect(matchesLife(noCost, "notstarted")).toBe(true);
   });
 });
 
@@ -173,6 +186,14 @@ describe("sortFinanceRows", () => {
   });
   it("life: most used first, ties by tag, not started last", () => {
     expect(sortFinanceRows(rows, "life").map((r) => r.tag)).toEqual(["IT-004", "IT-002", "IT-003", "IT-005", "IT-001"]);
+  });
+  it("life: two assets within the same whole percent order by the exact ratio, not by tag", () => {
+    const P120: Policy = { lifeMonths: 120, salvage: 0, basis: "category" };
+    const a = { tag: "IT-001", result: { bookValue: 1 }, lifeStage: lifeStage(started(13), "registered", false, COST) }; // 14/36 = 38.9%
+    const b = { tag: "IT-002", result: { bookValue: 1 }, lifeStage: lifeStage(started(46, COST, P120), "registered", false, COST) }; // 47/120 = 39.2%
+    expect(a.lifeStage.usedPct).toBe(39);
+    expect(b.lifeStage.usedPct).toBe(39);
+    expect(sortFinanceRows([a, b], "life").map((r) => r.tag)).toEqual(["IT-002", "IT-001"]);
   });
   it("tag: ascending", () => {
     expect(sortFinanceRows(rows, "tag").map((r) => r.tag)).toEqual(["IT-001", "IT-002", "IT-003", "IT-004", "IT-005"]);

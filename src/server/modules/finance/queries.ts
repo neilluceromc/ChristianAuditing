@@ -54,12 +54,18 @@ export function financeViewWhere(cls: AssetClass, fin: FinFilter): Prisma.AssetW
 
 export type FinanceRow = DepAssetRow & { lifeStage: LifeStage };
 
-/** Spec §3 item 2: the four money cards. Cost, accumulated and book value follow the totals footer's rule (capitalised rows). */
-export interface FinanceKpis { costC: number; accC: number; bookC: number; monthC: number; count: number; depreciatingCount: number }
+/**
+ * Spec §3 item 2: the four money cards. Cost, accumulated and book value follow the totals footer's rule (capitalised
+ * rows); `costedCount` is how many assets those cover ("N assets with a cost"), `count` every asset in scope.
+ */
+export interface FinanceKpis {
+  costC: number; accC: number; bookC: number; monthC: number;
+  count: number; costedCount: number; depreciatingCount: number;
+}
 
 export interface FinanceAssetsResult {
   rows: FinanceRow[]; total: number; page: number; pageCount: number; per: number;
-  /** the category filter in force: a category id of the class, "other", or null (an unknown id reads as null) */
+  /** the category filter in force: a category id with assets in the class, "other", or null (anything else reads as null) */
   category: string | null;
   kpis: FinanceKpis;
   categoryTiles: CategoryTile[];
@@ -75,7 +81,8 @@ export interface FinanceAssetsResult {
 
 /**
  * Phase 47 (spec §3): Finance's register of one class. ONE read of the class's assets (depRows) — plus, with a search,
- * one id-only read so the search stays SQL's — and every aggregate in one in-memory pass over it:
+ * one id-only read so the search stays SQL's — the category tiles computed once, and every other aggregate in one
+ * in-memory pass:
  * - category tiles: the class (folded to whole rows; "other" means every category not on its own tile);
  * - status tiles: the class and category;
  * - money totals: the class, category and status (the totals footer's rule: capitalised rows' depreciation results);
@@ -86,27 +93,24 @@ export interface FinanceAssetsResult {
 export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<FinanceAssetsResult> {
   const asOf = asOfMonth(now);
   const q = p.q.trim();
-  const [classRows, categories, hits] = await Promise.all([
+  const [classRows, hits] = await Promise.all([
     depRows({ cls: p.cls }, now),
-    prisma.assetCategory.findMany({ where: { cls: p.cls }, select: { id: true, name: true } }),
     q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: { id: true } }) : null,
   ]);
   const rows: FinanceRow[] = classRows.map((r) => ({ ...r, lifeStage: lifeStage(r.result, r.reg, r.notCapitalised, r.costC) }));
   const found = hits ? new Set(hits.map((h) => h.id)) : null;
 
   const tileInput = rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.category, costC: r.result?.cost ?? null, bookC: r.result?.bookValue ?? null }));
-  const unselected = categoryTiles(tileInput, null, 6, categories);
-  const kept = new Set(unselected.filter((t) => t.id !== "all" && t.id !== "other").map((t) => t.id));
-  const category = p.category === "other"
-    ? (unselected.some((t) => t.id === "other") ? "other" : null)
-    : p.category && categories.some((c) => c.id === p.category) ? p.category : null;
-  const tiles = category ? categoryTiles(tileInput, category, 6, categories) : unselected;
+  // categoryTiles validates the selection: All is lit for an unknown id, or for "other" when nothing folds.
+  const tiles = categoryTiles(tileInput, p.category ?? null, 6);
+  const kept = new Set(tiles.filter((t) => t.id !== "all" && t.id !== "other").map((t) => t.id));
+  const category = tiles[0].on ? null : (p.category ?? null);
   const inCategory = (r: FinanceRow) => category === null || (category === "other" ? !kept.has(r.categoryId) : r.categoryId === category);
 
   const tabs = finTabs(p.cls);
   const fin = p.fin && tabs.includes(p.fin) ? p.fin : null;
   const life = p.life ?? null;
-  const kpis: FinanceKpis = { costC: 0, accC: 0, bookC: 0, monthC: 0, count: 0, depreciatingCount: 0 };
+  const kpis: FinanceKpis = { costC: 0, accC: 0, bookC: 0, monthC: 0, count: 0, costedCount: 0, depreciatingCount: 0 };
   const statusTiles = TILE_SPECS[p.cls].flatMap((s) => (s.status ? [{ status: s.status as AssetStatus, count: 0, bookC: 0 }] : []));
   const byStatus = new Map(statusTiles.map((t) => [t.status, t]));
   const counts = new Map<FinFilter | "all", number>([["all", 0], ...tabs.map((f): [FinFilter, number] => [f, 0])]);
@@ -119,13 +123,14 @@ export async function financeAssets(p: FinanceListParams, now: Date = new Date()
     if (p.status && r.status !== p.status) continue;
     kpis.count++;
     if (r.result) {
+      kpis.costedCount++;
       kpis.costC += r.result.cost;
       kpis.accC += r.result.accumulated;
       kpis.bookC += bookC;
       const charge = monthCharge(r.result, asOf);
       if (charge > 0) { kpis.monthC += charge; kpis.depreciatingCount++; }
     }
-    if ((found && !found.has(r.id)) || !matchesLife(r.lifeStage, life)) continue;
+    if ((found && !found.has(r.id)) || !matchesLife(r, life)) continue;
     counts.set("all", counts.get("all")! + 1);
     for (const f of tabs) if (inFin(r, f)) counts.set(f, counts.get(f)! + 1);
     if (fin && !inFin(r, fin)) continue;

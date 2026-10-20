@@ -104,8 +104,9 @@ const sumRows = (rows: Result["rows"]) => rows.reduce((a, r) => ({
   bookC: a.bookC + (r.result?.bookValue ?? 0),
   monthC: a.monthC + (r.result ? monthCharge(r.result, asOfMonth(NOW)) : 0),
   count: a.count + 1,
+  costedCount: a.costedCount + (r.result ? 1 : 0),
   depreciatingCount: a.depreciatingCount + (r.result && monthCharge(r.result, asOfMonth(NOW)) > 0 ? 1 : 0),
-}), { costC: 0, accC: 0, bookC: 0, monthC: 0, count: 0, depreciatingCount: 0 });
+}), { costC: 0, accC: 0, bookC: 0, monthC: 0, count: 0, costedCount: 0, depreciatingCount: 0 });
 
 describe("financeAssets — money totals", () => {
   it("KPIs equal the sum of the class's rows, and the footer's rule (bookValueTotals)", async () => {
@@ -116,6 +117,8 @@ describe("financeAssets — money totals", () => {
     expect(r.kpis).toMatchObject({ costC: footer.costC, accC: footer.accumulatedC, bookC: footer.bookC });
     // depreciating this month: the 11/36 and 34/36 laptops, the one finishing this month, the two depreciating monitors
     expect(r.kpis.depreciatingCount).toBe(5);
+    // 13 assets, 11 of them in costC: IT-0008 has no cost and IT-0009 is expensed
+    expect(r.kpis).toMatchObject({ count: 13, costedCount: 11 });
     expect(r.kpis.monthC).toBeGreaterThan(0);
   });
   it("KPIs follow category and status, but not search, finance state or life", async () => {
@@ -125,6 +128,7 @@ describe("financeAssets — money totals", () => {
     const deployed = await financeAssets(base({ category: "lap", status: "DEPLOYED" }), NOW);
     expect(deployed.kpis).toEqual(sumRows(deployed.rows));
     expect(deployed.kpis.count).toBe(4);
+    expect(deployed.kpis.costedCount).toBe(3); // IT-0008 (no cost) is deployed too
     const narrowed = await financeAssets(base({ category: "lap", fin: "approved", life: "soon", q: "IT-0004" }), NOW);
     expect(narrowed.kpis).toEqual(all.kpis);
     expect(narrowed.rows.map((x) => x.tag)).toEqual(["IT-0004"]);
@@ -159,15 +163,25 @@ describe("financeAssets — tiles", () => {
     const p = await financeAssets(base({ cls: "PURCHASING" }), NOW);
     expect(p.statusTiles.map((t) => t.status)).toEqual(["OPERATIONAL", "STORED", "REPAIRING", "LOST"]);
   });
-  it("category=other filters to every folded category", async () => {
-    h.categories.push(...["a", "b", "c", "d"].map((x) => ({ id: x, name: `Extra ${x}`, cls: "IT", life: 36, salvage: null })));
-    h.assets.push(asset("a"), asset("a"), asset("b"));
-    // 7 IT categories → 8 tiles → All + 4 + Other: the three smallest (c, d empty; b with one) fold
-    const r = await financeAssets(base({ category: "other" }), NOW);
+  it("category=other filters to every folded category; empty categories get no tile", async () => {
+    h.categories.push(...["a", "b", "c", "d", "e", "f"].map((x) => ({ id: x, name: `Extra ${x}`, cls: "IT", life: 36, salvage: null })));
+    h.assets.push(asset("a"), asset("a"), asset("b"), asset("c"), asset("d")); // e and f stay empty
+    // 7 IT categories with assets → 8 tiles → All + 4 + Other: the three smallest (b, c, d, one each) fold
+    const r = await financeAssets(base({ category: "other", sort: "tag" }), NOW);
     expect(r.categoryTiles.map((t) => t.id)).toEqual(["all", "lap", "mon", "a", "dock", "other"]);
-    expect(r.categoryTiles.at(-1)).toMatchObject({ count: 1, on: true });
-    expect(r.rows.map((x) => x.categoryId)).toEqual(["b"]);
-    expect(r.kpis.count).toBe(1);
+    expect(r.categoryTiles.at(-1)).toMatchObject({ count: 3, on: true });
+    expect(r.category).toBe("other");
+    expect(r.rows.map((x) => x.categoryId)).toEqual(["b", "c", "d"]);
+    expect(r.kpis.count).toBe(3);
+    const empty = await financeAssets(base({ category: "e" }), NOW);
+    expect(empty.category).toBeNull();
+    expect(empty.categoryTiles[0].on).toBe(true);
+  });
+  it("category=other with nothing folded is ignored", async () => {
+    const r = await financeAssets(base({ category: "other" }), NOW);
+    expect(r.category).toBeNull();
+    expect(r.categoryTiles[0].on).toBe(true);
+    expect(r.rows).toHaveLength(13);
   });
   it("an unknown or other-class category is ignored", async () => {
     const r = await financeAssets(base({ category: "chair" }), NOW);
@@ -211,10 +225,10 @@ describe("financeAssets — rows", () => {
     expect(expensed.lifeStage.text).toBe("Expensed, not depreciated");
     expect(expensed.result).toBeNull();
     const pending = by((x) => x.reg === "with-finance" && x.costC !== null);
-    expect(pending.lifeStage).toEqual({ key: "notstarted", text: "Starts when approved", usedPct: null });
+    expect(pending.lifeStage).toEqual({ key: "notstarted", text: "Starts when approved", usedPct: null, usedRatio: null });
     expect(pending.result!.bookValue).toBe(36_000_00);
     expect(by((x) => x.reg === "awaiting-it").lifeStage.text).toBe("Starts when approved");
-    expect(by((x) => x.tag === "IT-0001").lifeStage).toEqual({ key: "mid", text: "11 / 36 mo · 25 left", usedPct: 31 });
+    expect(by((x) => x.tag === "IT-0001").lifeStage).toEqual({ key: "mid", text: "11 / 36 mo · 25 left", usedPct: 31, usedRatio: 11 / 36 });
     expect(by((x) => x.tag === "IT-0004").lifeStage.key).toBe("soon");
     expect(by((x) => x.tag === "IT-0002").lifeStage.key).toBe("full");
     expect(by((x) => x.tag === "IT-0012").lifeStage.text).toBe("No depreciation policy");
@@ -223,7 +237,7 @@ describe("financeAssets — rows", () => {
     expect((await financeAssets(base({ life: "soon" }), NOW)).rows.map((x) => x.tag)).toEqual(["IT-0004"]);
     expect((await financeAssets(base({ life: "full", sort: "tag" }), NOW)).rows.map((x) => x.tag)).toEqual(["IT-0002", "IT-0003"]);
     expect((await financeAssets(base({ life: "notstarted", sort: "tag" }), NOW)).rows.map((x) => x.tag))
-      .toEqual(["IT-0005", "IT-0006", "IT-0007", "IT-0008", "IT-0009", "IT-0012", "IT-0013"]);
+      .toEqual(["IT-0005", "IT-0006", "IT-0007", "IT-0008", "IT-0012", "IT-0013"]); // not IT-0009: expensed, not "yet"
   });
   it("sorts: book value high first by default, life used, tag", async () => {
     const book = (await financeAssets(base(), NOW)).rows;
@@ -254,6 +268,7 @@ describe("financeAssets — rows", () => {
     await financeAssets(base({ q: "model 3" }), NOW);
     expect(h.findMany).toHaveBeenCalledTimes(2);
     expect(h.count).not.toHaveBeenCalled();
+    expect(h.catFindMany).not.toHaveBeenCalled();
     await financeAssets(base(), NOW);
     expect(h.findMany).toHaveBeenCalledTimes(3);
   });
