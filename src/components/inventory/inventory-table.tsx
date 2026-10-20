@@ -69,7 +69,8 @@ export interface ColumnDef {
  * From 1280 px the card is normally `overflow-visible` (so the head can stick to the window), which would let a
  * wider table run past the card. So the card keeps scrolling sideways at every width whenever the table's
  * minimum does not fit it (`fitsCard`): measured after hydration, and assumed from the 1280 px width before
- * that, so a wide view (Repairs, Registration shown) never overflows the card, even on first paint.
+ * that, so a wide view (Repairs, Registration shown) never overflows the card, even on first paint. Its head
+ * then stays at the card's top rather than pinning under the window's toolbar (Table's `fitsCard`).
  */
 export const INVENTORY_COLUMNS: ColumnDef[] = [
   { id: "tag", label: "Tag", width: 116, sortKey: "tag" },
@@ -335,8 +336,9 @@ export function InventoryTable({
       <Table
         striped
         stickyHeader
-        // too wide for the card: keep scrolling inside it from 1280 px too (the head then scrolls with the rows)
-        className={cn("[&>table]:table-fixed [&>table]:min-w-(--inventory-table-min)", !fitsCard && "xl:overflow-auto")}
+        // too wide for the card: keep scrolling inside it from 1280 px too (the head then stays at the card's top)
+        fitsCard={fitsCard}
+        className="[&>table]:table-fixed [&>table]:min-w-(--inventory-table-min)"
       >
       <THead>
         <Tr style={{ height: "var(--list-head-h)" }}>

@@ -65,6 +65,7 @@ describe("EmployeesTable", () => {
     expect(html).toContain("--employees-table-min:952px");
     expect(cardClass(html)).toContain("xl:overflow-visible");
     expect(cardClass(html)).not.toContain("xl:overflow-auto");
+    expect(html).not.toContain("data-scrolls-in-card");
   });
 
   it("stacks the name over the title (one line in Dense), the EMP number for screen readers only", () => {

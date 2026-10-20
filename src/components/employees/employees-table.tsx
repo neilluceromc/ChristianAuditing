@@ -162,8 +162,9 @@ export function EmployeesTable({
       <Table
         striped
         stickyHeader
-        // too wide for the card: keep scrolling inside it from 1280 px too (the head then scrolls with the rows)
-        className={cn("[&>table]:table-fixed [&>table]:min-w-(--employees-table-min)", !fitsCard && "xl:overflow-auto")}
+        // too wide for the card: keep scrolling inside it from 1280 px too (the head then stays at the card's top)
+        fitsCard={fitsCard}
+        className="[&>table]:table-fixed [&>table]:min-w-(--employees-table-min)"
       >
         <THead>
           <Tr style={{ height: "var(--list-head-h)" }}>
