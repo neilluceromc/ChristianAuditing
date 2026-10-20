@@ -494,14 +494,26 @@ export function SignInCard({
                 <path d="m6 12.5 4 4 8-9" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            {heading(firstWord(name) ? `You're in, ${firstWord(name)}` : "You're in")}
-            <p className="lw-lede">
-              New accounts start as <strong className="lw-rolechip">Viewer</strong>. An admin assigns your role, and your role
-              decides which workspace you land in.
-            </p>
-            <a href={viewerLanding} className="lw-btn lw-btn-link">
-              Go to Cris
-            </a>
+            {signupState.pendingApproval ? (
+              <>
+                {heading("Account created")}
+                <p className="lw-lede">An admin needs to approve it before you can sign in.</p>
+                <a href={loginHref} className="lw-btn lw-btn-link" onClick={intercept("login-email")}>
+                  Back to sign in
+                </a>
+              </>
+            ) : (
+              <>
+                {heading(firstWord(name) ? `You're in, ${firstWord(name)}` : "You're in")}
+                <p className="lw-lede">
+                  New accounts start as <strong className="lw-rolechip">Viewer</strong>. An admin assigns your role, and your role
+                  decides which workspace you land in.
+                </p>
+                <a href={viewerLanding} className="lw-btn lw-btn-link">
+                  Go to Cris
+                </a>
+              </>
+            )}
           </>
         )}
       </section>

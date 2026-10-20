@@ -3,11 +3,26 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Step } from "./login-steps";
 
 // The real actions pull in next-auth and Prisma; the card only needs their identities.
+const h = vi.hoisted(() => ({
+  signUp: async () => ({}),
+  /** When set, the sign-up form reports this state, standing in for a finished server action (static render runs no effects). */
+  signupState: null as null | { created?: boolean; pendingApproval?: boolean },
+}));
 vi.mock("@/server/auth/actions", () => ({
   signInWithCredentials: async () => ({}),
-  signUp: async () => ({}),
+  signUp: h.signUp,
   quickSignIn: async () => {},
 }));
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    useActionState: ((action: unknown, initial: unknown) => {
+      const [state, run, pending] = (actual.useActionState as (a: unknown, i: unknown) => [unknown, unknown, boolean])(action, initial);
+      return action === h.signUp && h.signupState ? [h.signupState, run, pending] : [state, run, pending];
+    }) as typeof actual.useActionState,
+  };
+});
 
 const { SignInCard } = await import("./sign-in-card");
 type Props = Parameters<typeof SignInCard>[0];
@@ -149,5 +164,21 @@ describe("SignInCard", () => {
     expect(html).toContain("Viewer");
     expect(html).toContain("An admin assigns your role, and your role decides which workspace you land in.");
     expect(html).toMatch(/<a[^>]* href="\/inventory"[^>]*>Go to Cris<\/a>/);
+  });
+
+  it("Sign up 3 with pendingApproval: Account created, admin approval copy, back to sign in, no You're in", () => {
+    h.signupState = { created: true, pendingApproval: true };
+    try {
+      const html = render("signup-done");
+      expect(html).toContain("Sign up · 3 of 3");
+      expect(html).toContain("Account created");
+      expect(html).toContain("An admin needs to approve it before you can sign in.");
+      expect(html).not.toContain("You&#x27;re in");
+      expect(html).not.toContain("Go to Cris");
+      expect(html).not.toContain("Viewer");
+      expect(html).toMatch(/<a[^>]* href="\/login\?step=login&amp;next=%2Femployees"[^>]*>Back to sign in<\/a>/);
+    } finally {
+      h.signupState = null;
+    }
   });
 });
