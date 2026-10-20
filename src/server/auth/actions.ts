@@ -195,7 +195,12 @@ export async function switchWorkspace(ws: WorkspaceId) {
   if (!ROLE_WORKSPACES[user.role].includes(ws)) redirect(ROLE_LANDING[user.role]);
   const jar = await cookies();
   jar.set("br.dept", ws, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
-  // Phase 47 spec §5.4: the workspace follows the person, not the browser.
-  await saveUiPref({ workspace: ws });
+  // Phase 47 spec §5.4: the workspace follows the person, not the browser. Like the toggles, a failed save never
+  // blocks the switch: the cookie is already set, and only the next browser misses this choice.
+  try {
+    await saveUiPref({ workspace: ws });
+  } catch (err: unknown) {
+    console.error("[ui-prefs] saving the workspace failed:", err);
+  }
   redirect(WORKSPACE_META[ws].landing);
 }

@@ -173,6 +173,15 @@ describe("switchWorkspace (Phase 47 spec §5.4: the workspace follows the person
     expect(h.cookieSet).toHaveBeenCalledWith("br.dept", "finance", expect.objectContaining({ path: "/" }));
   });
 
+  it("still switches when saving the preference fails", async () => {
+    h.saveUiPref.mockRejectedValue(new Error("db down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(switchWorkspace("finance")).rejects.toThrow("REDIRECT:/finance/assets");
+    expect(h.cookieSet).toHaveBeenCalledWith("br.dept", "finance", expect.objectContaining({ path: "/" }));
+    expect(err).toHaveBeenCalledTimes(1);
+    err.mockRestore();
+  });
+
   it("saves nothing for a workspace the role can't open", async () => {
     h.requireUser.mockResolvedValue({ id: "u1", role: "it_staff" });
     await expect(switchWorkspace("finance")).rejects.toThrow("REDIRECT:/inventory");
