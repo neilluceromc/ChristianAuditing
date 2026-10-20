@@ -35,7 +35,7 @@ vi.mock("@/server/db/client", () => ({
   },
 }));
 
-import { bookValueByCategory, bookValueTotals, capitalizedByMonth, capitalizedSince } from "./depreciation-queries";
+import { bookValueByCategory, bookValueTotals, capitalizedSince } from "./depreciation-queries";
 
 const NOW = new Date("2026-10-20T03:00:00Z");
 
@@ -72,7 +72,7 @@ describe("bookValueByCategory", () => {
   });
 });
 
-describe("capitalizedSince / capitalizedByMonth", () => {
+describe("capitalizedSince", () => {
   beforeEach(() => {
     h.assets = [
       asset(1, "Laptops", { financeConfirmedAt: new Date("2026-10-19T02:00:00Z") }),
@@ -90,13 +90,5 @@ describe("capitalizedSince / capitalizedByMonth", () => {
       { at: new Date("2026-10-19T02:00:00Z"), amount: 11_000 },
       { at: new Date("2026-09-30T15:00:00Z"), amount: 12_000 },
     ]);
-  });
-
-  it("per Manila month for the 12 months ending this one", async () => {
-    const r = await capitalizedByMonth(NOW, 12);
-    expect(r.labels[0]).toBe("Nov 2025");
-    expect(r.labels.at(-1)).toBe("Oct 2026");
-    expect(r.values.slice(-2)).toEqual([12_000, 11_000]);
-    expect(r.values.reduce((s, v) => s + v, 0)).toBe(23_000); // Jan 2025 is outside the window
   });
 });

@@ -4,7 +4,7 @@ import { fmtDate } from "./format";
 import { dwellLine } from "./purchases-list";
 import {
   DEFAULT_LOAN_DAYS, SEE_ALL_HREF, WORK_SECTIONS, capLine, groupWork, leaverRow, loanRow,
-  loanSoonEdge, pastSlaCount, purchaseReviewRow, summaryChips, workActionLabel, workHeadline, workRowHref,
+  loanSoonEdge, pastSlaCount, purchaseReviewRow, summaryChips, workActionLabel, workRowHref,
   type LeaverLike, type WorkRow,
 } from "./worklist";
 
@@ -164,17 +164,8 @@ describe("loanSoonEdge — the badge's loan count agrees with loanRow", () => {
   });
 });
 
-describe("workHeadline", () => {
+describe("groupWork oldestDays", () => {
   const row = (over: Partial<WorkRow>): WorkRow => ({ key: "k", section: "triage", title: "", meta: "", href: "/", action: "Open", severity: 0, ...over });
-  it("counts, the oldest age and past-SLA rows, dropping zero parts", () => {
-    const groups = groupWork([
-      row({ key: "triage:1", ageDays: 4 }),
-      row({ key: "queue:2", section: "queue", rank: 0, ageDays: 9 }),
-    ], new Set(), {});
-    expect(workHeadline(groups)).toBe("2 waiting · oldest 9 d · 1 past SLA");
-    expect(workHeadline(groupWork([row({ key: "triage:1" })], new Set(), {}))).toBe("1 waiting");
-    expect(workHeadline([])).toBe("");
-  });
   it("final review I2: the oldest age counts every live row, not only the ones Home shows", () => {
     // Purchase reviews sort newest first, so with limit 2 the shown rows are the two youngest.
     const groups = groupWork([
@@ -184,14 +175,13 @@ describe("workHeadline", () => {
     ], new Set(), { limit: 2 });
     expect(groups[0].rows.map((r) => r.ageDays)).toEqual([1, 2]);
     expect(groups[0].oldestDays).toBe(15);
-    expect(workHeadline(groups)).toBe("3 waiting · oldest 15 d");
   });
   it("a hidden (dismissed) row's age does not count", () => {
     const groups = groupWork([
       row({ key: "triage:1", ageDays: 3 }),
       row({ key: "triage:2", ageDays: 30 }),
     ], new Set(["triage:2"]), { limit: 1 });
-    expect(workHeadline(groups)).toBe("1 waiting · oldest 3 d");
+    expect(groups[0].oldestDays).toBe(3);
   });
 });
 
@@ -307,6 +297,5 @@ describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
     const groups = groupWork(rows, new Set(["queue:d"]), { limit: 2 });
     expect(groups[0].rows).toHaveLength(2);
     expect(pastSlaCount(groups)).toBe(3);
-    expect(workHeadline(groups)).toBe("3 waiting · 3 past SLA");
   });
 });

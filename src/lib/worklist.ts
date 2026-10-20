@@ -237,13 +237,3 @@ export function summaryChips(groups: WorkGroup[]): { id: WorkSectionId; label: s
 export function pastSlaCount(groups: WorkGroup[]): number {
   return groups.reduce((s, g) => s + g.pastSla, 0);
 }
-
-/** Home's Worklist headline (spec §5.4): parts omitted when zero. */
-export function workHeadline(groups: WorkGroup[]): string {
-  const n = groups.reduce((s, g) => s + g.total, 0);
-  if (n === 0) return "";
-  // Final review I2: from every live row, not the shown ones — purchase reviews sort newest first.
-  const oldest = Math.max(0, ...groups.map((g) => g.oldestDays));
-  const late = pastSlaCount(groups);
-  return [`${n} waiting`, oldest > 0 ? `oldest ${oldest} d` : null, late > 0 ? `${late} past SLA` : null].filter(Boolean).join(" · ");
-}

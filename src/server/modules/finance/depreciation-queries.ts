@@ -6,7 +6,6 @@ import {
 } from "@/lib/depreciation";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { finWhere, registrationState, type RegState } from "@/lib/registration";
-import { monthBuckets, monthLabels, monthWindowStart } from "@/lib/overview";
 
 /** Phase 35 (spec 5.1): depreciation covers capitalised assets only. */
 export const CAPITALISED: Prisma.AssetWhereInput = { cost: { not: null }, financeNotCapitalised: false };
@@ -106,12 +105,6 @@ export async function capitalizedSince(since: Date): Promise<Array<{ at: Date; a
     select: { financeConfirmedAt: true, cost: true },
   });
   return rows.map((r) => ({ at: r.financeConfirmedAt!, amount: Number(r.cost) }));
-}
-
-/** Phase 46 (spec §3.2, Finance trend): capitalised pesos per Manila month, the `months` months ending this one. */
-export async function capitalizedByMonth(now: Date = new Date(), months = 12): Promise<{ labels: string[]; values: number[] }> {
-  const rows = await capitalizedSince(monthWindowStart(now, months));
-  return { labels: monthLabels(now, months), values: monthBuckets(rows, now, months) };
 }
 
 export interface PolicyRow {

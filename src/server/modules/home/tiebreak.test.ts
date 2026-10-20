@@ -19,7 +19,7 @@ vi.mock("@/server/db/client", () => ({
   },
 }));
 
-import { claimedByYou, hireWorkRows, warrantyRunway } from "./queries";
+import { claimedByYou, hireWorkRows } from "./queries";
 
 beforeEach(() => {
   h.approvalFindMany.mockReset().mockResolvedValue([]);
@@ -33,13 +33,6 @@ describe("Home reads break ties on id", () => {
     const args = h.approvalFindMany.mock.calls[0][0];
     expect(args.orderBy).toEqual([{ slaAt: "asc" }, { id: "asc" }]);
     expect(args.take).toBe(5);
-  });
-
-  it("warrantyRunway: warrantyUntil asc, then id asc, take 8", async () => {
-    await warrantyRunway(new Date("2026-10-19T04:00:00.000Z"));
-    const args = h.assetFindMany.mock.calls[0][0];
-    expect(args.orderBy).toEqual([{ warrantyUntil: "asc" }, { id: "asc" }]);
-    expect(args.take).toBe(8);
   });
 
   it("hireWorkRows: joinedAt asc, then id asc", async () => {
