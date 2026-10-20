@@ -5,6 +5,7 @@ import {
 } from "./inventory-list";
 import { parseListState } from "./url-state";
 import { STATUSES_BY_CLASS } from "./asset-class";
+import { attentionWhere } from "./inventory-attention";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), INVENTORY_LIST_CONFIG);
 
@@ -255,5 +256,21 @@ describe("the Attention sort key (spec §6.3, plan P-10)", () => {
   it("never reaches the SQL order, and alone falls back to the default order", () => {
     expect(buildAssetOrderBy([{ key: "attention", dir: "asc" }])).toEqual(buildAssetOrderBy([]));
     expect(buildAssetOrderBy([{ key: "attention", dir: "asc" }, { key: "model", dir: "desc" }])).toEqual([{ model: "desc" }, { id: "asc" }]);
+  });
+});
+
+describe("buildAssetWhere attention facet (Phase 45 §2.1)", () => {
+  const now = new Date("2026-10-20T00:00:00Z");
+  it("attention=1 ANDs attentionWhere(now)", () => {
+    const where = buildAssetWhere(parse("attention=1"), null, "IT", now);
+    expect(where.AND).toEqual([attentionWhere(now)]);
+  });
+  it("coexists with the other derived facets without dropping either", () => {
+    const where = buildAssetWhere(parse("attention=1&assignee=none"), null, "IT", now);
+    expect(where.AND).toEqual([{ assigneeId: null }, attentionWhere(now)]);
+  });
+  it("is absent unless the value is 1", () => {
+    expect(buildAssetWhere(parse("attention=0"), null, "IT", now).AND).toBeUndefined();
+    expect(buildAssetWhere(parse(""), null, "IT", now).AND).toBeUndefined();
   });
 });

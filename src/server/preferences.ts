@@ -7,7 +7,7 @@ import { checkRate } from "./rate-limit";
 import {
   forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "./action-result";
-import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
 
 const schema = z.object({
   key: z.literal("columns:inventory"), // extend to a union as more tables gain choosers
@@ -30,11 +30,20 @@ export async function saveColumns(input: unknown): Promise<ActionResult<null>> {
   const allowed = COLUMN_PREF_KEYS[parsed.data.key] as readonly string[];
   const visible = parsed.data.visible.filter((c) => allowed.includes(c));
 
-  await prisma.userPreference.upsert({
-    where: { userId_key: { userId: user.id, key: parsed.data.key } },
-    update: { value: visible },
-    create: { userId: user.id, key: parsed.data.key, value: visible },
-  });
+  // Phase 45 (spec §2.3): saving is the user choosing; remember which columns existed then, so a column added
+  // later (Serial number) is offered once to a saved set instead of being silently hidden for ever.
+  await prisma.$transaction([
+    prisma.userPreference.upsert({
+      where: { userId_key: { userId: user.id, key: parsed.data.key } },
+      update: { value: visible },
+      create: { userId: user.id, key: parsed.data.key, value: visible },
+    }),
+    prisma.userPreference.upsert({
+      where: { userId_key: { userId: user.id, key: INVENTORY_COLUMNS_SEEN_KEY } },
+      update: { value: [...allowed] },
+      create: { userId: user.id, key: INVENTORY_COLUMNS_SEEN_KEY, value: [...allowed] },
+    }),
+  ]);
   return ok(null);
 }
 

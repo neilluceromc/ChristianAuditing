@@ -7,7 +7,8 @@ import {
 } from "@/lib/inventory-list";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, STATUS_LABEL, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
-import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY, resolveInventoryColumns } from "@/lib/column-prefs";
+import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
@@ -24,6 +25,8 @@ import { attentionOf, attentionWhere, orderByAttention, type Attention } from "@
 export interface AssetRow {
   id: string;
   tag: string;
+  /** Phase 45 (spec §2.3): the serial number, null when none was recorded */
+  serial: string | null;
   model: string;
   category: string;
   status: string;
@@ -110,6 +113,7 @@ const LIST_INCLUDE = {
 function toRow(a: {
   id: string;
   tag: string;
+  serial: string | null;
   model: string;
   cls: AssetClass;
   status: AssetStatus;
@@ -142,6 +146,7 @@ function toRow(a: {
   return {
     id: a.id,
     tag: a.tag,
+    serial: a.serial,
     model: a.model,
     category: a.category.name,
     status: a.status,
@@ -307,14 +312,45 @@ export async function listAssets(
   };
 }
 
-/** Visible hideable columns for this user; default = all. */
+/**
+ * Visible hideable columns for this user. Phase 45 (spec §2.3): nothing saved gives the defaults (Serial number,
+ * Category, Assigned); a saved set that lacks Serial number and was saved before it existed gets it once, by the
+ * "columns:inventory:seen" marker `saveColumns` writes.
+ */
 export async function getInventoryColumns(userId: string): Promise<string[]> {
   const allowed = COLUMN_PREF_KEYS["columns:inventory"] as readonly string[];
-  const pref = await prisma.userPreference.findUnique({
-    where: { userId_key: { userId, key: "columns:inventory" } },
+  const prefs = await prisma.userPreference.findMany({
+    where: { userId, key: { in: ["columns:inventory", INVENTORY_COLUMNS_SEEN_KEY] } },
   });
-  if (!pref || !Array.isArray(pref.value)) return [...allowed];
-  return (pref.value as string[]).filter((c) => allowed.includes(c));
+  const strings = (key: string): string[] | null => {
+    const value = prefs.find((p) => p.key === key)?.value;
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : null;
+  };
+  return resolveInventoryColumns(strings("columns:inventory"), strings(INVENTORY_COLUMNS_SEEN_KEY), allowed);
+}
+
+/**
+ * Phase 45 (spec §2.1): the count on each tile, keyed by TileSpec key - what clicking that tile shows. The scope is
+ * the class, search and every facet except status and attention, so the tiles read the same whichever one is pressed.
+ */
+export async function inventoryTileCounts(
+  state: ListState,
+  purchaseYear: PurchaseYearValue | null,
+  cls: AssetClass,
+  now: Date = new Date(),
+): Promise<Record<string, number>> {
+  const base = buildAssetWhere(
+    { ...state, filters: { ...state.filters, status: [], attention: [] } }, purchaseYear, cls, now,
+  );
+  const [byStatus, attention] = await Promise.all([
+    prisma.asset.groupBy({ by: ["status"], where: base, _count: { _all: true } }),
+    prisma.asset.count({ where: { AND: [base, attentionWhere(now)] } }),
+  ]);
+  const counts: Record<string, number> = {};
+  for (const spec of TILE_SPECS[cls]) {
+    counts[spec.key] = spec.attention ? attention : (byStatus.find((g) => g.status === spec.status)?._count._all ?? 0);
+  }
+  return counts;
 }
 
 export interface FacetOption {
