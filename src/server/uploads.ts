@@ -30,10 +30,10 @@ export function validateUpload(value: unknown): { ok: true; file: File } | { ok:
  * CR/LF (header injection). Emit the RFC 6266 pair instead: an ASCII-safe
  * `filename` fallback plus a `filename*` carrying the real name.
  */
-export function contentDisposition(fileName: string): string {
+export function contentDisposition(fileName: string, disposition: "attachment" | "inline" = "attachment"): string {
   const ascii = fileName.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "");
   const encoded = encodeURIComponent(fileName.replace(/[\r\n\0]/g, ""));
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 /** Writes under uploads/<relDir>/<timestamp>-<safeName>; returns the relative posix path the row stores. */

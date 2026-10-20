@@ -1,6 +1,7 @@
-import type { AssetClass, AssetStatus } from "@prisma/client";
+import type { AssetClass, AssetStatus, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { auditSentence } from "@/lib/activity";
+import { depLines, isFinanceRelevant, type AuditRow, type DepLine } from "@/lib/finance-history";
 import {
   asOfMonth, depStartMonth, depreciate, lifeYears, monthLabel, resolvePolicy, stateNote, toCentavos, type DepResult, type LifeYear,
 } from "@/lib/depreciation";
@@ -28,9 +29,30 @@ export interface FinanceAssetDetail {
   pr: { id: string; refNo: string; requester: string; totalC: number } | null;
   vendor: string | null; invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null; feesC: number | null;
   warrantyUntil: Date | null; coveredBy: string | null; contact: string | null;
-  docs: Array<{ kind: string; title: string; file: { id: string; fileName: string } | null }>;
+  docs: Array<{ kind: string; title: string; file: { id: string; fileName: string; size: number | null } | null }>;
   years: LifeYear[];
   history: Array<{ at: Date; sentence: string }>;
+  /**
+   * Phase 47 (spec §4.2 ruling): agrees with the engine — the depreciable base is cost − salvage; the purchase
+   * record's fees never depreciate, so there is no "total acquisition cost". `feesUnits` > 1 reads "for the whole
+   * delivery of N". Null salvage/base when there is no cost, it is not capitalised, or there is no policy.
+   */
+  cost: { priceC: number | null; feesC: number | null; feesUnits: number | null; salvageC: number | null; baseC: number | null };
+  /** Phase 47 (spec §4.2): the Purchase card. */
+  purchase: {
+    pr: { id: string; refNo: string } | null; requestedBy: string | null; supplier: string | null;
+    invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null; warrantyUntil: Date | null; coveredBy: string | null;
+  };
+  /** Phase 47 (spec §4.5): finance-relevant audit rows of the asset, its purchase record and its category policy, newest first. */
+  audit: AuditRow[];
+  /** Phase 47 (spec §4.5): one derived System line per depreciation month counted. */
+  depLines: DepLine[];
+  /** Units the purchase record covered (history's "Purchase record (N units)"). */
+  purchaseUnits: number | null;
+  /** Phase 47: note threads, and the unresolved ones (the Notes badge is amber while any is open). */
+  noteCount: number; openNoteCount: number;
+  /** Phase 47: `attachment:*` documents (the Attachments tab; they are not document slots). */
+  attachmentCount: number;
 }
 
 export async function financeAssetDetail(id: string, now: Date = new Date()): Promise<FinanceAssetDetail | null> {
@@ -43,8 +65,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       purchaseRequest: {
         select: { id: true, refNo: true, requestedBy: { select: { name: true } }, units: { select: { qty: true, unitPrice: true } } },
       },
-      purchaseRecord: { select: { fees: true } },
-      documents: { select: { id: true, kind: true, fileName: true, createdAt: true }, orderBy: { createdAt: "asc" } },
+      purchaseRecord: { select: { id: true, fees: true, quantity: true } },
+      documents: { select: { id: true, kind: true, fileName: true, size: true, createdAt: true }, orderBy: { createdAt: "asc" } },
       financeConfirmedBy: { select: { name: true } },
     },
   });
@@ -83,32 +105,64 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     ? a.purchaseRequest.units.reduce((sum, u) => sum + (toCentavos(u.unitPrice) ?? 0) * u.qty, 0)
     : 0;
 
-  const bySlot = new Map<string, { id: string; fileName: string }>();
-  const others: Array<{ kind: string; title: string; file: { id: string; fileName: string } | null }> = [];
+  type DocFile = { id: string; fileName: string; size: number | null };
+  const bySlot = new Map<string, DocFile>();
+  const others: Array<{ kind: string; title: string; file: DocFile | null }> = [];
+  let attachmentCount = 0;
   for (const d of a.documents) {
-    if (SLOT_KINDS.some((s) => s.kind === d.kind)) bySlot.set(d.kind, { id: d.id, fileName: d.fileName }); // newest wins
-    else others.push({ kind: "other", title: d.kind === "other" ? "Other" : d.kind, file: { id: d.id, fileName: d.fileName } });
+    const file = { id: d.id, fileName: d.fileName, size: d.size };
+    if (d.kind.startsWith("attachment:")) attachmentCount++; // the Attachments tab's, not a document slot
+    else if (SLOT_KINDS.some((s) => s.kind === d.kind)) bySlot.set(d.kind, file); // newest wins
+    else others.push({ kind: "other", title: d.kind === "other" ? "Other" : d.kind, file });
   }
   const docs = [...SLOT_KINDS.map((s) => ({ kind: s.kind, title: s.title, file: bySlot.get(s.kind) ?? null })), ...others];
 
-  const audits = await prisma.auditEntry.findMany({
-    where: {
-      OR: [
-        {
-          entityType: "asset", entityId: a.id,
-          OR: [
-            { action: { in: ["register", "update", "it.verify"] } },
-            { action: { startsWith: "finance." } },
-            { action: { startsWith: "depreciation." } },
-          ],
-        },
-        { entityType: "asset-category", entityId: a.categoryId, action: "depreciation.policy" },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-    select: { actorLabel: true, action: true, diff: true, entityType: true, createdAt: true },
-  });
+  const [audits, notes] = await Promise.all([
+    prisma.auditEntry.findMany({
+      where: {
+        OR: [
+          {
+            entityType: "asset", entityId: a.id,
+            OR: [
+              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update"] } },
+              { action: { startsWith: "finance." } },
+              { action: { startsWith: "depreciation." } },
+              { action: { startsWith: "document." } },
+              { action: { startsWith: "attachment." } },
+              { action: { startsWith: "note." } },
+              { action: { startsWith: "asset-note." } },
+            ],
+          },
+          // Phase 47 (spec §4.5): the purchase record's entries, where the purchase and its fees are recorded
+          ...(a.purchaseRecord ? [{ entityType: "purchase-record", entityId: a.purchaseRecord.id }] : []),
+          { entityType: "asset-category", entityId: a.categoryId, action: "depreciation.policy" },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true, actorId: true, actorLabel: true, entityType: true, entityId: true, action: true, diff: true,
+        source: true, reason: true, createdAt: true,
+      },
+    }),
+    prisma.assetNote.findMany({ where: { assetId: a.id }, select: { parentId: true, resolvedAt: true } }),
+  ]);
+
+  // The signed-in account and role of each actor (AuditEntry keeps only the id and a display name).
+  const actorIds = [...new Set(audits.map((e) => e.actorId).filter((x): x is string => x !== null))];
+  const actors = actorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, email: true, role: true } })
+    : [];
+  const actorById = new Map<string, { email: string; role: Role }>(actors.map((u) => [u.id, { email: u.email, role: u.role }]));
+  const audit: AuditRow[] = audits.filter(isFinanceRelevant).map((e) => ({
+    ...e,
+    actorEmail: e.actorId ? actorById.get(e.actorId)?.email ?? null : null,
+    actorRole: e.actorId ? actorById.get(e.actorId)?.role ?? null : null,
+  }));
+
+  // Today's page's short list (kept until Task 7 rebuilds the page): the same actions it always read.
   const history = audits
+    .filter((e) => ["register", "update", "it.verify"].includes(e.action) || e.action.startsWith("finance.")
+      || e.action.startsWith("depreciation."))
     .filter((e) => e.action !== "update" || (e.diff !== null && typeof e.diff === "object" && "cost" in (e.diff as object)))
     .slice(0, 50)
     .map((e) => ({
@@ -139,5 +193,25 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     docs,
     years: result && costC !== null ? lifeYears(costC, depStart, policy, asOf) : [],
     history,
+    cost: {
+      priceC: costC,
+      feesC: toCentavos(a.purchaseRecord?.fees),
+      feesUnits: a.purchaseRecord?.quantity ?? null,
+      salvageC: policy?.salvage ?? null,
+      baseC: costC !== null && policy ? costC - policy.salvage : null,
+    },
+    purchase: {
+      pr: a.purchaseRequest ? { id: a.purchaseRequest.id, refNo: a.purchaseRequest.refNo } : null,
+      requestedBy: a.purchaseRequest?.requestedBy.name ?? null,
+      supplier: a.vendor?.name ?? null,
+      invoiceRef: a.invoiceRef, receiptRef: a.receiptRef, purchasedAt: a.purchasedAt,
+      warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy,
+    },
+    audit,
+    depLines: depLines(result, depStart, asOf, a.financeConfirmedAt),
+    purchaseUnits: a.purchaseRecord?.quantity ?? null,
+    noteCount: notes.filter((n) => n.parentId === null).length,
+    openNoteCount: notes.filter((n) => n.parentId === null && n.resolvedAt === null).length,
+    attachmentCount,
   };
 }
