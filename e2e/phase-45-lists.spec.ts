@@ -14,7 +14,8 @@ import { INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
  *   tabs       the Employees tabs filter and count (Missing kit = gaps=1); an old URL selects no tab
  *   per        Rows per page: 50 and 100 on both lists (also under the attention sort and gaps=1), a bad
  *              value reads as 25, and a change lands on page 1
- *   sticky     toolbar, head and footer stay in view after a scroll; at 1280×800 the default inventory
+ *   sticky     toolbar, head and footer stay in view after a scroll; focusing a stuck bar's control does not
+ *              scroll the window, and a focused row clears the pinned head; at 1280×800 the default inventory
  *              table fits its card, and the wide views (Repairs, Registration) scroll inside the card
  *   row size   Dense is 36 px and one line, Compact 48 px, the top-bar button goes Dense → Comfortable
  *   zebra      even body rows are tinted, odd rows are not
@@ -321,6 +322,60 @@ test.describe("sticky toolbar, head and footer", () => {
       expect(Math.abs(footer.y + footer.height - 900), `${url}: footer bottom at the window's bottom`).toBeLessThanOrEqual(1);
       expect(await page.evaluate(() => window.scrollY), url).toBeGreaterThanOrEqual(1400);
     }
+  });
+
+  test("6b. tabbing the stuck toolbar or footer never scrolls the window; a focused row lands below the pinned head", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await login(page, IT);
+    await page.goto("/inventory?per=100");
+    await expect(page.locator("tbody tr")).toHaveCount(100, { timeout: 20_000 });
+    const list = page.locator("[data-sticky-list]");
+    const toolbar = page.locator("[data-sticky-list] > div").filter({ has: page.getByRole("searchbox") });
+    const search = page.getByRole("searchbox", { name: "Search assets" });
+    await waitForHydration(search);
+    await expect
+      .poll(() => list.evaluate((el) => (el as HTMLElement).style.getPropertyValue("--list-sticky-top")), { timeout: 20_000 })
+      .not.toBe("");
+
+    await page.evaluate(() => window.scrollTo(0, 2000));
+    await expect(toolbar).toHaveAttribute("data-stuck", "true");
+    const scrollY = () => page.evaluate(() => window.scrollY);
+    const y0 = await scrollY();
+    expect(y0).toBeGreaterThanOrEqual(1990);
+
+    // The toolbar: the search box, then two Tabs along its controls. The window stays put.
+    await search.focus();
+    expect(await scrollY(), "focusing the search box").toBe(y0);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    expect(await toolbar.evaluate((bar) => bar.contains(document.activeElement)), "focus is still in the toolbar").toBe(true);
+    await page.waitForTimeout(300); // let any smooth scroll start
+    expect(await scrollY(), "tabbing the toolbar").toBe(y0);
+
+    // The footer: Rows per page.
+    await page.getByLabel("Rows per page").focus();
+    await page.waitForTimeout(300);
+    expect(await scrollY(), "focusing the footer's Rows per page").toBe(y0);
+
+    // A row that sits under the toolbar and head: focusing it scrolls it clear of both (WCAG 2.4.11).
+    const hiddenIdx = await page.locator("tbody tr").evaluateAll((rows) => {
+      const headBottom = document.querySelector("thead")!.getBoundingClientRect().bottom;
+      return rows.findIndex((r) => {
+        const box = r.getBoundingClientRect();
+        return box.bottom > 0 && box.top < headBottom - 4;
+      });
+    });
+    expect(hiddenIdx, "a row under the sticky toolbar and head").toBeGreaterThanOrEqual(0);
+    const row = page.locator("tbody tr").nth(hiddenIdx);
+    await row.focus();
+    await expect(row).toBeFocused();
+    await expect(async () => {
+      const rowBox = (await row.boundingBox())!;
+      const head = (await page.locator("thead").boundingBox())!;
+      expect(rowBox.y, "the focused row's top is at or below the head's bottom").toBeGreaterThanOrEqual(head.y + head.height - 1);
+      expect(rowBox.y + rowBox.height, "and inside the window").toBeLessThanOrEqual(900);
+    }).toPass({ timeout: 5_000 });
+    expect(await scrollY(), "the window scrolled up to the row").toBeLessThan(y0);
   });
 
   /** The table card (the Table wrapper) and its table, measured against each other and the window. */

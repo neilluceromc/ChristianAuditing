@@ -53,13 +53,10 @@ export function StickyToolbar({ children, className }: { children: React.ReactNo
     const sentinel = sentinelRef.current;
     if (!bar || !sentinel) return;
     const list = bar.closest<HTMLElement>("[data-sticky-list]");
-    const root = document.documentElement;
     const ro = new ResizeObserver(() => {
-      const h = `${Math.round(bar.getBoundingClientRect().height)}px`;
-      list?.style.setProperty("--list-sticky-top", h);
-      // The window's scroll-padding-top (globals.css, :root:has([data-sticky-list])) reads it, so a row reached by
+      // The head's sticky `top` reads it, and so do the rows' scroll-margin-top (globals.css), so a row reached by
       // Shift+Tab scrolls clear of the toolbar and the pinned head instead of landing under them (WCAG 2.4.11).
-      root.style.setProperty("--list-scroll-top", h);
+      list?.style.setProperty("--list-sticky-top", `${Math.round(bar.getBoundingClientRect().height)}px`);
     });
     ro.observe(bar);
     // stuck = the sentinel has scrolled out above the window's top edge (not merely below the fold)
@@ -69,7 +66,6 @@ export function StickyToolbar({ children, className }: { children: React.ReactNo
       ro.disconnect();
       io.disconnect();
       list?.style.removeProperty("--list-sticky-top");
-      root.style.removeProperty("--list-scroll-top");
     };
   }, []);
 

@@ -170,15 +170,21 @@
   border-bottom-right-radius: calc(var(--radius-card) - 1px);
 }
 
-/* A sticky list keeps keyboard focus in view (WCAG 2.4.11): rows are Tab stops, and the window's scroll padding
-   makes a focused row scroll clear of the sticky toolbar plus the pinned head above it (StickyToolbar writes its
-   height into --list-scroll-top) and of the 48 px sticky footer below it, or of Cris's corner when that is taller
-   (--cris-clear, cris-widget.css). `:root:has()` (0,2,0) outranks Cris's `html:has([data-cris-dock])` (0,1,1),
-   whichever stylesheet loads last. */
+/* A sticky list keeps keyboard focus in view (WCAG 2.4.11): rows are Tab stops, and a focused row (or a control
+   inside one) scrolls clear of the sticky toolbar plus the pinned head above it (--list-sticky-top, which
+   StickyToolbar measures onto the StickyList) and of the 48 px sticky footer below it, or of Cris's corner when that
+   is taller (--cris-clear, cris-widget.css). The clearance is the rows' scroll margin, not the window's scroll
+   padding: padding would also cover the sticky bars themselves, so focusing a toolbar or footer control would scroll
+   the window. For the same reason a list page drops Cris's window scroll-padding-bottom (the rows carry it instead);
+   `:root:has()` (0,2,0) outranks Cris's `html:has([data-cris-dock])` (0,1,1), whichever stylesheet loads last. */
 @media screen {
   :root:has([data-sticky-list]) {
-    scroll-padding-top: calc(var(--list-scroll-top, 0px) + var(--list-head-h));
-    scroll-padding-bottom: max(var(--cris-clear, 0px), 64px);
+    scroll-padding-bottom: 0;
+  }
+  [data-sticky-list] tbody tr,
+  [data-sticky-list] tbody tr * {
+    scroll-margin-top: calc(var(--list-sticky-top, 0px) + var(--list-head-h));
+    scroll-margin-bottom: max(var(--cris-clear, 0px), 64px);
   }
 }
 
