@@ -96,16 +96,16 @@ export function MobileNav({
   );
 }
 
-/** Spec §3: the phone top bar's BR mark and page name (the sidebar carries both from `lg` up). */
+/**
+ * Spec §3: the phone top bar's brand mark and page name (the sidebar carries both from `lg` up). Phase 47: the mark
+ * is the compact "CRIS" text the icon rail shows, not the old square BR logo (printed forms and labels keep BR).
+ */
 export function PageName({ sections, workspaceLabel }: { sections: VisibleSection[]; workspaceLabel: string }) {
   const pathname = usePathname();
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2 lg:hidden">
-      <span
-        aria-hidden
-        className="grid size-6 shrink-0 place-items-center rounded-[5px] bg-fg font-mono text-[11px] font-bold text-canvas"
-      >
-        BR
+      <span aria-hidden className="shrink-0 text-[11px] font-bold leading-none tracking-[0.02em] text-fg">
+        CRIS
       </span>
       <span className="truncate text-[13px] font-semibold text-fg">
         {navLabelFor(pathname, sections) ?? workspaceLabel}

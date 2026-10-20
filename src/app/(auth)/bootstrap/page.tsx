@@ -14,8 +14,8 @@ export default async function BootstrapPage() {
     <main data-theme="dark" className="grid min-h-screen w-full place-items-center bg-canvas p-4 text-fg">
       <div className="w-full max-w-[400px] rounded-[11px] border border-border bg-surface p-6 shadow-dialog">
         <div className="mb-5 flex items-center gap-2.5">
-          <span className="grid size-6 place-items-center rounded-[5px] bg-fg font-mono text-[11px] font-bold text-canvas">
-            BR
+          <span className="text-[11px] font-bold leading-none tracking-[0.02em] text-fg">
+            CRIS
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.09em] text-fg-muted">
             First-run setup
