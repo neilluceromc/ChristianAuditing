@@ -26,8 +26,10 @@ import { localDateISO } from "@/lib/format";
  * money value carries the exact amount in its `title`) and `[data-delta]`; `[data-needs-you] > li[data-tone]` are the
  * Needs you items; `[data-chart]` / `[data-tooltip]` / `[data-chart-table]` are the trend.
  *
- * The seed does not truncate MetricSnapshot (prisma/seed.ts), so beforeAll clears it: a fresh database has no
- * history. Fixtures are made and removed inside the test that needs them. Never a raw cuid.
+ * The seed truncates MetricSnapshot (prisma/seed.ts), so beforeAll starts from no history. A `worker:once` in an
+ * earlier spec, or a running worker, still writes today's rows, so the history test sets aside the rows for its own
+ * keys, runs on a clean slate, and puts them back. Fixtures are made and removed inside the test that needs them.
+ * Never a raw cuid.
  */
 
 const db = new PrismaClient();
@@ -325,6 +327,10 @@ test.describe("history behind the numbers", () => {
   test("a fresh database reads collecting history; two snapshots a week apart draw the sparkline and the change", async ({ page }) => {
     test.setTimeout(90_000);
     const today = localDateISO();
+    // `worker:once` (other specs) or a running worker may already have written today's rows, or earlier days, for
+    // these keys: set them aside, run on a clean slate, put them back (cleanup touches only these keys).
+    const before = await db.metricSnapshot.findMany({ where: { key: { in: IT_KEYS } } });
+    await db.metricSnapshot.deleteMany({ where: { key: { in: IT_KEYS } } });
     try {
       await openHome(page, { email: IT });
       // Spec §2.4: no made-up history — every snapshot tile says so, and draws no sparkline.
@@ -354,7 +360,8 @@ test.describe("history behind the numbers", () => {
       // the other tiles have no history yet
       await expect(tileOf(page, "it.deployed").locator("[data-delta]")).toHaveText("collecting history");
     } finally {
-      await db.metricSnapshot.deleteMany({ where: { key: "it.spare" } });
+      await db.metricSnapshot.deleteMany({ where: { key: { in: IT_KEYS } } });
+      if (before.length > 0) await db.metricSnapshot.createMany({ data: before, skipDuplicates: true });
     }
   });
 });

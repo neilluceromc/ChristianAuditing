@@ -50,7 +50,7 @@ async function main() {
       "EquipmentPolicy", "EmployeeTransfer", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User",
       "StocktakeLine", "Stocktake", "StockMovement", "StockLotDocument", "StockAllocation", "StockLot",
-      "StockItem", "StockCategory" CASCADE`);
+      "StockItem", "StockCategory", "MetricSnapshot" CASCADE`);
 
   const hash = await bcrypt.hash(SEED_PASSWORD, 10);
 
