@@ -110,6 +110,13 @@ and paste the lines it prints into chat (table names and numbers only; no secret
 **(Claude)** runs `.\scripts\supabase\counts.ps1 -Target laptop` against the laptop database and
 compares the two lists table by table. Any difference stops the cutover here.
 
+**Uploaded files do not travel with the database.** The five document tables are `AssetDocument`,
+`RequestDocument` (purchase documents), `VendorDocument` (supplier documents), `StockLotDocument`
+(stock lot documents) and `Acknowledgement` (employee acknowledgements). Their files stay on the
+laptop's `./uploads` volume, and every download on Vercel would then answer "File missing from the
+uploads volume". So **every one of the five must be 0 on the laptop. If any is not 0, stop and ask
+Claude before continuing**: the files have to be copied into the `documents` bucket first.
+
 ### 5. In Vercel: import the repository, paste the environment variables
 
 **Import only now.** A production build runs `prisma migrate deploy`, and it must find the restored
@@ -132,6 +139,10 @@ schema.
    above was started by the import; the real test is the **first push to `main` after it**. When
    that push happens, check Vercel → Deployments shows a new production deployment for it. If it
    does not, set Settings → Git → Production Branch to `main` and push again (or Redeploy).
+
+8. Check Project → Settings → **Functions**: **Fluid compute** must be **ON** (the default for new
+   projects). The instant worker kick runs after the response is sent, and without Fluid compute the
+   function is cut off after about 10 seconds, killing a job half way.
 
 Functions run in Singapore (`sin1`, set in `vercel.json`), next to the database.
 
@@ -162,15 +173,21 @@ Vercel Hobby has no long-running process, so Supabase calls the worker:
 `POST /api/worker/tick` every minute and `POST /api/worker/maintenance` hourly at :05, each with the
 header `Authorization: Bearer <CRON_SECRET>`. A missing or wrong header gets `401`.
 
-1. SQL Editor → New query → put **your** two values in place of the placeholders and run:
+1. Store the two values in the Vault **through its page**, not through SQL: Supabase → your project →
+   **Integrations → Vault → Add new secret**, twice. The names must be exactly:
 
-   ```sql
-   select vault.create_secret('https://<project>.vercel.app', 'app_url');  -- no trailing slash
-   select vault.create_secret('<your-cron-secret>', 'cron_secret');       -- the same as Vercel's CRON_SECRET
-   ```
+   | Name | Secret |
+   |---|---|
+   | `app_url` | `https://<project>.vercel.app` (no trailing slash) |
+   | `cron_secret` | the same value as Vercel's `CRON_SECRET` |
 
-   Then clear the editor tab, so the secret is not left in a saved query. (You can also add the two
-   secrets under Integrations → **Vault**; the names must be exactly `app_url` and `cron_secret`.)
+   Why not SQL: the SQL editor keeps its query history on Supabase's side, so a real secret typed
+   into `vault.create_secret(...)` stays there even after you clear the tab.
+
+   Fallback, only if the Vault page is unavailable: in SQL Editor run
+   `select vault.create_secret('<value>', 'cron_secret');` and the same for `app_url`. **Warning:** the
+   editor's history keeps that query, secret included. Delete it from the history afterwards and, if
+   you doubt it was purged, rotate `CRON_SECRET` (new value in Vercel, redeploy, update Vault).
 2. New query → paste all of `scripts/supabase/schedule.sql` → **Run**. It enables `pg_cron` and
    `pg_net` and (re)creates the jobs `worker-tick` and `worker-maintenance`. Safe to run again.
 3. After two minutes, check:
@@ -209,6 +226,12 @@ if not, set Vercel → Settings → Git → Production Branch to `main`. The Pla
 local, because it seeds.
 
 ---
+
+## Troubleshooting
+
+- **Vercel logs show Prisma "Timed out fetching a new connection from the connection pool".** Change
+  `connection_limit=1` to `connection_limit=3` in the Vercel `DATABASE_URL` (Settings → Environment
+  Variables) and Redeploy. One connection can be too few when a function serves several requests at once.
 
 ## Sign-up on the public internet
 

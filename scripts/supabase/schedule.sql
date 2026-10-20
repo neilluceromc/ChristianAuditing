@@ -6,9 +6,14 @@
 -- Both send `Authorization: Bearer <cron_secret>`. The secret and the address live in Supabase Vault,
 -- never in this file. Run AFTER the first Vercel production deploy.
 --
--- STEP 1 (once, in the SQL editor; replace the two placeholders, keep the names exactly):
---   select vault.create_secret('https://<project>.vercel.app', 'app_url');      -- no trailing slash
---   select vault.create_secret('<your-cron-secret>', 'cron_secret');           -- the same value as Vercel's CRON_SECRET
+-- STEP 1 (once): in the Supabase dashboard, Project -> Integrations -> Vault -> Add new secret, twice.
+-- Keep the names exactly:
+--   app_url      https://<project>.vercel.app    (no trailing slash)
+--   cron_secret  the same value as Vercel's CRON_SECRET
+-- Use the Vault page, NOT the SQL editor: the editor keeps its query history, so a secret typed into
+-- vault.create_secret('...') stays stored there. Fallback only if the page is unavailable (the history
+-- then holds the secret; delete it from the history, or rotate CRON_SECRET):
+--   select vault.create_secret('<value>', 'app_url');  select vault.create_secret('<value>', 'cron_secret');
 -- To change one later: Project -> Integrations -> Vault (or vault.update_secret(id, new_secret)).
 --
 -- STEP 2: run this whole file. It unschedules both jobs first, so it can be re-run safely.
