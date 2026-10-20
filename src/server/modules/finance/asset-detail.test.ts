@@ -182,11 +182,6 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
     expect(JSON.stringify(rows)).not.toContain("ven-");
   });
 
-  it("keeps the old history list for today's page", async () => {
-    const d = (await financeAssetDetail("a1", NOW))!;
-    expect(d.history.length).toBeGreaterThan(0);
-    expect(d.history.every((x) => typeof x.sentence === "string")).toBe(true);
-  });
 });
 
 describe("financeAssetDetail — notes, attachments, documents", () => {

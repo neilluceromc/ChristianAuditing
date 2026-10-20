@@ -1,6 +1,5 @@
 import type { AssetClass, AssetStatus, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { auditSentence } from "@/lib/activity";
 import { countedFromOf, depLines, isFinanceRelevant, type AuditRow, type DepLine } from "@/lib/finance-history";
 import {
   asOfMonth, depStartMonth, depreciate, lifeYears, monthLabel, resolvePolicy, stateNote, toCentavos, type DepResult, type LifeYear,
@@ -31,7 +30,6 @@ export interface FinanceAssetDetail {
   warrantyUntil: Date | null; coveredBy: string | null; contact: string | null;
   docs: Array<{ kind: string; title: string; file: { id: string; fileName: string; size: number | null } | null }>;
   years: LifeYear[];
-  history: Array<{ at: Date; sentence: string }>;
   /**
    * Phase 47 (spec §4.2 ruling): agrees with the engine — the depreciable base is cost − salvage; the purchase
    * record's fees never depreciate, so there is no "total acquisition cost". `feesUnits` > 1 reads "for the whole
@@ -162,20 +160,6 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
   }));
   const historyNames = await diffIdNames(audit);
 
-  // Today's page's short list (kept until Task 7 rebuilds the page): the same actions it always read.
-  const history = audits
-    .filter((e) => ["register", "update", "it.verify"].includes(e.action) || e.action.startsWith("finance.")
-      || e.action.startsWith("depreciation."))
-    .filter((e) => e.action !== "update" || (e.diff !== null && typeof e.diff === "object" && "cost" in (e.diff as object)))
-    .slice(0, 50)
-    .map((e) => ({
-      at: e.createdAt,
-      sentence: auditSentence({
-        actorLabel: e.actorLabel, action: e.action, diff: e.diff,
-        entityLabel: e.entityType === "asset-category" ? a.category.name : a.tag,
-      }),
-    }));
-
   return {
     id: a.id, tag: a.tag, model: a.model, brand: a.brand, serial: a.serial,
     cls: a.cls, status: a.status, category: a.category.name, holder: a.assignee?.name ?? null,
@@ -195,7 +179,6 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy, contact: a.warrantyContact,
     docs,
     years: result && costC !== null ? lifeYears(costC, depStart, policy, asOf) : [],
-    history,
     cost: {
       priceC: costC,
       feesC: toCentavos(a.purchaseRecord?.fees),

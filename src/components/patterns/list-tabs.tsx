@@ -8,6 +8,8 @@ export interface TabDef {
   key: string;
   label: string;
   count: number;
+  /** Phase 47 (asset page): words shown in the badge instead of the count, e.g. "36 mo" */
+  badge?: string;
   /** where a click goes: this tab's filter on (and every other tab's off) */
   href: string;
   /** selected: this tab's filter is the one applied */
@@ -50,7 +52,7 @@ export function ListTabs({ tabs, label }: { tabs: TabDef[]; label: string }) {
               t.on ? "bg-accent-soft text-accent-soft-text" : BADGE_TONE[t.tone ?? "neutral"],
             )}
           >
-            {t.count.toLocaleString("en-US")}
+            {t.badge ?? t.count.toLocaleString("en-US")}
           </span>
           {t.on && (
             <span
