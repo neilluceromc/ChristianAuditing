@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { depreciate, type Policy } from "./depreciation";
 import {
-  buildHistory, depLines, historyRef, historyVerb, isFinanceRelevant, HISTORY_KINDS, type AuditRow,
+  buildHistory, countedFromOf, depLines, historyRef, historyVerb, isFinanceRelevant, HISTORY_KINDS, type AuditRow,
 } from "./finance-history";
 
 /*
@@ -22,9 +22,11 @@ function row(extra: Partial<AuditRow> & { id: string }): AuditRow {
   };
 }
 
+// confirmFinance stamps Asset.financeConfirmedAt, THEN writes the audit row: the entry is a few ms later.
+const FINANCE_CONFIRMED_AT = new Date("2026-01-10T02:00:00.000Z");
 const confirm = row({
   id: "cmabc123xyz9k2", action: "finance.confirm",
-  diff: { financeConfirmed: { from: null, to: "Ana Cruz" } }, createdAt: new Date("2026-01-10T02:00:00Z"),
+  diff: { financeConfirmed: { from: null, to: "Ana Cruz" } }, createdAt: new Date("2026-01-10T02:00:00.005Z"),
 });
 const lateNight = row({
   id: "cmlate000000zz77", action: "update", diff: { cost: { from: 30000, to: 36000 } },
@@ -68,7 +70,7 @@ const system = row({
 const ENTRIES = [confirm, lateNight, fee, sendBack, override, imported, doc, note, odd, system];
 const START = M(2025, 12);
 const AS_OF = M(2026, 10);
-const DEP = depLines(depreciate(3_600_000, START, policy, AS_OF), START, AS_OF, confirm.createdAt);
+const DEP = depLines(depreciate(3_600_000, START, policy, AS_OF), START, AS_OF, countedFromOf(ENTRIES, FINANCE_CONFIRMED_AT));
 
 describe("historyRef", () => {
   it("is AUD-<yyyymmdd Manila>-<last 6 of id, upper case>", () => {
@@ -86,7 +88,15 @@ describe("depLines", () => {
     expect(DEP[10].accToC).toBe(depreciate(3_600_000, START, policy, AS_OF).accumulated);
   });
 
-  it("a month counted before the approval is dated at the approval; later months at their first day (Manila)", () => {
+  it("countedFromOf: the latest finance.confirm entry's time, else financeConfirmedAt", () => {
+    expect(countedFromOf(ENTRIES, FINANCE_CONFIRMED_AT)).toEqual(confirm.createdAt);
+    const again = row({ id: "cmagain0000000ag1", action: "finance.confirm", createdAt: new Date("2026-05-01T00:00:00Z") });
+    expect(countedFromOf([confirm, again], FINANCE_CONFIRMED_AT)).toEqual(again.createdAt);
+    expect(countedFromOf([], FINANCE_CONFIRMED_AT)).toEqual(FINANCE_CONFIRMED_AT);
+    expect(countedFromOf([], null)).toBeNull();
+  });
+
+  it("a month counted before the approval is dated at the approval entry; later months at their first day (Manila)", () => {
     expect(DEP[0].at.toISOString()).toBe(confirm.createdAt.toISOString()); // Dec 2025, caught up at approval
     expect(DEP[1].at.toISOString()).toBe(confirm.createdAt.toISOString()); // Jan 2026 began before the 10 Jan approval
     expect(DEP[2].at.toISOString()).toBe("2026-01-31T16:00:00.000Z"); // 1 Feb 2026 00:00 Manila
@@ -126,7 +136,7 @@ describe("buildHistory", () => {
 
   it("includes the purchase record's entry as a cost change related to the purchase", () => {
     const r = all().rows.find((x) => x.id === fee.id)!;
-    expect(r).toMatchObject({ kind: "cost", actor: "Pia Lim", role: "Purchasing", related: "Purchase record (3 units)" });
+    expect(r).toMatchObject({ kind: "cost", actor: "Pia Lim", actorKey: "u-pia", role: "Purchasing", related: "Purchase record (3 units)" });
     expect(r.verb).toBe("recorded the purchase");
     expect(r.changes).toEqual([
       { field: "total", from: "—", to: "₱108,500.00" },
@@ -138,6 +148,7 @@ describe("buildHistory", () => {
     const by = (id: string) => all().rows.find((x) => x.id === id)!;
     expect(by(confirm.id)).toMatchObject({ kind: "approval", verb: "approved the asset for depreciation", changes: [] });
     expect(by(sendBack.id)).toMatchObject({ kind: "review", verb: "sent the asset back", reason: "Invoice total differs" });
+    expect(by(sendBack.id).changes).toEqual([{ field: "flagged", from: "—", to: "Cost" }]);
     expect(by(override.id)).toMatchObject({
       kind: "settings", verb: "set a custom depreciation", reason: "Heavy field use", source: "cris", sourceLabel: "Cris assistant",
     });
@@ -167,7 +178,10 @@ describe("buildHistory", () => {
     // the unknown action falls back to Reviews
     expect(h.counts).toEqual({ approval: 2, review: 2, cost: 3, settings: 1, docs: 1, notes: 1, dep: 11 });
     expect(Object.keys(h.counts).sort()).toEqual([...HISTORY_KINDS].sort());
-    expect(h.actors).toEqual(["Ana Cruz", "Ben Reyes", "Pia Lim", "System"]);
+    expect(h.actors).toEqual([
+      { key: "u-ana", label: "Ana Cruz" }, { key: "u-ben", label: "Ben Reyes" }, { key: "u-pia", label: "Pia Lim" },
+      { key: "system", label: "System" },
+    ]);
     expect(h.total).toBe(ENTRIES.length + 11);
   });
 
@@ -175,13 +189,27 @@ describe("buildHistory", () => {
     const dep = all({ kind: "dep" });
     expect(dep.total).toBe(11);
     expect(dep.rows.every((r) => r.kind === "dep")).toBe(true);
-    const ana = all({ person: "Ana Cruz" });
+    const ana = all({ person: "u-ana" });
     expect(ana.rows.every((r) => r.actor === "Ana Cruz")).toBe(true);
     expect(ana.total).toBe(7);
     expect(ana.counts.dep).toBe(0);
-    const sys = all({ person: "System", kind: "dep" });
+    const sys = all({ person: "system", kind: "dep" });
     expect(sys.total).toBe(11);
-    expect(all({ person: "System" }).total).toBe(12);
+    expect(all({ person: "system" }).total).toBe(12);
+  });
+
+  it("the person filter keys on the actor id: two people with the same name stay apart", () => {
+    const twin = row({ id: "cmtwin0000000tw1", actorId: "u-ana2", action: "it.verify", createdAt: new Date("2026-06-01T00:00:00Z") });
+    const h = buildHistory([...ENTRIES, twin], DEP, { pageSize: 1000 }, CTX);
+    expect(h.actors.filter((a) => a.label === "Ana Cruz").map((a) => a.key).sort()).toEqual(["u-ana", "u-ana2"]);
+    expect(buildHistory([...ENTRIES, twin], DEP, { person: "u-ana2" }, CTX).rows.map((r) => r.id)).toEqual([twin.id]);
+  });
+
+  it("catch-up depreciation lines sit above the approval, newest first", () => {
+    const ids = all().rows.map((r) => r.id);
+    expect(ids.indexOf("dep-" + M(2025, 12))).toBeLessThan(ids.indexOf(confirm.id));
+    expect(ids.indexOf("dep-" + M(2026, 1))).toBeLessThan(ids.indexOf(confirm.id));
+    expect(ids.indexOf("dep-" + M(2026, 1))).toBeLessThan(ids.indexOf("dep-" + M(2025, 12)));
   });
 
   it("pages 10 at a time, newest first, with x–y of N", () => {
@@ -198,6 +226,53 @@ describe("buildHistory", () => {
   });
 });
 
+describe("change chips never show raw ids or codes", () => {
+  const vendor = row({
+    id: "cmven00000000ven1", action: "update",
+    diff: { vendorId: { from: "cmvendorold000001", to: "cmvendornew000002" }, cost: { from: 30000, to: 36000 } },
+  });
+  const one = (e: AuditRow, names?: Record<string, string>) =>
+    buildHistory([e], [], {}, { ...CTX, names }).rows[0];
+
+  it("a supplier change reads by name when the server resolved it", () => {
+    const r = one(vendor, { cmvendorold000001: "Octagon", cmvendornew000002: "Acme Trading" });
+    expect(r.changes).toEqual([
+      { field: "cost", from: "₱30,000.00", to: "₱36,000.00" },
+      { field: "supplier", from: "Octagon", to: "Acme Trading" },
+    ]);
+    expect(r.verb).toBe("changed the cost, supplier");
+  });
+
+  it("an id the server could not resolve drops its chip (the verb still names the field)", () => {
+    const r = one(vendor);
+    expect(r.changes).toEqual([{ field: "cost", from: "₱30,000.00", to: "₱36,000.00" }]);
+    expect(JSON.stringify(r)).not.toContain("cmvendor");
+    expect(r.verb).toBe("changed the cost, supplier");
+  });
+
+  it("a cleared supplier reads — ", () => {
+    const cleared = row({ id: "cmclr00000000clr1", action: "update", diff: { vendorId: { from: "cmvendorold000001", to: null } } });
+    expect(one(cleared, { cmvendorold000001: "Octagon" }).changes).toEqual([{ field: "supplier", from: "Octagon", to: "—" }]);
+  });
+
+  it("statuses and classes use their labels", () => {
+    const created = row({
+      id: "cmcre00000000cre1", action: "create",
+      diff: { status: { from: null, to: "TEMPORARY" }, cls: { from: null, to: "PURCHASING" }, tag: { from: null, to: "IT-0042" } },
+    });
+    expect(one(created).changes).toEqual([
+      { field: "class", from: "—", to: "Purchasing" },
+      { field: "status", from: "—", to: "Loan" },
+      { field: "tag", from: "—", to: "IT-0042" },
+    ]);
+  });
+
+  it("a signed document reads 'signed <file>' with no chip", () => {
+    const signed = row({ id: "cmsig00000000sig1", action: "document.signed", diff: { "form.pdf": { from: "unsigned", to: "SIGNED" } } });
+    expect(one(signed)).toMatchObject({ verb: "signed form.pdf", changes: [], kind: "docs" });
+  });
+});
+
 describe("isFinanceRelevant / historyVerb", () => {
   it("keeps finance actions and purchase-record entries; drops non-finance updates and lifecycle", () => {
     expect(isFinanceRelevant({ entityType: "asset", action: "update", diff: { cost: { from: 1, to: 2 } } })).toBe(true);
@@ -205,6 +280,8 @@ describe("isFinanceRelevant / historyVerb", () => {
     expect(isFinanceRelevant({ entityType: "asset", action: "lifecycle.assign", diff: null })).toBe(false);
     expect(isFinanceRelevant({ entityType: "purchase-record", action: "anything", diff: null })).toBe(true);
     expect(isFinanceRelevant({ entityType: "asset", action: "it.verify", diff: null })).toBe(true);
+    // a holder or status change request is not finance history
+    expect(isFinanceRelevant({ entityType: "asset", action: "approval.requested", diff: null })).toBe(false);
   });
 
   it("not capitalised reads as such", () => {

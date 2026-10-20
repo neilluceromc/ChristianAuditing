@@ -1,7 +1,7 @@
 import type { AssetClass, AssetStatus, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { auditSentence } from "@/lib/activity";
-import { depLines, isFinanceRelevant, type AuditRow, type DepLine } from "@/lib/finance-history";
+import { countedFromOf, depLines, isFinanceRelevant, type AuditRow, type DepLine } from "@/lib/finance-history";
 import {
   asOfMonth, depStartMonth, depreciate, lifeYears, monthLabel, resolvePolicy, stateNote, toCentavos, type DepResult, type LifeYear,
 } from "@/lib/depreciation";
@@ -49,6 +49,8 @@ export interface FinanceAssetDetail {
   depLines: DepLine[];
   /** Units the purchase record covered (history's "Purchase record (N units)"). */
   purchaseUnits: number | null;
+  /** id → name for the supplier / category / type / holder / department ids in `audit` diffs (buildHistory's `names`). */
+  historyNames: Record<string, string>;
   /** Phase 47: note threads, and the unresolved ones (the Notes badge is amber while any is open). */
   noteCount: number; openNoteCount: number;
   /** Phase 47: `attachment:*` documents (the Attachments tab; they are not document slots). */
@@ -158,6 +160,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     actorEmail: e.actorId ? actorById.get(e.actorId)?.email ?? null : null,
     actorRole: e.actorId ? actorById.get(e.actorId)?.role ?? null : null,
   }));
+  const historyNames = await diffIdNames(audit);
 
   // Today's page's short list (kept until Task 7 rebuilds the page): the same actions it always read.
   const history = audits
@@ -208,10 +211,39 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy,
     },
     audit,
-    depLines: depLines(result, depStart, asOf, a.financeConfirmedAt),
+    // catch-up months are dated at the approval's audit entry, which lands ms after financeConfirmedAt
+    depLines: depLines(result, depStart, asOf, countedFromOf(audit, a.financeConfirmedAt)),
     purchaseUnits: a.purchaseRecord?.quantity ?? null,
+    historyNames,
     noteCount: notes.filter((n) => n.parentId === null).length,
     openNoteCount: notes.filter((n) => n.parentId === null && n.resolvedAt === null).length,
     attachmentCount,
   };
+}
+
+/**
+ * Phase 47 (Task 4 review): the ids an audit diff can carry, resolved to names so a history chip never shows a raw id.
+ * One read per kind of id present; an id that no longer resolves is simply absent (its chip is dropped).
+ */
+async function diffIdNames(rows: AuditRow[]): Promise<Record<string, string>> {
+  const ids: Record<"vendorId" | "categoryId" | "typeId" | "assigneeId" | "departmentId", Set<string>> = {
+    vendorId: new Set(), categoryId: new Set(), typeId: new Set(), assigneeId: new Set(), departmentId: new Set(),
+  };
+  for (const r of rows) {
+    if (r.diff === null || typeof r.diff !== "object") continue;
+    for (const [key, change] of Object.entries(r.diff as Record<string, { from?: unknown; to?: unknown } | null>)) {
+      if (!(key in ids) || !change || typeof change !== "object") continue;
+      for (const v of [change.from, change.to]) if (typeof v === "string" && v) ids[key as keyof typeof ids].add(v);
+    }
+  }
+  const byId = (set: Set<string>) => ({ where: { id: { in: [...set] } }, select: { id: true, name: true } });
+  const none = Promise.resolve([] as Array<{ id: string; name: string }>);
+  const found = await Promise.all([
+    ids.vendorId.size ? prisma.vendor.findMany(byId(ids.vendorId)) : none,
+    ids.categoryId.size ? prisma.assetCategory.findMany(byId(ids.categoryId)) : none,
+    ids.typeId.size ? prisma.assetType.findMany(byId(ids.typeId)) : none,
+    ids.assigneeId.size ? prisma.employee.findMany(byId(ids.assigneeId)) : none,
+    ids.departmentId.size ? prisma.department.findMany(byId(ids.departmentId)) : none,
+  ]);
+  return Object.fromEntries(found.flat().map((x) => [x.id, x.name]));
 }

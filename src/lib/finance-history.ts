@@ -2,7 +2,9 @@ import type { Role } from "@prisma/client";
 import { lifeYears, monthLabel, type DepResult, type MonthIndex } from "./depreciation";
 import { lifeLabel } from "./depreciation-input";
 import { fieldLabel } from "./activity";
+import { CLASS_LABEL, statusLabel } from "./asset-class";
 import { fmtDate, fmtMoneyExact } from "./format";
+import { EMPLOYMENT_LABEL } from "./labels";
 
 /*
  * Phase 47 (Task 4, spec §4.5): the Financial history tab, built from
@@ -29,6 +31,8 @@ export const ROLE_SHORT: Record<Role, string> = {
 };
 
 export const SYSTEM_ACTOR = "System";
+/** The person filter's key for System (audit rows with no actor, and the derived depreciation lines). */
+export const SYSTEM_KEY = "system";
 export const HISTORY_PAGE_SIZE = 10;
 
 /** One AuditEntry, with the actor's email and role joined from User by actorId (null for System or a deleted user). */
@@ -76,6 +80,8 @@ export interface HistoryRow {
   /** Exact time with the time zone, for Details. */
   exact: string;
   actor: string;
+  /** The person filter's key: the actor's user id, or "system". */
+  actorKey: string;
   /** Short role ("Finance", "IT"), null for System or an unknown user. */
   role: string | null;
   kind: HistoryKind;
@@ -92,7 +98,7 @@ export interface HistoryRow {
 
 export interface HistoryFilters {
   kind?: HistoryKind | "all";
-  /** An actor name, "System", or "all" / undefined for Everyone. */
+  /** An actor key (user id, or "system"), or "all" / undefined for Everyone. */
   person?: string;
   /** 1-based; clamped to the last page. */
   page?: number;
@@ -104,14 +110,19 @@ export interface HistoryContext {
   categoryName?: string | null;
   /** Units the purchase record covered, for "Purchase record (3 units)". */
   purchaseUnits?: number | null;
+  /**
+   * id → name for the ids a diff can carry (supplier, category, type, holder, department), resolved on the server.
+   * An id missing here drops its chip: a chip never shows a raw id.
+   */
+  names?: Record<string, string>;
 }
 
 export interface HistoryResult {
   rows: HistoryRow[];
   /** Per kind, under the person filter (not the kind filter); "All" is their sum. */
   counts: Record<HistoryKind, number>;
-  /** Everyone who appears, by name, then "System" last when it appears. */
-  actors: string[];
+  /** Everyone who appears (key = user id, label = name), by name, then System last when it appears. */
+  actors: Array<{ key: string; label: string }>;
   /** Entries after both filters: the N of "x–y of N". */
   total: number;
   page: number;
@@ -173,7 +184,6 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
   "it.verify": { kind: "review", verb: "completed the IT check" },
   "finance.return": { kind: "review", verb: "sent the asset back" },
   "finance.resubmit": { kind: "review", verb: "resubmitted the asset to Finance" },
-  "approval.requested": { kind: "review", verb: "requested a change" },
   // approvals
   "finance.confirm": {
     kind: "approval",
@@ -192,7 +202,13 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
   "document.uploaded": {
     kind: "docs", verb: (d) => (typeof d?.document?.to === "string" ? `uploaded ${d.document.to}` : "uploaded a document"),
   },
-  "document.signed": { kind: "docs", verb: "signed a document" },
+  // the writer keys the diff by the file name: { "<file>": { from: "unsigned", to: "SIGNED" } }
+  "document.signed": {
+    kind: "docs", verb: (d) => {
+      const file = d ? Object.keys(d).find((k) => k !== "via") : undefined;
+      return file ? `signed ${file}` : "signed a document";
+    },
+  },
   "attachment.uploaded": {
     kind: "docs", verb: (d) => (typeof d?.attachment?.to === "string" ? `attached ${d.attachment.to}` : "added an attachment"),
   },
@@ -233,7 +249,7 @@ export function isFinanceRelevant(e: { entityType: string; action: string; diff:
   if (e.entityType === "purchase-record") return true;
   if (e.entityType === "asset-category") return e.action === "depreciation.policy";
   if (e.action === "update" || e.action === "import-update") return touchesFinance(e.diff);
-  if (HISTORY_VERBS[e.action]) return e.action !== "approval.requested";
+  if (HISTORY_VERBS[e.action]) return true;
   return ["finance.", "depreciation.", "document.", "attachment.", "note.", "asset-note."].some((p) => e.action.startsWith(p));
 }
 
@@ -241,15 +257,26 @@ export function isFinanceRelevant(e: { entityType: string; action: string; diff:
 
 /** Diff keys that are not changes to show: the actor's own name, Cris's marker, the reason-bearing notes, objects. */
 const HIDDEN_FIELDS = new Set(["via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "document", "attachment"]);
-const MONEY_FIELDS = new Set(["cost", "total", "fees", "salvage", "unitCost", "price"]);
+const MONEY_FIELDS = new Set(["cost", "total", "fees", "salvage", "unitCost", "price", "repairQuote"]);
 const CHIP_LABELS: Record<string, string> = {
   lifeMonths: "useful life", quantity: "units", fees: "delivery and fees", unitCost: "unit cost",
-  notCapitalised: "not capitalised", salvagePercent: "salvage %",
+  notCapitalised: "not capitalised", salvagePercent: "salvage %", cls: "class", repairQuote: "repair quote",
 };
+/** Enum values a chip shows by their label, never the code. */
+const ENUM_LABELS: Record<string, (v: string) => string> = {
+  status: statusLabel,
+  cls: (v) => (Object.hasOwn(CLASS_LABEL, v) ? CLASS_LABEL[v as keyof typeof CLASS_LABEL] : v),
+  employment: (v) => (Object.hasOwn(EMPLOYMENT_LABEL, v) ? EMPLOYMENT_LABEL[v as keyof typeof EMPLOYMENT_LABEL] : v),
+};
+/** A diff key holding a database id (vendorId, categoryId, assigneeId, …). */
+const isIdKey = (key: string) => /Id$/.test(key);
 const chipLabel = (key: string) => CHIP_LABELS[key] ?? fieldLabel(key);
 
-function chipValue(key: string, v: unknown): string | null {
+/** A chip's words for one side of a change; null drops the chip (an object, or an id with no resolved name). */
+function chipValue(key: string, v: unknown, names: Record<string, string>): string | null {
   if (v === null || v === undefined || v === "") return "—";
+  if (isIdKey(key)) return typeof v === "string" && Object.hasOwn(names, v) ? names[v] : null;
+  if (typeof v === "string" && ENUM_LABELS[key]) return ENUM_LABELS[key](v);
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (MONEY_FIELDS.has(key) && (typeof v === "number" || typeof v === "string") && v !== "" && !Number.isNaN(Number(v))) {
     return fmtMoneyExact(v);
@@ -262,13 +289,20 @@ function chipValue(key: string, v: unknown): string | null {
   return String(v);
 }
 
-function changesOf(diff: unknown): HistoryChange[] {
+function changesOf(e: AuditRow, names: Record<string, string>): HistoryChange[] {
+  const diff = e.diff;
   if (diff === null || typeof diff !== "object") return [];
+  if (e.action === "document.signed") return []; // its one key is the file name, and the verb says it
   const out: HistoryChange[] = [];
+  // a send-back's checklist: which fields Finance flagged (the note is the reason)
+  const ret = (diff as { financeReturn?: { to?: { fields?: unknown } | null } }).financeReturn?.to;
+  if (ret && typeof ret === "object" && Array.isArray(ret.fields) && ret.fields.length) {
+    out.push({ field: "flagged", from: "—", to: ret.fields.map(String).join(", ") });
+  }
   for (const [key, c] of Object.entries(diff as Record<string, unknown>)) {
     if (HIDDEN_FIELDS.has(key) || c === null || typeof c !== "object") continue;
     const { from, to } = c as { from?: unknown; to?: unknown };
-    const f = chipValue(key, from), t = chipValue(key, to);
+    const f = chipValue(key, from, names), t = chipValue(key, to, names);
     if (f === null || t === null) continue;
     out.push({ field: chipLabel(key), from: f, to: t });
   }
@@ -323,10 +357,11 @@ function auditToRow(e: AuditRow, ctx: HistoryContext): HistoryRow {
     at: e.createdAt,
     ...timeFields(e.createdAt),
     actor: system ? SYSTEM_ACTOR : e.actorLabel,
+    actorKey: e.actorId ?? SYSTEM_KEY,
     role: e.actorRole ? ROLE_SHORT[e.actorRole] : null,
     kind: kindFor(e.entityType, e.action),
     verb: historyVerb(e),
-    changes: changesOf(e.diff),
+    changes: changesOf(e, ctx.names ?? {}),
     reason: reasonOf(e),
     source,
     sourceLabel: HISTORY_SOURCE_LABELS[source],
@@ -343,6 +378,7 @@ function depToRow(l: DepLine): HistoryRow {
     at: l.at,
     ...timeFields(l.at),
     actor: SYSTEM_ACTOR,
+    actorKey: SYSTEM_KEY,
     role: null,
     kind: "dep",
     verb: `counted ${l.label} depreciation`,
@@ -359,6 +395,19 @@ function depToRow(l: DepLine): HistoryRow {
 }
 
 // ---- derived depreciation lines -------------------------------------------------------------------------------------
+
+/**
+ * When the catch-up months were counted: the latest `finance.confirm` audit entry. confirmFinance stamps
+ * `Asset.financeConfirmedAt` before it writes that entry, so the entry is a few ms later — dating the lines at the
+ * column would list them under the approval. Falls back to the column when no entry is at hand.
+ */
+export function countedFromOf(entries: ReadonlyArray<Pick<AuditRow, "entityType" | "action" | "createdAt">>, financeConfirmedAt: Date | null): Date | null {
+  let latest: Date | null = null;
+  for (const e of entries) {
+    if (e.entityType === "asset" && e.action === "finance.confirm" && (!latest || e.createdAt > latest)) latest = e.createdAt;
+  }
+  return latest ?? financeConfirmedAt;
+}
 
 /**
  * One line per month counted so far (the start month through this month — Phase 38 counts the current month), read
@@ -390,21 +439,26 @@ export function buildHistory(
   filters: HistoryFilters = {},
   ctx: HistoryContext = { assetTag: "" },
 ): HistoryResult {
+  // Newest first. At the same instant a depreciation line lists above an audit entry: catch-up months are counted
+  // at the approval, i.e. just after it. Then the later month (or id) first.
   const all = [...entries.map((e) => auditToRow(e, ctx)), ...lines.map(depToRow)].sort(
-    (a, b) => b.at.getTime() - a.at.getTime() || b.id.localeCompare(a.id, "en", { numeric: true }),
+    (a, b) => b.at.getTime() - a.at.getTime()
+      || Number(b.kind === "dep") - Number(a.kind === "dep")
+      || b.id.localeCompare(a.id, "en", { numeric: true }),
   );
 
-  const names = new Set<string>();
+  const people = new Map<string, string>();
   let hasSystem = false;
   for (const r of all) {
-    if (r.actor === SYSTEM_ACTOR) hasSystem = true;
-    else names.add(r.actor);
+    if (r.actorKey === SYSTEM_KEY) hasSystem = true;
+    else if (!people.has(r.actorKey)) people.set(r.actorKey, r.actor);
   }
-  const actors = [...names].sort((a, b) => a.localeCompare(b));
-  if (hasSystem) actors.push(SYSTEM_ACTOR);
+  const actors = [...people].map(([key, label]) => ({ key, label }))
+    .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+  if (hasSystem) actors.push({ key: SYSTEM_KEY, label: SYSTEM_ACTOR });
 
   const person = filters.person && filters.person !== "all" ? filters.person : null;
-  const byPerson = person ? all.filter((r) => r.actor === person) : all;
+  const byPerson = person ? all.filter((r) => r.actorKey === person) : all;
   const counts = Object.fromEntries(HISTORY_KINDS.map((k) => [k, 0])) as Record<HistoryKind, number>;
   for (const r of byPerson) counts[r.kind]++;
 

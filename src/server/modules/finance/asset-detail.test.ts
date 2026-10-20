@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
   audits: [] as Record<string, unknown>[],
   users: [] as Record<string, unknown>[],
   notes: [] as Record<string, unknown>[],
+  /** id → name for the supplier / category / type / holder / department lookups. */
+  names: {} as Record<string, string>,
+  nameReads: [] as string[],
   auditFindMany: vi.fn(),
   userFindMany: vi.fn(),
   noteFindMany: vi.fn(),
@@ -25,10 +28,17 @@ vi.mock("@/server/db/client", () => ({
     auditEntry: { findMany: h.auditFindMany },
     user: { findMany: h.userFindMany },
     assetNote: { findMany: h.noteFindMany },
+    ...Object.fromEntries(["vendor", "assetCategory", "assetType", "employee", "department"].map((model) => [model, {
+      findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => {
+        h.nameReads.push(model);
+        return where.id.in.filter((id) => id in h.names).map((id) => ({ id, name: h.names[id] }));
+      }),
+    }])),
   },
 }));
 
 import { financeAssetDetail } from "./asset-detail";
+import { buildHistory } from "@/lib/finance-history";
 import { ledgerYears } from "@/lib/finance-ledger";
 import { asOfMonth } from "@/lib/depreciation";
 
@@ -59,16 +69,24 @@ function asset(extra: Row = {}): Row {
   };
 }
 
+let seq = 0;
 const audit = (extra: Row): Row => ({
-  id: `cm${Math.random().toString(36).slice(2, 12)}`, actorId: "u-ana", actorLabel: "Ana Cruz", entityType: "asset", entityId: "a1",
+  id: `cmaudit${String(++seq).padStart(6, "0")}`, actorId: "u-ana", actorLabel: "Ana Cruz", entityType: "asset", entityId: "a1",
   action: "update", diff: null, source: null, reason: null, createdAt: new Date("2026-03-01T02:00:00Z"), ...extra,
 });
 
+// confirmFinance stamps financeConfirmedAt, then writes the audit entry a few ms later
+const CONFIRM_ENTRY_AT = new Date(APPROVED.getTime() + 5);
+
 beforeEach(() => {
+  seq = 0;
   h.asset = asset();
+  h.names = { "ven-old": "Octagon", "ven-new": "Acme Trading" };
+  h.nameReads = [];
   h.audits = [
-    audit({ action: "finance.confirm", diff: { financeConfirmed: { from: null, to: "Ana Cruz" } }, createdAt: APPROVED }),
+    audit({ action: "finance.confirm", diff: { financeConfirmed: { from: null, to: "Ana Cruz" } }, createdAt: CONFIRM_ENTRY_AT }),
     audit({ action: "update", diff: { cost: { from: 30000, to: 36000 } } }),
+    audit({ action: "update", diff: { vendorId: { from: "ven-old", to: "ven-new" } }, createdAt: new Date("2026-03-02T02:00:00Z") }),
     audit({ action: "update", diff: { location: { from: "A", to: "B" } } }), // not finance history
     audit({ action: "lifecycle.assign", diff: { assignee: { from: null, to: "Carla" } } }), // not finance history
     audit({
@@ -130,7 +148,7 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
 
   it("keeps the finance-relevant rows with email and role joined; drops lifecycle and non-finance updates", async () => {
     const d = (await financeAssetDetail("a1", NOW))!;
-    expect(d.audit.map((r) => r.action).sort()).toEqual(["finance.confirm", "finance.reopened", "purchase.recorded", "update"]);
+    expect(d.audit.map((r) => r.action).sort()).toEqual(["finance.confirm", "finance.reopened", "purchase.recorded", "update", "update"]);
     const fee = d.audit.find((r) => r.entityType === "purchase-record")!;
     expect(fee).toMatchObject({ actorEmail: "pia@example.test", actorRole: "purchasing_staff" });
     const sys = d.audit.find((r) => r.actorId === null)!;
@@ -142,6 +160,26 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
     const d = (await financeAssetDetail("a1", NOW))!;
     expect(d.depLines).toHaveLength(11);
     expect(d.depLines[0].label).toBe("December 2025");
+  });
+
+  it("catch-up lines are dated at the finance.confirm entry (ms after financeConfirmedAt), so they list above it", async () => {
+    const d = (await financeAssetDetail("a1", NOW))!;
+    expect(d.depLines[0].at).toEqual(CONFIRM_ENTRY_AT);
+    const rows = buildHistory(d.audit, d.depLines, { pageSize: 1000 }, { assetTag: d.tag, names: d.historyNames }).rows;
+    const confirmAt = rows.findIndex((r) => r.verb.startsWith("approved"));
+    const decAt = rows.findIndex((r) => r.verb === "counted December 2025 depreciation");
+    expect(decAt).toBeGreaterThanOrEqual(0);
+    expect(decAt).toBeLessThan(confirmAt);
+  });
+
+  it("resolves the supplier ids in the diffs to names; the chip never shows an id", async () => {
+    const d = (await financeAssetDetail("a1", NOW))!;
+    expect(d.historyNames).toMatchObject({ "ven-old": "Octagon", "ven-new": "Acme Trading" });
+    expect(h.nameReads).toEqual(["vendor"]);
+    const rows = buildHistory(d.audit, d.depLines, { pageSize: 1000 }, { assetTag: d.tag, names: d.historyNames }).rows;
+    const r = rows.find((x) => x.changes.some((c) => c.field === "supplier"))!;
+    expect(r.changes).toEqual([{ field: "supplier", from: "Octagon", to: "Acme Trading" }]);
+    expect(JSON.stringify(rows)).not.toContain("ven-");
   });
 
   it("keeps the old history list for today's page", async () => {
