@@ -153,6 +153,33 @@ describe("supabase driver", () => {
   });
 });
 
+describe("local driver on Vercel (Supabase variables missing)", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "storage-vercel-test-"));
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    vi.stubEnv("VERCEL", "1");
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("writeObject throws the named error and touches no disk", async () => {
+    await expect(writeObject("lots/1/a.pdf", Buffer.from("x"), "application/pdf")).rejects.toThrow(
+      "Storage is not configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on Vercel",
+    );
+    await expect(readFile(path.join(dir, "uploads", "lots", "1", "a.pdf"))).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("readUpload returns null even when a file exists under uploads/", async () => {
+    await mkdir(path.join(dir, "uploads", "lots", "1"), { recursive: true });
+    await writeFile(path.join(dir, "uploads", "lots", "1", "a.pdf"), "hello");
+    expect(await readUpload("lots/1/a.pdf")).toBeNull();
+  });
+});
+
 describe("local driver", () => {
   let dir: string;
   beforeEach(async () => {

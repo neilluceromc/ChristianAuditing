@@ -8,6 +8,8 @@ import path from "node:path";
  */
 const BUCKET = "documents";
 
+const STORAGE_NOT_CONFIGURED = "Storage is not configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on Vercel";
+
 export function storageDriver(): "supabase" | "local" {
   return process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? "supabase" : "local";
 }
@@ -77,6 +79,8 @@ export async function writeObject(relPath: string, bytes: Buffer, contentType: s
     if (!res.ok) throw failure("write", res.status, await bodySnippet(res));
     return;
   }
+  // On Vercel the disk is read-only and temporary: a missing Supabase variable must fail by name, not as EROFS.
+  if (process.env.VERCEL) throw new Error(STORAGE_NOT_CONFIGURED);
   const abs = localAbs(relPath);
   if (!abs) throw new Error(`Invalid upload path: ${relPath}`);
   await mkdir(path.dirname(abs), { recursive: true });
@@ -98,6 +102,7 @@ export async function readUpload(relPath: string): Promise<Buffer | null> {
     }
     return Buffer.from(await res.arrayBuffer());
   }
+  if (process.env.VERCEL) return null; // no local files on Vercel; see writeObject
   const abs = localAbs(relPath);
   if (!abs) return null;
   return readFile(abs).catch(() => null);
