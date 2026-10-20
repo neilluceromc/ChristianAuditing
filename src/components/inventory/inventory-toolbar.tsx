@@ -4,8 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
 import { cn } from "@/lib/cn";
-import { Input } from "@/components/ui/input";
-import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { LIST } from "@/components/patterns/list-styles";
 import { Menu, type MenuItem } from "@/components/ui/menu";
@@ -13,13 +11,14 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { PeopleFacet } from "@/components/patterns/people-facet";
 import { searchAssignees } from "@/server/modules/employees/people-search";
 import {
-  INVENTORY_LIST_CONFIG, withPurchaseYearQS, type PurchaseYearValue, type YearChip,
+  INVENTORY_LIST_CONFIG, withPurchaseYearQS, withScannerGo, type PurchaseYearValue, type YearChip,
 } from "@/lib/inventory-list";
 import { CLASS_LABEL, withViewClsQS } from "@/lib/asset-class";
 import { REPAIRS_SAVED_VIEW, isRepairStage, isRepairView } from "@/lib/repairs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { useListNavigation } from "@/components/patterns/list-navigation";
+import { SearchBox } from "@/components/patterns/search-box";
 import { MoreFilters } from "./more-filters";
 
 /** Phase 30 (spec §6.2): the view switches are pill toggles — links, so e2e and a middle-click reach them. */
@@ -140,7 +139,7 @@ export function InventoryToolbar({
   /** the Columns chooser, after More filters */
   children?: React.ReactNode;
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
   const hrefFor = useInventoryHref(cls, defaultCls, purchaseYear);
   const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -193,36 +192,19 @@ export function InventoryToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="relative w-[300px]">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint">
-          <Icon name="search" size={14} />
-        </span>
-        <Input
-          // Keyed on the URL's q (the Phase 29 employees fix): a search change is a soft
-          // navigation, and an uncontrolled input ignores a new defaultValue once typed in.
-          key={state.q}
-          type="search"
-          data-page-search
-          aria-label="Search assets"
-          placeholder="Search tag, model, serial, holder · Enter"
-          defaultValue={state.q}
-          className="h-9 py-0 pl-8 pr-7 text-[13px]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") navigate(hrefFor(withSearch(state, e.currentTarget.value)));
-          }}
-        />
-        {state.q && (
-          <button
-            type="button"
-            aria-label="Clear search"
-            // Fitts / WCAG 2.5.8: a 24 × 24 px target, centred, inside the input's pr-7 gutter
-            className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-(--radius-ctl) text-fg-muted hover:bg-surface-subtle hover:text-fg"
-            onClick={() => navigate(hrefFor(withSearch(state, "")))}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      {/* The house search (spec §7.2: as you type). Enter alone sends go=1 — the USB scanner contract: an exact tag
+          opens the record only on Enter, so typing or pasting a full tag just filters. */}
+      <SearchBox
+        value={state.q}
+        ariaLabel="Search assets"
+        placeholder="Search tag, model, serial, holder · Enter"
+        onSubmit={(q, { enter }) => {
+          const to = hrefFor(withSearch(state, q));
+          replace(enter && q.trim() ? withScannerGo(to) : to);
+        }}
+        className="w-[300px]"
+        inputClassName="h-9 py-0 text-[13px]"
+      />
       <div className={LIST.tall}>{facetControl("category")}</div>
       <MoreFilters count={moreSet}>
         {moreFacets.map(facetControl)}

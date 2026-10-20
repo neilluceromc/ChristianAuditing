@@ -7,6 +7,7 @@ import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolic
 import { fmtDate } from "@/lib/format";
 import { pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
+import { prefixFirstPage, rankFirst, startsWithAny } from "@/lib/search-rank";
 import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
 import { sameNameKey } from "@/lib/same-name";
 import { RECENT_PEOPLE } from "@/lib/people-search";
@@ -111,6 +112,16 @@ async function derivedIds(
   return derivedCut(candidates, missingAll, gapsOnly, loadoutSort).map((c) => c.id);
 }
 
+/**
+ * Spec §7.2: a person's rank while searching — 0 when the name starts with the search, 1 when the employee no. does,
+ * 2 when it only contains it. Names rank before numbers because every number starts "EMP-": without the split, "E"
+ * would rank everyone first and the names starting with E would be lost among them. (The spec also names email; an
+ * Employee has no email field.)
+ */
+function employeeTier(q: string, e: { name: string; employeeNo: string }): number {
+  return startsWithAny(q, [e.name]) ? 0 : startsWithAny(q, [e.employeeNo]) ? 1 : 2;
+}
+
 /** Spec §4: the plain list pages in SQL; the gaps filter and the Loadout sort (Phase 29, plan P-4) cut a NARROW candidate pass first, then page in memory. */
 async function pageEmployees(state: ListState, gapsOnly: boolean, now: Date) {
   const where = buildEmployeeWhere(state, now);
@@ -119,11 +130,30 @@ async function pageEmployees(state: ListState, gapsOnly: boolean, now: Date) {
   // as buildEmployeeOrderBy already drops it in SQL, so the clicked column really orders the rows.
   const loadoutSort = primarySortOf(state.sort, "loadout");
   if (!gapsOnly && !loadoutSort) {
+    // Spec §7.2 (2026-10-21): while searching, the people whose name or employee no. START with the search come
+    // first (names before numbers: `employeeTier`), then the ones that only contain it, each group in the chosen
+    // sort. The count becomes a narrow read of the matching people's starts-with fields, and the page is cut across
+    // the groups (`prefixFirstPage`): still SQL-ordered and SQL-paged, one read per group the page touches.
+    let tiers: string[][] = [];
     const { rows: employees, ...pg } = await pagedSnapshot(
       state.per,
       state.page,
-      (tx) => tx.employee.count({ where }),
-      (tx, pg) => tx.employee.findMany({ where, orderBy, skip: pg.skip, take: pg.take, include: rowInclude }),
+      async (tx) => {
+        if (!state.q) return tx.employee.count({ where });
+        const hits = await tx.employee.findMany({ where, select: { id: true, name: true, employeeNo: true } });
+        tiers = [0, 1].map((t) => hits.filter((h) => employeeTier(state.q, h) === t).map((h) => h.id));
+        return hits.length;
+      },
+      (tx, pg) =>
+        prefixFirstPage(tiers, pg.total, pg, (ids, w) =>
+          tx.employee.findMany({
+            where: ids ? { AND: [where, { id: ids }] } : where,
+            orderBy,
+            skip: w.skip,
+            take: w.take,
+            include: rowInclude,
+          }),
+        ),
     );
     const missing = await resolveMissing(employees);
     return { pg, employees, missing };
@@ -131,7 +161,9 @@ async function pageEmployees(state: ListState, gapsOnly: boolean, now: Date) {
   // Candidate pass: everything the where admits, resolved once; then the gaps cut and/or the derived order.
   const candidates = await prisma.employee.findMany({ where, orderBy, include: rowInclude });
   const missingAll = await resolveMissing(candidates);
-  const kept = derivedCut(candidates, missingAll, gapsOnly, loadoutSort);
+  const cut = derivedCut(candidates, missingAll, gapsOnly, loadoutSort);
+  // spec §7.2: starts-with first here too, each group in the derived order
+  const kept = state.q ? rankFirst(cut, (c) => employeeTier(state.q, c)) : cut;
   const pg = pageOf(kept.length, state.page, state.per);
   const employees = kept.slice(pg.skip, pg.skip + pg.take);
   return { pg, employees, missing: missingAll };

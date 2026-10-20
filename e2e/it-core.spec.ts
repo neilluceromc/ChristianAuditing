@@ -233,7 +233,7 @@ test.describe("inventory list", () => {
     await page.goto("/inventory");
     await page.getByLabel("Search assets").fill("BR-LT-0148");
     await page.getByLabel("Search assets").press("Enter");
-    // Enter is a client-side router.push to /inventory?q=…; the server component
+    // Enter is a client-side router.replace to /inventory?q=…&go=1 (spec §7.2: only Enter sends go=1); the server component
     // there resolves the exact tag and redirect()s on to /inventory/<id>. That is
     // TWO server renders behind one keypress, and `inventory/loading.tsx` covers
     // both — so a slow render shows an all-Skeleton `main` with no accessible
@@ -368,7 +368,7 @@ test.describe("asset record", () => {
 
   test("edit writes field-level history rows", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/inventory?q=BR-MN-0910");
+    await page.goto("/inventory?q=BR-MN-0910&go=1");
     // The scanner contract makes this a REDIRECT to /inventory/[id], so this
     // one assertion has to cover a list render, a redirect and a record
     // render. It was the only unheadroomed assertion left in this test, and
@@ -415,7 +415,7 @@ test.describe("asset record", () => {
 
   test("secrets: reveal is audited and counts down; viewer can't reveal", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/inventory?q=BR-LT-0201");
+    await page.goto("/inventory?q=BR-LT-0201&go=1");
     // The exact-tag redirect (scanner contract) fires as a client-side
     // redirect after the initial response on a hard navigation — page.url()
     // read immediately after goto() can still show the pre-redirect
@@ -454,7 +454,7 @@ test.describe("asset record", () => {
 
   test("documents: type allowlist rejects, PNG uploads", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/inventory?q=BR-LT-0201");
+    await page.goto("/inventory?q=BR-LT-0201&go=1");
     // See the comment in the secrets test above — wait for the client-side
     // exact-tag redirect to settle before reading page.url().
     await page.waitForURL(/\/inventory\/[^/?]+$/);

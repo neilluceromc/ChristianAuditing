@@ -93,7 +93,7 @@ export function qrBase(baseUrl: string | undefined): QrBase {
  * and this string is printed onto adhesive paper. Asset.tag is @unique, so
  * the card can find the row from it.
  *
- * `/inventory?q=<tag>` still redirects an exact tag match to the full record
+ * `/inventory?q=<tag>&go=1` (the search box's Enter, spec §7.2) still redirects an exact tag match to the full record
  * and is untouched — that is the USB desk scanner's contract, guarded by
  * e2e/it-core.spec.ts. This function decides only where a PHONE lands.
  */

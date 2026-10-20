@@ -286,7 +286,7 @@ describe("financeAssets — rows", () => {
     const odd = await financeAssets(base({ per: 7 }), NOW);
     expect(odd.per).toBe(25);
   });
-  it("reads the class once and searches in SQL (ids only)", async () => {
+  it("reads the class once and searches in SQL (ids and the starts-with fields)", async () => {
     await financeAssets(base({ q: "model 3" }), NOW);
     expect(h.findMany).toHaveBeenCalledTimes(2);
     expect(h.count).not.toHaveBeenCalled();
@@ -340,5 +340,37 @@ describe("financeClassCount (spec §3 item 1: a class tab's asset count)", () =>
     expect(h.count).toHaveBeenCalledTimes(2);
     expect((await financeAssets(base({ category: "lap", status: "SPARE", fin: "approved" }), NOW)).categoryTiles[0].count).toBe(13);
     expect((await financeAssets(base({ cls: "PURCHASING", q: "x" }), NOW)).categoryTiles[0].count).toBe(4);
+  });
+});
+
+describe("financeAssets — starts-with first while searching (spec §7.2)", () => {
+  it("\"E\" puts the rows whose tag, model, serial or holder starts with E first, each group in the chosen sort", async () => {
+    // every fixture row contains an "e" ("Model n"); these four START with one, by model, holder, serial and tag
+    const elite = asset("lap", { model: "EliteBook 840" });
+    const eve = asset("mon", { assignee: { name: "Eve Santos" } });
+    const serial = asset("dock", { serial: "E-55" });
+    const tag = asset("lap", { tag: "EX-0001" });
+    h.assets.push(elite, eve, serial, tag);
+    const firstIds = [elite, eve, serial, tag].map((a) => a.id as string);
+
+    for (const sort of ["tag", "book", "added-asc"] as const) {
+      const plain = await financeAssets(base({ sort }), NOW);
+      const r = await financeAssets(base({ q: "E", sort }), NOW);
+      expect(r.rows).toHaveLength(plain.rows.length);
+      const head = r.rows.slice(0, 4).map((x) => x.id);
+      expect(new Set(head)).toEqual(new Set(firstIds));
+      // each group keeps the list's chosen sort
+      const order = plain.rows.map((x) => x.id);
+      expect(head).toEqual(order.filter((id) => firstIds.includes(id)));
+      expect(r.rows.slice(4).map((x) => x.id)).toEqual(order.filter((id) => !firstIds.includes(id)));
+      // the export follows the list
+      expect((await financeExportRows(base({ q: "E", sort }), NOW)).map((x) => x.id)).toEqual(r.rows.map((x) => x.id));
+    }
+  });
+  it("no search, no reordering", async () => {
+    h.assets.push(asset("lap", { model: "EliteBook 840" }));
+    const r = await financeAssets(base({ sort: "tag" }), NOW);
+    const tags = r.rows.map((x) => x.tag);
+    expect(tags).toEqual([...tags].sort());
   });
 });

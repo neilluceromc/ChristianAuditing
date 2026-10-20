@@ -23,7 +23,7 @@ export function AuditToolbar({
   entityOptions: FacetOptionLike[];
 }) {
   const pathname = usePathname();
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
 
   const href = (s: ListState) => pathname + serializeListState(s, AUDIT_LIST_CONFIG);
 
@@ -34,7 +34,7 @@ export function AuditToolbar({
         // P-14: the accessible name stays "Search audit log" (e2e pins it); only the placeholder changed.
         ariaLabel="Search audit log"
         placeholder="Search tag, person, ref no, action · Enter"
-        onSubmit={(q) => navigate(href(withSearch(state, q)))}
+        onSubmit={(q) => replace(href(withSearch(state, q)))}
       />
       <FacetDropdown
         label="Entity"

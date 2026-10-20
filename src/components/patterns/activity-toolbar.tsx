@@ -17,7 +17,7 @@ export function ActivityToolbar({
 }: {
   state: ListState; total: number; actionOptions: FacetOptionLike[]; base: string;
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
   const href = (s: ListState) => base + serializeListState(s, ACTIVITY_LIST_CONFIG);
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -26,7 +26,7 @@ export function ActivityToolbar({
         // P-14: the feeds' own accessible name; /audit keeps "Search audit log".
         ariaLabel="Search activity"
         placeholder="Search tag, person, ref no · Enter"
-        onSubmit={(q) => navigate(href(withSearch(state, q)))}
+        onSubmit={(q) => replace(href(withSearch(state, q)))}
       />
       <FacetDropdown
         label="Action"

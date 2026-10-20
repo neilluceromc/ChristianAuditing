@@ -68,7 +68,7 @@ export function FinanceToolbar({
   categoryLabel: string | null;
   shown: { count: number; bookC: number };
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
   const go = (control: ToolbarControl, value: string) => navigate(controlHref(state, control, value));
   const category = state.category ?? "";
   const folded = category !== "" && !tiles.some((t) => t.id === category);
@@ -79,7 +79,7 @@ export function FinanceToolbar({
         value={state.q}
         ariaLabel="Search assets"
         placeholder="Tag, model, serial or holder"
-        onSubmit={(q) => go("q", q)}
+        onSubmit={(q) => replace(controlHref(state, "q", q))}
         className="w-full max-w-[340px] flex-1 basis-[240px]"
         inputClassName="h-9 py-0 text-[13px]"
       />

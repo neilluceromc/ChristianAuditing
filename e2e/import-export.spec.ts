@@ -236,7 +236,7 @@ test.describe.serial("the asset import wizard", () => {
 
     expect(await assetTotal(page)).toBe(before + 3);
     for (const tag of ["BR-LT-9001", "BR-MN-9002", "BR-HS-9003"]) {
-      await page.goto(`/inventory?q=${tag}`);
+      await page.goto(`/inventory?q=${tag}&go=1`);
       // The scanner contract redirects an exact tag match straight to the record.
       await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     }

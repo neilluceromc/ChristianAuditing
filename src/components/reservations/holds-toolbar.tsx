@@ -23,7 +23,7 @@ function holdsHref(s: ListState, tab: ReservationTab): string {
 export function HoldsToolbar({ tab, state, total, soon, facets }: {
   tab: ReservationTab; state: ListState; total: number; soon: number; facets: HoldFacets;
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
   const href = (s: ListState) => holdsHref(s, tab);
 
   // Value-only chips: the facet a value belongs to is the dropdown it came from.
@@ -50,7 +50,7 @@ export function HoldsToolbar({ tab, state, total, soon, facets }: {
           value={state.q}
           ariaLabel="Search holds"
           placeholder="Tag, model or person · Enter"
-          onSubmit={(q) => navigate(href(withSearch(state, q)))}
+          onSubmit={(q) => replace(href(withSearch(state, q)))}
         />
         <FacetDropdown label="Employee" options={facets.employee} selected={state.filters.employee ?? []}
           onApply={(values) => navigate(href(withFilter(state, "employee", values)))} />

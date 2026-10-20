@@ -236,3 +236,37 @@ export function identifierWhere(
     serials: { cls, serial: { in: serials } },
   };
 }
+
+/**
+ * Spec 7.2 (2026-10-21): the USB scanner contract. A scanner types the tag and presses Enter, and an exact tag then
+ * opens the record. Since the search filters as you type, typing or pasting a full tag must only filter, so the
+ * search box sends `go=1` on Enter alone (`withScannerGo`) and the page asks `scannerRedirect` what to do with it.
+ */
+export const SCANNER_GO_PARAM = "go";
+
+/** `href` with `go=1`: the search box's Enter on Inventory. */
+export function withScannerGo(href: string): string {
+  const url = new URL(href, "http://x");
+  url.searchParams.set(SCANNER_GO_PARAM, "1");
+  return url.pathname + url.search;
+}
+
+/**
+ * Where the list page must redirect for the scanner contract, or null to render the list. Without `go=1`: null, and
+ * nothing is looked up (a typed or pasted exact tag only filters). With it: the record for an exact tag; otherwise the
+ * same list without `go` (stripped after use, so a reload or a shared link never opens a record on its own).
+ */
+export async function scannerRedirect(
+  sp: URLSearchParams,
+  q: string,
+  lookup: (q: string) => Promise<{ id: string } | null> | null,
+  path = "/inventory",
+): Promise<string | null> {
+  if (sp.get(SCANNER_GO_PARAM) !== "1") return null;
+  const hit = q ? await lookup(q) : null;
+  if (hit) return `${path}/${hit.id}`;
+  const rest = new URLSearchParams(sp);
+  rest.delete(SCANNER_GO_PARAM);
+  const qs = rest.toString();
+  return qs ? `${path}?${qs}` : path;
+}

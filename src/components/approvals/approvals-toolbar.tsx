@@ -27,7 +27,7 @@ export function ApprovalsToolbar({
   types: ApprovalType[];
   typeOptions: FacetOptionLike[];
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
 
   const chips: FilterChip[] = [];
   if (q) chips.push({ label: `Search: ${q}`, removeHref: approvalsHref({ tab, via, types }) });
@@ -42,7 +42,7 @@ export function ApprovalsToolbar({
           value={q}
           ariaLabel="Search approvals"
           placeholder="Search ref no, tag, person · Enter"
-          onSubmit={(next) => navigate(approvalsHref({ tab, via, q: next, types }))}
+          onSubmit={(next) => replace(approvalsHref({ tab, via, q: next, types }))}
         />
         <FacetDropdown
           label="Type"

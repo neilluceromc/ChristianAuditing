@@ -14,6 +14,7 @@ import {
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
 import { pageOf } from "@/lib/paging";
+import { prefixFirst, prefixFirstPage, startsWithAny } from "@/lib/search-rank";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
@@ -246,6 +247,11 @@ export async function attentionOrdered(
   return orderByAttention(all.map((a) => toRow(a, now)), dir);
 }
 
+/** The search's narrow pass: the fields a starts-with match is judged on (spec §7.2). */
+const SEARCH_HIT_SELECT = {
+  id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } },
+} as const satisfies Prisma.AssetSelect;
+
 export async function listAssets(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
@@ -280,7 +286,11 @@ export async function listAssets(
   // buildAssetOrderBy already drops it in SQL, so the clicked column really orders the rows.
   const attentionSort = primarySortOf(state.sort, "attention");
   if (attentionSort) {
-    const ordered = await attentionOrdered(where, orderBy, attentionSort.dir, now);
+    const attentionOrder = await attentionOrdered(where, orderBy, attentionSort.dir, now);
+    // spec §7.2: while searching, the rows that start with the search come first, each group in the Attention order
+    const ordered = state.q
+      ? prefixFirst(attentionOrder, (r) => startsWithAny(state.q, [r.tag, r.model, r.serial, r.assignee]))
+      : attentionOrder;
     const pg = pageOf(ordered.length, state.page, state.per);
     return {
       rows: ordered.slice(pg.skip, pg.skip + pg.take),
@@ -291,18 +301,30 @@ export async function listAssets(
     };
   }
 
+  // Spec §7.2 (2026-10-21): while searching, the rows whose tag, model, serial or holder START with the search come
+  // first, then the ones that only contain it, each group in the chosen sort. The count becomes a narrow read of the
+  // matching rows' starts-with fields (the same rows it counted), and the page is cut across the two groups by
+  // `prefixFirstPage` — still SQL-ordered and SQL-paged, one read per group the page touches.
+  let prefixIds: string[] = [];
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
     state.per,
     state.page,
-    (tx) => tx.asset.count({ where }),
+    async (tx) => {
+      if (!state.q) return tx.asset.count({ where });
+      const hits = await tx.asset.findMany({ where, select: SEARCH_HIT_SELECT });
+      prefixIds = hits.filter((h) => startsWithAny(state.q, [h.tag, h.model, h.serial, h.assignee?.name])).map((h) => h.id);
+      return hits.length;
+    },
     (tx, pg) =>
-      tx.asset.findMany({
-        where,
-        orderBy,
-        skip: pg.skip,
-        take: pg.take,
-        include: LIST_INCLUDE,
-      }),
+      prefixFirstPage([prefixIds], pg.total, pg, (ids, w) =>
+        tx.asset.findMany({
+          where: ids ? { AND: [where, { id: ids }] } : where,
+          orderBy,
+          skip: w.skip,
+          take: w.take,
+          include: LIST_INCLUDE,
+        }),
+      ),
   );
   return {
     total,
