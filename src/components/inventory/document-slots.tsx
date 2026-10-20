@@ -41,7 +41,7 @@ export const slotCount = (slots: SlotFiles) => slotUploads(slots).length;
 
 // The same limits `src/server/uploads.ts` enforces (it imports node:fs, so it cannot be imported here).
 const ACCEPT = "application/pdf,image/png,image/jpeg";
-const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_BYTES = 4_000_000; // keep equal to UPLOAD_MAX_BYTES in src/server/uploads.ts
 const TYPES: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
 export const SLOT_REFUSAL = "PDF, PNG or JPG up to 4 MB";
 

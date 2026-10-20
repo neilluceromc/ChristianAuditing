@@ -20,6 +20,14 @@ describe("checkUploadMeta", () => {
   });
 });
 
+describe("upload cap", () => {
+  it("is exactly 4_000_000 bytes: that passes, one more is refused", () => {
+    expect(UPLOAD_MAX_BYTES).toBe(4_000_000);
+    expect(checkUploadMeta({ name: "a.pdf", type: "application/pdf", size: 4_000_000 })).toBeNull();
+    expect(checkUploadMeta({ name: "a.pdf", type: "application/pdf", size: 4_000_001 })).toBe("Too big — the cap is 4 MB");
+  });
+});
+
 describe("contentDisposition (ruling R11)", () => {
   it("strips quotes from the ascii filename", () => {
     expect(contentDisposition('quote"scan.pdf')).toContain('filename="quotescan.pdf"');

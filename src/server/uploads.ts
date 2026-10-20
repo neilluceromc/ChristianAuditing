@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { writeObject } from "./storage";
 
-export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+// Decimal 4 MB, just under the 4 MiB server-action body limit (next.config.ts), so the multipart
+// boundaries and form fields around a maximum-size file still fit.
+export const UPLOAD_MAX_BYTES = 4_000_000;
 export const UPLOAD_TYPES: Record<string, string> = {
   ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 };
