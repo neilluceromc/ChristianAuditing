@@ -393,23 +393,22 @@ test.describe.serial("new employee", () => {
 });
 
 test.describe("Purchasing Home", () => {
-  test("11. Approvals waiting and Awaiting IT check", async ({ page }) => {
+  test("11. Purchasing's approvals waiting (its own class and the class-less) and requests awaiting IT", async ({ page }) => {
     const expectedApprovals = await db.approval.count({
       where: { state: { in: ["PENDING", "CLAIMED"] }, OR: [{ assetId: null }, { asset: { cls: "PURCHASING" } }] },
     });
-    const expectedItCheck = await db.asset.count({ where: { cls: "IT", itVerifiedAt: null } });
+    const expectedAwaitingIt = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
     await login(page, P);
     await page.goto("/");
-    await expect(page.getByText("Approvals waiting")).toBeVisible();
-    // Scoped to its own Stat block: other Home stats (low stock, expiry) can carry the same number.
-    await expect(
-      page.getByText("Approvals waiting").locator("xpath=..").getByRole("link", { name: String(expectedApprovals), exact: true }),
-    ).toBeVisible();
-    await expect(page.getByText("Awaiting IT check")).toBeVisible();
-    // "Awaiting IT check" (Stat's label span) and its number (Stat's value
-    // span) are siblings, not one text node — assert the number lives in the
-    // same Stat block rather than trying to match one combined string.
-    await expect(page.getByText("Awaiting IT check").locator("xpath=..")).toContainText(String(expectedItCheck));
+    // Phase 46 (spec §3.2): the Purchasing Overview has no approvals tile (its six are requests and stock); the
+    // approvals waiting are the sidebar's Approvals badge, which Home leaves closed, so it shows.
+    expect(expectedApprovals, "the seed has open approvals Purchasing can see").toBeGreaterThan(0);
+    const approvals = page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: /^Approvals\b/ });
+    await expect(approvals.getByLabel(/^\d+ open approvals\b/)).toHaveText(String(expectedApprovals));
+    // Awaiting IT: the tile is the /purchases "Awaiting IT" tab's count.
+    const awaitingIt = page.locator('a[data-kpi="pr.submitted"]');
+    await expect(awaitingIt.locator("[data-kpi-value]")).toHaveText(String(expectedAwaitingIt));
+    await expect(awaitingIt).toHaveAttribute("href", "/purchases?state=SUBMITTED");
   });
 });
 
@@ -506,29 +505,14 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
   });
-  test("13c. IT's Home lists it under CHECK; IT marks it checked; Purchasing's Edit is gone", async ({ page }) => {
+  test("13c. IT's worklist lists it under Awaiting IT check; IT marks it checked; Purchasing's Edit is gone", async ({ page }) => {
     await login(page, IT);
-    await page.goto("/");
-    // D-: "Your shift" caps at SHIFT_LIMIT=5 and ranks CHECK last of all six
-    // kinds (lib/home.ts KIND_RANK). The seed gives this user SIX higher-
-    // ranked candidate rows (an overdue SLA, a failed EXEC, an offboarding
-    // LEAVE, two recent HIREs, and one MISSING-asset DATA row that only
-    // appears once the visible five make room) — one more than the window —
-    // so the new CHECK row has no room to show until at least two are
-    // cleared. Clear them first — a real, supported action (the row menu's
-    // "Hide until tomorrow", work-row-menu.tsx) — the same way a shift worker would,
-    // rather than asserting on a list ordering this case doesn't own. Each
-    // clear is a full server round trip (dismissShiftRow + router.refresh()),
-    // so wait for the network to settle rather than for an exact row count —
-    // a cleared row is very often replaced in the same render by the next
-    // candidate, so the total count does not reliably dip in between.
-    for (let i = 0; i < 5; i++) {
-      if (await page.getByText(new RegExp(tag)).count()) break;
-      await page.getByRole("button", { name: /^Actions for / }).first().click();
-      await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
-      await page.waitForLoadState("networkidle");
-    }
-    await expect(page.getByText(new RegExp(tag))).toBeVisible();
+    // Phase 46: Home's Needs you shows the six most urgent items, and an IT check is "to do" (the least urgent
+    // tone), so the full worklist is where the CHECK row is promised. No rows need hiding to make room there.
+    await page.goto("/inventory/work");
+    const check = page.locator("section#check");
+    await expect(check).toBeVisible({ timeout: 20_000 });
+    await expect(check.getByText(new RegExp(tag))).toBeVisible();
     await page.goto(`/inventory/${id}`);
     await expect(page.getByText("AWAITING IT CHECK", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Mark checked" }).click();

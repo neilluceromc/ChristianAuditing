@@ -1,3 +1,6 @@
+import { addDays, dayFromISO } from "./deadlines";
+import { localDateISO } from "./format";
+
 /** Phase 24 (spec §4.2, decision 2): one retention rule for the worker's two tables. */
 export const RETENTION_DAYS = 90;
 export const PRUNE_BATCH = 1_000;
@@ -16,6 +19,13 @@ export function crisConversationCutoff(now: Date): Date {
 }
 export function crisPendingCutoff(now: Date): Date {
   return new Date(now.getTime() - CRIS_PENDING_DAYS * DAY_MS);
+}
+/** Phase 46 (spec §2.3): MetricSnapshot rows are kept 400 Manila days, so a year-on-year read still has its day. */
+export const METRIC_SNAPSHOT_DAYS = 400;
+
+/** The oldest `day` kept: today's Manila day minus 400 days, as the UTC-midnight Date a `@db.Date` column compares with. */
+export function metricSnapshotCutoff(now: Date): Date {
+  return dayFromISO(addDays(localDateISO(now), -METRIC_SNAPSHOT_DAYS));
 }
 export function pruneDue(lastPruneAt: Date | null, now: Date): boolean {
   return lastPruneAt === null || now.getTime() - lastPruneAt.getTime() >= PRUNE_INTERVAL_MS;

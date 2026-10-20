@@ -32,3 +32,18 @@ export function approvalClassWhere(role: Role): Prisma.ApprovalWhereInput {
   if (mine.length === 0 || mine.length === ASSET_CLASSES.length) return {};
   return { OR: [{ assetId: null }, { asset: { cls: { in: [...mine] } } }] };
 }
+
+/** Phase 46 (spec §2.2): the per-class split the snapshot stores approvals under; `none` = no asset. */
+export type ApprovalClassKey = "it" | "purchasing" | "none";
+const CLASS_KEY: Record<AssetClass, ApprovalClassKey> = { IT: "it", PURCHASING: "purchasing" };
+
+/**
+ * The snapshot classes whose sum is the role's Approvals count: the same branches as approvalClassWhere (every
+ * class when it is unfiltered, else the role's classes plus the class-less rows), so a summed history tile
+ * matches the page it links to for every role.
+ */
+export function approvalClassKeys(role: Role): ApprovalClassKey[] {
+  const mine = MANAGEABLE_CLASSES[role];
+  const classes = mine.length === 0 || mine.length === ASSET_CLASSES.length ? ASSET_CLASSES : mine;
+  return [...classes.map((c) => CLASS_KEY[c]), "none"];
+}

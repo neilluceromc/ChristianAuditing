@@ -19,6 +19,12 @@ const h = vi.hoisted(() => ({
   worklist: vi.fn(),
   reviews: vi.fn(),
   approval: vi.fn(),
+  stockItems: vi.fn(),
+  stockSums: vi.fn(),
+  stocktake: vi.fn(),
+  vendor: vi.fn(),
+  user: vi.fn(),
+  delivery: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -27,11 +33,23 @@ vi.mock("@/server/db/client", () => ({
     employee: { count: h.employee },
     purchaseRequest: { count: h.purchase },
     approval: { count: h.approval },
+    stockItem: { findMany: h.stockItems },
+    stockMovement: { groupBy: h.stockSums },
+    stocktake: { count: h.stocktake },
+    vendor: { count: h.vendor },
+    user: { count: h.user },
+    webhookDelivery: { count: h.delivery },
   },
 }));
 vi.mock("./queries", () => ({ worklistCount: h.worklist, purchaseReviewCount: h.reviews }));
 
-import { getApprovalsBadge, NAV_COUNT_HREF, readNavCounts } from "./nav-counts";
+import { buildStockItemWhere, STOCK_LIST_CONFIG } from "@/lib/stock-list";
+import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
+import { finWhere } from "@/lib/registration";
+import { FLAG_SPECS } from "@/lib/admin-flags";
+import { financeListWhere } from "@/server/modules/finance/queries";
+import { stocktakesOverdueWhere } from "@/server/modules/stock/queries";
+import { getApprovalsBadge, NAV_COUNT_HREF, NAV_COUNT_UNFILTERED, readNavCounts } from "./nav-counts";
 
 const itStaff = { id: "u1", role: "it_staff" as const };
 const viewer = { id: "u2", role: "viewer" as const };
@@ -174,6 +192,75 @@ describe("readNavCounts", () => {
   });
 });
 
+describe("readNavCounts: the Phase 46 counts (spec §4.3), each the page's own predicate", () => {
+  const purchasing = { id: "p", role: "purchasing_staff" as const };
+  const admin = { id: "a", role: "admin" as const };
+  const params = (key: keyof typeof NAV_COUNT_HREF) => new URL(NAV_COUNT_HREF[key], "http://x").searchParams;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T23:30:00Z")); // 20 Oct in Manila
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("stockLow is /stock?low=1's row count: active items at or below a positive reorder level", async () => {
+    h.stockItems.mockResolvedValue([
+      { id: "a", reorderLevel: 5 }, { id: "b", reorderLevel: 5 }, { id: "c", reorderLevel: 0 }, { id: "d", reorderLevel: 2 },
+    ]);
+    h.stockSums.mockResolvedValue([
+      { itemId: "a", _sum: { quantity: 5 } }, { itemId: "b", _sum: { quantity: 9 } }, { itemId: "c", _sum: { quantity: 0 } },
+    ]); // d has no movements: balance 0
+    expect(await readNavCounts(["stockLow"], purchasing)).toEqual({ stockLow: 2 });
+    const state = parseListState(params("stockLow"), STOCK_LIST_CONFIG);
+    expect(state.filters).toEqual({ low: ["1"] });
+    // The low filter is derived, so the candidates are the page's where without it.
+    expect(h.stockItems.mock.calls[0][0].where).toEqual(buildStockItemWhere({ ...state, filters: {} }));
+  });
+
+  it("stocktakesOverdue is the Overview's own overdue predicate on the Manila day", async () => {
+    h.stocktake.mockResolvedValue(3);
+    expect(await readNavCounts(["stocktakesOverdue"], purchasing)).toEqual({ stocktakesOverdue: 3 });
+    expect(h.stocktake).toHaveBeenCalledWith({ where: stocktakesOverdueWhere("2026-10-20") });
+  });
+
+  it("suppliersRenewing is /purchases/suppliers?renewing=30's where, today in Manila", async () => {
+    h.vendor.mockResolvedValue(2);
+    expect(await readNavCounts(["suppliersRenewing"], purchasing)).toEqual({ suppliersRenewing: 2 });
+    const where = buildSupplierWhere(parseListState(params("suppliersRenewing"), SUPPLIER_LIST_CONFIG), "2026-10-20");
+    expect(where.contractEnd).toEqual({ gte: new Date("2026-10-20T00:00:00.000Z"), lte: new Date("2026-11-19T00:00:00.000Z") });
+    expect(h.vendor).toHaveBeenCalledWith({ where });
+  });
+
+  it("the To confirm counts are /finance/assets' With-finance chip, per class", async () => {
+    h.asset.mockImplementation(async ({ where }) => (JSON.stringify(where).includes("PURCHASING") ? 6 : 5));
+    expect(await readNavCounts(["finToConfirmIt", "finToConfirmPurchasing"], { id: "f", role: "finance_staff" }))
+      .toEqual({ finToConfirmIt: 5, finToConfirmPurchasing: 6 });
+    for (const cls of ["IT", "PURCHASING"] as const) {
+      expect(h.asset).toHaveBeenCalledWith({
+        where: { AND: [financeListWhere({ cls, status: null, q: "" }), finWhere("with-finance")] },
+      });
+    }
+  });
+
+  it("usersDisabled, deadDeliveries and flagsUnavailable read their pages' filters", async () => {
+    h.user.mockResolvedValue(4);
+    h.delivery.mockResolvedValue(7);
+    expect(await readNavCounts(["usersDisabled", "deadDeliveries", "flagsUnavailable"], admin)).toEqual({
+      usersDisabled: 4, deadDeliveries: 7, flagsUnavailable: FLAG_SPECS.filter((f) => f.unavailable).length,
+    });
+    expect(h.user).toHaveBeenCalledWith({ where: { disabled: true } });
+    expect(h.delivery).toHaveBeenCalledWith({ where: { status: { in: ["DEAD"] } } });
+  });
+
+  it("each fails to 0 on its own", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    h.vendor.mockRejectedValue(new Error("db down"));
+    h.user.mockResolvedValue(1);
+    expect(await readNavCounts(["suppliersRenewing", "usersDisabled"], admin)).toEqual({ suppliersRenewing: 0, usersDisabled: 1 });
+    expect(error).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("getApprovalsBadge", () => {
   it("counts the open approvals and the overdue ones", async () => {
     h.approval.mockImplementation(async ({ where }: { where: { AND: Array<{ slaAt?: unknown }> } }) =>
@@ -204,7 +291,37 @@ describe("NAV_COUNT_HREF", () => {
         }
       }
     }
-    expect(checked).toBe(8); // itSpare, itDefective, itMissing, leaving, prDraft, prSubmitted, prItReviewed ×2
+    // itSpare, itDefective, itMissing, leaving, prDraft, prSubmitted, prItReviewed ×2; Phase 46: stockLow,
+    // suppliersRenewing, finToConfirmIt, finToConfirmPurchasing, usersDisabled, deadDeliveries, flagsUnavailable
+    expect(checked).toBe(15);
+  });
+
+  it("accounts for every counted view: a list count (equal to its page), an exempt one, or a work count", () => {
+    // Work counts are not a list page's row count: the Approvals badge (getApprovalsBadge), the worklist, and the
+    // purchase reviews (the reviewer's queue). Exempt counts (NAV_COUNT_UNFILTERED) sit on a view whose page has no
+    // filter for them, so they are never asserted equal to that page's rows: only that they sit on that view.
+    const WORK: CountKey[] = ["approvals", "worklist", "purchaseReviews"];
+    const seen = new Set<CountKey>();
+    for (const sections of Object.values(WORKSPACE_NAV)) {
+      for (const view of sections.flatMap((s) => s.items).flatMap((i) => i.views ?? [])) {
+        if (!view.count) continue;
+        seen.add(view.count);
+        if (view.count in NAV_COUNT_HREF) continue;
+        if (view.count in NAV_COUNT_UNFILTERED) {
+          expect(view.href, view.count).toBe(NAV_COUNT_UNFILTERED[view.count as keyof typeof NAV_COUNT_UNFILTERED]);
+          continue;
+        }
+        expect(WORK, `${view.label}: ${view.count}`).toContain(view.count);
+      }
+    }
+    for (const key of [...Object.keys(NAV_COUNT_HREF), ...Object.keys(NAV_COUNT_UNFILTERED)]) {
+      expect(seen.has(key as CountKey), `${key} sits on a view`).toBe(true);
+    }
+    expect(Object.keys(NAV_COUNT_HREF).filter((k) => k in NAV_COUNT_UNFILTERED)).toEqual([]);
+  });
+
+  it("exempts only Stocktakes overdue: /stock/stocktakes has no overdue filter (Phase 46 spec §4.3)", () => {
+    expect(NAV_COUNT_UNFILTERED).toEqual({ stocktakesOverdue: "/stock/stocktakes" });
   });
 
   it("names no class because every role that sees IT's Inventory views defaults to IT, as the page does", () => {

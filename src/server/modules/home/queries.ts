@@ -1,19 +1,15 @@
-import { Prisma, type ApprovalType, type Role } from "@prisma/client";
+import { Prisma, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
-import { regWhere } from "@/lib/registration";
-import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
+import { fmtMoney, localDateISO } from "@/lib/format";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState, serializeListState, withFilter } from "@/lib/url-state";
-import { stockHomeSignals } from "@/server/modules/stock/queries";
-import { DIRECT_KIND_LABEL, DIRECT_WINDOW_DAYS, slaLabel } from "@/lib/approvals-list";
+import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
-  AGE_BUCKETS, DISMISS_PREF_KEY, activeDismissals, ageBucketBounds, coverageLine,
-  todayStamp, warrantyClusters, warrantyDaysLeft, type AgeBucket,
+  DISMISS_PREF_KEY, activeDismissals, coverageLine, todayStamp,
 } from "@/lib/home";
 import {
   loanRow, loanSoonEdge, leaverRow, groupWork, purchaseReviewRow, type WorkGroup, type WorkRow, type WorkSectionId,
@@ -26,7 +22,6 @@ const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() 
 
 /** ACTIVE employees who started recently are the ones whose kit is still landing. */
 const HIRE_WINDOW_DAYS = 30;
-const WARRANTY_WINDOW_DAYS = 90;
 
 /** Phase 17: per-source read caps, named once so `take` and the saturation check can't drift apart. */
 const CAP = { small: 10, large: 50 };
@@ -418,47 +413,13 @@ export async function claimedByYou(userId: string, role: Role, now: Date = new D
   }));
 }
 
-export interface DirectChanges {
-  since: Date;
-  total: number;
-  /** zero-count kinds omitted; count desc, then label */
-  byKind: Array<{ type: ApprovalType; label: string; count: number }>;
-  /** zero-count actors can't occur (grouped from real rows); count desc, then name */
-  byActor: Array<{ name: string; count: number }>;
-}
-
-/**
- * Admin Home's "Applied directly · last 7 days" (Phase 21 spec §4.1): rows
- * that were never queued — created already EXECUTED via Phase 15's direct
- * change path (`appliedDirectly`, Task 1) — resolved within the window.
- */
-export async function directChanges(now: Date = new Date(), days: number = DIRECT_WINDOW_DAYS): Promise<DirectChanges> {
-  const since = new Date(now.getTime() - days * DAY_MS);
-  const where: Prisma.ApprovalWhereInput = { appliedDirectly: true, resolvedAt: { gte: since } };
-
-  const [byType, byClaimer] = await Promise.all([
-    prisma.approval.groupBy({ by: ["type"], where, _count: { _all: true } }),
-    prisma.approval.groupBy({ by: ["claimedById"], where, _count: { _all: true } }),
-  ]);
-
-  const claimerIds = byClaimer.map((g) => g.claimedById).filter((id): id is string => id !== null);
-  const users = claimerIds.length
-    ? await prisma.user.findMany({ where: { id: { in: claimerIds } }, select: { id: true, name: true } })
-    : [];
-  const nameById = new Map(users.map((u) => [u.id, u.name]));
-
-  const byKind = byType
-    .map((g) => ({ type: g.type, label: DIRECT_KIND_LABEL[g.type], count: g._count._all }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-
-  const byActor = byClaimer
-    .map((g) => ({
-      name: g.claimedById === null ? "Unknown" : (nameById.get(g.claimedById) ?? "Unknown"),
-      count: g._count._all,
-    }))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-
-  return { since, total: byKind.reduce((sum, k) => sum + k.count, 0), byKind, byActor };
+/** Phase 46: every direct change resolved since `since` — when, and the class of the asset it changed. */
+export async function directChangeRows(since: Date): Promise<Array<{ at: Date; cls: AssetClass | null }>> {
+  const rows = await prisma.approval.findMany({
+    where: { appliedDirectly: true, resolvedAt: { gte: since } },
+    select: { resolvedAt: true, asset: { select: { cls: true } } },
+  });
+  return rows.map((r) => ({ at: r.resolvedAt!, cls: r.asset?.cls ?? null }));
 }
 
 export interface FleetSlice {
@@ -550,72 +511,6 @@ export async function fleet(now: Date = new Date()): Promise<Fleet> {
   return { total, slices, coverage: coverageLine(spareByType, neededByType).text };
 }
 
-export interface AgeBar {
-  bucket: AgeBucket;
-  count: number;
-}
-
-/**
- * Phase 43: the histogram's one query — the five ageBucket buckets counted in SQL against ageBucketBounds, instead of
- * loading every IT asset's purchasedAt. A null purchasedAt matches no predicate, as ageBucket buckets it nowhere.
- * Prisma stores a DateTime as its UTC wall clock in `timestamp(3)`, so each bound is cast to timestamptz and read back
- * AT TIME ZONE 'UTC': the same instant, compared at the stored ms, whatever the session's TimeZone.
- */
-export function ageHistogramSql(now: Date): Prisma.Sql {
-  const [b0, b1, b2, b3] = ageBucketBounds(now);
-  const utc = (d: Date) => Prisma.sql`(${d}::timestamptz AT TIME ZONE 'UTC')`;
-  return Prisma.sql`
-    SELECT
-      COUNT(*) FILTER (WHERE "purchasedAt" > ${utc(b0)}) AS "lt1",
-      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b0)} AND "purchasedAt" > ${utc(b1)}) AS "y1",
-      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b1)} AND "purchasedAt" > ${utc(b2)}) AS "y2",
-      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b2)} AND "purchasedAt" > ${utc(b3)}) AS "y3",
-      COUNT(*) FILTER (WHERE "purchasedAt" <= ${utc(b3)}) AS "y4"
-    FROM "Asset" WHERE "cls" = 'IT'::"AssetClass"
-  `;
-}
-
-/** Five buckets; only 4y+ changes colour, because that's next year's capex conversation. */
-export async function ageHistogram(now: Date = new Date()): Promise<AgeBar[]> {
-  const [row] = await prisma.$queryRaw<[Record<"lt1" | "y1" | "y2" | "y3" | "y4", bigint>]>(ageHistogramSql(now));
-  const counts: Record<AgeBucket, bigint> = { "<1y": row.lt1, "1–2y": row.y1, "2–3y": row.y2, "3–4y": row.y3, "4y+": row.y4 };
-  return AGE_BUCKETS.map((bucket) => ({ bucket, count: Number(counts[bucket]) }));
-}
-
-export interface WarrantyRow {
-  id: string;
-  tag: string;
-  model: string;
-  until: string;
-  days: number;
-  clustered: boolean;
-}
-
-export async function warrantyRunway(now: Date = new Date()): Promise<WarrantyRow[]> {
-  const horizon = new Date(now.getTime() + WARRANTY_WINDOW_DAYS * DAY_MS);
-  const assets = await prisma.asset.findMany({
-    // a runway looks FORWARD: without the floor this card fills with kit that
-    // came off warranty a year ago, which is a different problem entirely
-    where: {
-      warrantyUntil: { gte: now, lte: horizon },
-      status: { notIn: ["DISPOSE", "DONATED", "BUYOUT"] },
-      cls: "IT",
-    },
-    orderBy: [{ warrantyUntil: "asc" }, { id: "asc" }],
-    take: 8,
-    select: { id: true, tag: true, model: true, warrantyUntil: true },
-  });
-  return warrantyClusters(
-    assets.map((a) => ({
-      id: a.id,
-      tag: a.tag,
-      model: a.model,
-      until: fmtDate(a.warrantyUntil),
-      days: warrantyDaysLeft(a.warrantyUntil!, now),
-    })),
-  );
-}
-
 export interface TodoRow {
   id: string;
   refNo: string;
@@ -623,61 +518,66 @@ export interface TodoRow {
   meta: string;
   href: string;
   action: string;
+  /** Purchasing: the request came back to its author (IT rejected it, or Finance asked for more) */
+  bounced?: boolean;
 }
 
-export interface PurchasingHome {
-  todo: TodoRow[];
-  draftCount: number;
-  awaitingIT: number;
-  awaitingFinance: number;
-  /** completed this calendar month, preformatted */
-  spendThisMonth: string;
-  approvalsWaiting: number;
-  awaitingItCheck: number;
-  /** Phase 22 (spec §0 decision 7 / §6.5): the two Stock tiles — items at or below reorder level, and open lots expiring within `DEFAULT_EXPIRY_WINDOW`. */
-  lowStock: number;
-  expiringLots: number;
-  stocktakesOverdue: number;
-}
-
-const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
+/** A request's value in pesos: qty × unit price over its units (a unit with no price counts 0). */
+export const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
   units.reduce((sum, u) => sum + u.qty * (u.unitPrice === null || u.unitPrice === undefined ? 0 : Number(u.unitPrice)), 0);
 
+export interface SpendRow {
+  /** completedAt */
+  at: Date;
+  /** pesos: qty x unit price over the request's units */
+  amount: number;
+  supplier: string | null;
+  department: string | null;
+}
+
 /**
- * Purchasing Home leads with what this person still has to do: drafts nobody
- * has sent, and anything that came back to them.
+ * Completed requests since `since`, each with its value — the one read behind "Spend this month" (Purchasing),
+ * "Approved this month" (Finance) and both spend breakdowns, so they can never disagree.
  */
-export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [mine, counts, completed, approvalsWaiting, awaitingItCheck, stockSignals] = await Promise.all([
-    prisma.purchaseRequest.findMany({
-      where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
-      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      take: 8,
-      select: {
-        id: true, refNo: true, state: true, updatedAt: true,
-        units: { select: { qty: true, unitPrice: true } },
-        notes: {
-          where: { kind: { not: "COMMENT" } },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          take: 1,
-          select: { kind: true, author: { select: { name: true } } },
-        },
+export async function completedSpend(since: Date): Promise<SpendRow[]> {
+  const rows = await prisma.purchaseRequest.findMany({
+    where: { state: "COMPLETED", completedAt: { gte: since } },
+    select: {
+      completedAt: true,
+      units: { select: { qty: true, unitPrice: true } },
+      vendor: { select: { name: true } },
+      department: { select: { name: true } },
+    },
+  });
+  return rows.map((r) => ({
+    at: r.completedAt!, amount: unitsValue(r.units), supplier: r.vendor?.name ?? null, department: r.department?.name ?? null,
+  }));
+}
+
+/** Phase 46: the breakdowns' "top 7 + Other". */
+export const SPEND_TOP = 7;
+
+/**
+ * Purchasing's to-do (Home and the Overview's Needs you): the viewer's drafts and submitted requests, oldest touched
+ * first, each with the one action that moves it — and whether it came back to them.
+ */
+export async function purchasingTodo(userId: string, now: Date = new Date()): Promise<TodoRow[]> {
+  const mine = await prisma.purchaseRequest.findMany({
+    where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    take: 8,
+    select: {
+      id: true, refNo: true, state: true, updatedAt: true,
+      units: { select: { qty: true, unitPrice: true } },
+      notes: {
+        where: { kind: { not: "COMMENT" } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 1,
+        select: { kind: true, author: { select: { name: true } } },
       },
-    }),
-    prisma.purchaseRequest.groupBy({ by: ["state"], _count: { _all: true } }),
-    prisma.purchaseRequest.findMany({
-      where: { state: "COMPLETED", completedAt: { gte: monthStart } },
-      select: { units: { select: { qty: true, unitPrice: true } } },
-    }),
-    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
-    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
-    stockHomeSignals(localDateISO(now)),
-  ]);
-
-  const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
-
-  const todo: TodoRow[] = mine.map((r) => {
+    },
+  });
+  return mine.map((r) => {
     const last = r.notes[0];
     const bounced = (r.state === "DRAFT" && last?.kind === "IT_REJECT") || (r.state === "SUBMITTED" && last?.kind === "REQUEST_INFO");
     return {
@@ -687,90 +587,42 @@ export async function purchasingHome(userId: string, role: Role, now: Date = new
       meta: `${fmtMoney(unitsValue(r.units))} · ${daysSince(r.updatedAt, now)} d`,
       href: `/purchases/${r.id}`,
       action: bounced ? "Fix and resubmit" : r.state === "DRAFT" ? "Submit" : "Open",
+      bounced,
     };
   });
-
-  return {
-    todo,
-    draftCount: count("DRAFT"),
-    awaitingIT: count("SUBMITTED"),
-    awaitingFinance: count("IT_REVIEWED"),
-    spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
-    approvalsWaiting,
-    awaitingItCheck,
-    lowStock: stockSignals.low,
-    expiringLots: stockSignals.expiringLots,
-    stocktakesOverdue: stockSignals.stocktakesOverdue,
-  };
-}
-
-export interface FinanceHome {
-  /** the headline: money sitting on finance's desk */
-  waiting: string;
-  waitingCount: number;
-  /** "oldest 2 days" — null when nothing is waiting */
-  oldestDays: number | null;
-  approvedThisMonth: string;
-  capitalized: string;
-  capitalizedCount: number;
-  /** Phase 35: book value, depreciation to date (both as of today) and the review backlog */
-  bookValue: string;
-  depreciation: string;
-  /** registrations waiting for Finance, per class — each is its own link, so a count always matches the page it opens */
-  toReview: { it: number; purchasing: number };
-  queue: TodoRow[];
 }
 
 /**
- * README 5d: Finance Home leads with MONEY AND AGE, not counts — "₱208k
- * waiting, oldest 2 days". The count is the supporting detail, not the headline.
+ * The requests waiting on Finance (IT_REVIEWED), oldest review first: Finance Home's headline and queue, and the
+ * snapshot's `fin.waitingC` / `fin.waitingCount` (Phase 46), so the two can never disagree.
  */
-export async function financeHome(now: Date = new Date()): Promise<FinanceHome> {
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [waiting, completed, capitalized, totals, toReviewIt, toReviewPurchasing] = await Promise.all([
-    prisma.purchaseRequest.findMany({
-      where: { state: "IT_REVIEWED" },
-      orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true, refNo: true, reviewedAt: true, updatedAt: true,
-        requestedBy: { select: { name: true } },
-        units: { select: { qty: true, unitPrice: true } },
-      },
-    }),
-    prisma.purchaseRequest.findMany({
-      where: { state: "COMPLETED", completedAt: { gte: monthStart } },
-      select: { units: { select: { qty: true, unitPrice: true } } },
-    }),
-    // financeHome is the ONE prisma.asset read in this file NOT pinned to IT.
-    // Spec §6 makes IT's HOME alerts IT-only; this is FINANCE's home, and spec
-    // line 8 gives Finance both classes — /finance/assets shows both on its
-    // tabs, so a headline total that showed one would contradict the page it
-    // fronts (D-16).
-    prisma.asset.aggregate({ where: { cost: { not: null } }, _sum: { cost: true }, _count: { _all: true } }),
-    bookValueTotals({}, now),
-    prisma.asset.count({ where: { AND: [{ cls: "IT" }, regWhere("with-finance")] } }),
-    prisma.asset.count({ where: { AND: [{ cls: "PURCHASING" }, regWhere("with-finance")] } }),
-  ]);
+export function financeWaitingRows() {
+  return prisma.purchaseRequest.findMany({
+    where: { state: "IT_REVIEWED" },
+    orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true, refNo: true, reviewedAt: true, updatedAt: true,
+      requestedBy: { select: { name: true } },
+      units: { select: { qty: true, unitPrice: true } },
+    },
+  });
+}
 
-  const oldest = waiting[0];
-  return {
-    waiting: fmtMoney(waiting.reduce((sum, r) => sum + unitsValue(r.units), 0)),
-    waitingCount: waiting.length,
-    oldestDays: oldest ? daysSince(oldest.reviewedAt ?? oldest.updatedAt, now) : null,
-    approvedThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
-    // Prisma returns Decimal | null from _sum — Number() before it ever leaves here
-    capitalized: fmtMoney(capitalized._sum.cost === null ? 0 : Number(capitalized._sum.cost)),
-    capitalizedCount: capitalized._count._all,
-    bookValue: fmtMoneyExact(totals.bookC / 100),
-    depreciation: fmtMoneyExact(totals.accumulatedC / 100),
-    toReview: { it: toReviewIt, purchasing: toReviewPurchasing },
-    queue: waiting.slice(0, 8).map((r) => ({
-      id: r.id,
-      refNo: r.refNo,
-      what: `from ${r.requestedBy.name}`,
-      meta: `${fmtMoney(unitsValue(r.units))} · waiting ${daysSince(r.reviewedAt ?? r.updatedAt, now)} d`,
-      href: `/purchases/${r.id}`,
-      action: "Review",
-    })),
-  };
+export type FinanceWaitingRow = Awaited<ReturnType<typeof financeWaitingRows>>[number];
+
+/** Days a waiting request has sat with Finance: since IT's review (or its last update, for a pre-review row). */
+export function waitingDays(r: Pick<FinanceWaitingRow, "reviewedAt" | "updatedAt">, now: Date): number {
+  return daysSince(r.reviewedAt ?? r.updatedAt, now);
+}
+
+/** Finance's queue (Home and the Overview's Needs you): the first `take` waiting requests, each opened to review. */
+export function financeQueue(rows: FinanceWaitingRow[], now: Date, take = 8): TodoRow[] {
+  return rows.slice(0, take).map((r) => ({
+    id: r.id,
+    refNo: r.refNo,
+    what: `from ${r.requestedBy.name}`,
+    meta: `${fmtMoney(unitsValue(r.units))} · waiting ${waitingDays(r, now)} d`,
+    href: `/purchases/${r.id}`,
+    action: "Review",
+  }));
 }

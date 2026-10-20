@@ -30,6 +30,15 @@ export function financeListWhere(p: Omit<FinanceListParams, "page" | "fin">): Pr
   };
 }
 
+/**
+ * Phase 46: `/finance/assets?fin=<f>` (with `cls=PURCHASING` for that class) and nothing else filtered — the page's own
+ * registration-chip count for that filter (financeAssets counts `AND [financeListWhere, finWhere(f)]`). The Finance
+ * overview's To confirm tile, its snapshot and the sidebar's To confirm views all count this where.
+ */
+export function financeViewWhere(cls: AssetClass, fin: FinFilter): Prisma.AssetWhereInput {
+  return { AND: [financeListWhere({ cls, status: null, q: "" }), finWhere(fin)] };
+}
+
 const BY_COST: Prisma.AssetOrderByWithRelationInput[] = [{ cost: { sort: "desc", nulls: "last" } }, { tag: "asc" }, { id: "asc" }];
 const BY_AGE: Prisma.AssetOrderByWithRelationInput[] = [{ createdAt: "asc" }, { id: "asc" }];
 

@@ -14,7 +14,7 @@ import { addDays, dayFromISO, defaultOffboardingDue, defaultStocktakeDue } from 
  * "Close by" fields with their server floors, the offboarding list's Due
  * column and facet, the wizard and stocktake headers, the farewell report's
  * Completion line, the worklist's `leaverRow`, and Purchasing Home's
- * "Stocktakes past close-by" tile.
+ * "Stocktakes overdue" tile and Needs you item (Phase 46 Overview).
  *
  * Cases run `serial` — three of them share state on purpose:
  *   - case 2 edits Dennis's own due date, so it runs after case 1 (which
@@ -334,12 +334,15 @@ test.describe.serial("deadlines", () => {
 
       await login(page, PURCHASING);
       await page.goto("/");
-      await expect(page.getByRole("heading", { name: "Your requests", level: 2 })).toBeVisible({ timeout: 20_000 });
-      // Same Stat-tile shape e2e/stock-reports.spec.ts:323 uses: the label
-      // span's parent is the tile, whose only link is the value.
-      const tile = page.getByText("Stocktakes past close-by", { exact: true }).locator("xpath=..");
-      await expect(tile.getByRole("link")).toHaveText("1");
-      await expect(tile.getByRole("link")).toHaveAttribute("href", "/stock/stocktakes");
+      // Phase 46 (spec §3.2): the Purchasing Overview's "Stocktakes overdue" tile — a plain card (ruling: the
+      // stocktakes list has no overdue filter to link to) — counts it, and Needs you lists it as urgent, linked.
+      const tile = page.locator('[data-kpis] > [data-kpi="stock.stocktakesOverdue"]');
+      await expect(tile.locator("[data-kpi-value]")).toHaveText("1", { timeout: 20_000 });
+      await expect(page.locator('a[data-kpi="stock.stocktakesOverdue"]')).toHaveCount(0);
+      const item = page.locator("[data-needs-you] > li").filter({ hasText: stocktakeRefNo });
+      await expect(item).toHaveAttribute("data-tone", "bad");
+      await expect(item).toContainText("1 d overdue");
+      await expect(item.getByRole("link")).toHaveAttribute("href", `/stock/stocktakes/${stocktakeId}`);
 
       await page.goto("/stock/stocktakes");
       const row = page.getByRole("row", { name: new RegExp(stocktakeRefNo) });

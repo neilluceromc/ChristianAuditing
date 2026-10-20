@@ -473,7 +473,7 @@ test.describe("import — the role gate is on the route, not the button", () => 
 
     await page.goto("/inventory/import");
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
-    await expect(page.getByRole("link", { name: "Import" })).toHaveCount(0);
+    await expect(page.getByRole("main").getByRole("link", { name: "Import" })).toHaveCount(0);
     // Phase 30 (spec §6.1): Import moved behind the header's More actions menu — absent there too.
     await page.getByRole("button", { name: "More actions" }).click();
     await expect(page.getByRole("menuitem", { name: "Export" })).toBeVisible();
@@ -483,7 +483,7 @@ test.describe("import — the role gate is on the route, not the button", () => 
     await page.goto("/employees/import");
     await expect(page).toHaveURL(/\/inventory$/, { timeout: 30_000 });
     await page.goto("/employees");
-    await expect(page.getByRole("link", { name: "Import" })).toHaveCount(0);
+    await expect(page.getByRole("main").getByRole("link", { name: "Import" })).toHaveCount(0);
   });
 
   // The actual PATH_RULES probe. No page file exists at either */no-such-page

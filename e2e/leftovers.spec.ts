@@ -117,7 +117,7 @@ test.describe("Phase 31 — leftovers sweep", () => {
     const byLoadout = await employeeNos(page);
     expect(byLoadout, "the seed's Loadout order differs from its name order").not.toEqual(byName);
 
-    const employee = page.getByRole("button", { name: "Employee" });
+    const employee = page.getByRole("main").getByRole("button", { name: "Employee" });
     await waitForHydration(employee);
     await employee.click();
     // toggleSort demotes Loadout to the secondary key: sort=name,loadout.

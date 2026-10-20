@@ -7,6 +7,16 @@ import { parseListState } from "@/lib/url-state";
 import { buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { buildEmployeeWhere, EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
 import { parsePurchaseState, purchaseWhere } from "@/lib/purchases-list";
+import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
+import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
+import { parseCls } from "@/lib/asset-class";
+import { parseFin } from "@/lib/registration";
+import { FLAG_SPECS } from "@/lib/admin-flags";
+import { filterFlags, parseFlagsState, parseUsersDisabled, usersWhere } from "@/lib/admin-lists";
+import { deliveryTabWhere, parseDeliveryTab } from "@/lib/webhooks";
+import { localDateISO } from "@/lib/format";
+import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
+import { financeViewWhere } from "@/server/modules/finance/queries";
 import { purchaseReviewCount, worklistCount } from "./queries";
 
 /**
@@ -22,6 +32,23 @@ export const NAV_COUNT_HREF = {
   prDraft: "/purchases?state=DRAFT",
   prSubmitted: "/purchases?state=SUBMITTED",
   prItReviewed: "/purchases?state=IT_REVIEWED",
+  // Phase 46 spec §4.3
+  stockLow: "/stock?low=1",
+  suppliersRenewing: "/purchases/suppliers?renewing=30",
+  finToConfirmIt: "/finance/assets?fin=with-finance",
+  finToConfirmPurchasing: "/finance/assets?cls=PURCHASING&fin=with-finance",
+  usersDisabled: "/admin/users?disabled=1",
+  deadDeliveries: "/admin/webhooks/deliveries?state=DEAD",
+  flagsUnavailable: "/admin/flags?state=unavailable",
+} as const satisfies Partial<Record<CountKey, string>>;
+
+/**
+ * Counts that sit on a view whose page lists more than the count, because the page has no filter for it (Phase 46
+ * spec §4.3: the Stocktakes view shows how many are overdue; /stock/stocktakes lists every stocktake). They are never
+ * asserted equal to the page's rows; nav-counts.test.ts asserts each sits on exactly this view.
+ */
+export const NAV_COUNT_UNFILTERED = {
+  stocktakesOverdue: "/stock/stocktakes",
 } as const satisfies Partial<Record<CountKey, string>>;
 
 type User = { id: string; role: Role };
@@ -79,6 +106,36 @@ const employees = (key: "leaving") => () =>
 const purchases = (key: "prDraft" | "prSubmitted" | "prItReviewed") => () =>
   prisma.purchaseRequest.count({ where: purchaseWhere(parsePurchaseState(paramsOf(key).get("state")), "") });
 
+// Phase 46 spec §4.3: each new count reads its view's URL the way the page does.
+
+// /stock: parseListState → listStockItems' lowCount (stockLowCount); with low=1 the page lists exactly those items.
+const stockLow = () => stockLowCount(parseListState(paramsOf("stockLow"), STOCK_LIST_CONFIG));
+
+// The Purchasing overview's Stocktakes overdue (stockHomeSignals), on today's Manila day. Exempt: see above.
+const stocktakesOverdue = () => prisma.stocktake.count({ where: stocktakesOverdueWhere(localDateISO()) });
+
+// /purchases/suppliers: parseListState → buildSupplierWhere(state) (today = the Manila day); listSuppliers counts it.
+const suppliersRenewing = () =>
+  prisma.vendor.count({ where: buildSupplierWhere(parseListState(paramsOf("suppliersRenewing"), SUPPLIER_LIST_CONFIG)) });
+
+// /finance/assets: cls (IT unless PURCHASING) and fin as the page parses them; financeAssets counts financeViewWhere.
+const toConfirm = (key: "finToConfirmIt" | "finToConfirmPurchasing") => () => {
+  const params = paramsOf(key);
+  return prisma.asset.count({ where: financeViewWhere(parseCls(params.get("cls")) ?? "IT", parseFin(params.get("fin"))!) });
+};
+
+// /admin/users: parseUsersDisabled → usersWhere; listUsers counts it.
+const usersDisabled = () =>
+  prisma.user.count({ where: usersWhere(parseUsersDisabled(paramsOf("usersDisabled").get("disabled"))) });
+
+// /admin/webhooks/deliveries: parseDeliveryTab → deliveryTabWhere; listDeliveries counts it.
+const deadDeliveries = () =>
+  prisma.webhookDelivery.count({ where: deliveryTabWhere(parseDeliveryTab(paramsOf("deadDeliveries").get("state"))) });
+
+// /admin/flags: listFlags is FLAG_SPECS-driven and `unavailable` is the spec's, so the filter needs no query.
+const flagsUnavailable = () =>
+  Promise.resolve(filterFlags(FLAG_SPECS, parseFlagsState(paramsOf("flagsUnavailable").get("state"))).length);
+
 // Spec §5.3 / Phase 40 §6: the Worklist and Purchase reviews counts are admin's and IT's only, as before.
 const reviewer = (user: User) => user.role === "admin" || user.role === "it_staff";
 
@@ -89,6 +146,14 @@ const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<num
   prDraft: purchases("prDraft"),
   prSubmitted: purchases("prSubmitted"),
   prItReviewed: purchases("prItReviewed"),
+  stockLow,
+  stocktakesOverdue,
+  suppliersRenewing,
+  finToConfirmIt: toConfirm("finToConfirmIt"),
+  finToConfirmPurchasing: toConfirm("finToConfirmPurchasing"),
+  usersDisabled,
+  deadDeliveries,
+  flagsUnavailable,
 };
 
 /**

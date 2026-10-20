@@ -57,6 +57,8 @@ export interface WorkRow {
   control?: WorkControl;
   /** what the row menu's Open record / Open profile opens */
   entity?: { kind: "asset" | "employee"; id: string; label: string };
+  /** past its due date (a loan or a leaver) — the Overview's bad tone; severity can't say so past 500 days late */
+  overdue?: true;
   /** how long the row has waited, in days — Home's "oldest {d} d" (spec §5.4); absent = not an age */
   ageDays?: number;
 }
@@ -94,7 +96,7 @@ export function loanRow(a: LoanLike, now: Date): WorkRow | null {
   }
   const days = daysUntil(a.loanDueAt, localDateISO(now));
   const meta = `${holder} · due ${fmtDate(a.loanDueAt)}`;
-  if (days < 0) return { ...base, title: `${a.tag} overdue by ${-days} d`, meta, severity: 500 - days };
+  if (days < 0) return { ...base, title: `${a.tag} overdue by ${-days} d`, meta, severity: 500 - days, overdue: true };
   if (days > LOAN_DUE_SOON_DAYS) return null;
   const when = days === 0 ? "due today" : days === 1 ? "due tomorrow" : `due in ${days} d`;
   return { ...base, title: `${a.tag} ${when}`, meta, severity: LOAN_DUE_SOON_DAYS - days };
@@ -163,7 +165,7 @@ export function leaverRow(e: LeaverLike, todayISO: string): WorkRow {
   }
   const due = dueStatus(e.dueAt, todayISO);
   const severity = due.overdue ? 500 - due.days : due.days === 0 ? 2 : due.days === 1 ? 1 : 0;
-  return { ...base, title: `${e.name} is leaving`, meta: `${kit} · ${due.text}`, severity };
+  return { ...base, title: `${e.name} is leaving`, meta: `${kit} · ${due.text}`, severity, ...(due.overdue ? { overdue: true as const } : {}) };
 }
 
 const CONTROL_LABEL: Record<WorkControl["kind"], string> = {
@@ -234,14 +236,4 @@ export function summaryChips(groups: WorkGroup[]): { id: WorkSectionId; label: s
 /** Rank-0 queue rows are SLA breaches (worklist()'s own ranking), counted before any row limit. */
 export function pastSlaCount(groups: WorkGroup[]): number {
   return groups.reduce((s, g) => s + g.pastSla, 0);
-}
-
-/** Home's Worklist headline (spec §5.4): parts omitted when zero. */
-export function workHeadline(groups: WorkGroup[]): string {
-  const n = groups.reduce((s, g) => s + g.total, 0);
-  if (n === 0) return "";
-  // Final review I2: from every live row, not the shown ones — purchase reviews sort newest first.
-  const oldest = Math.max(0, ...groups.map((g) => g.oldestDays));
-  const late = pastSlaCount(groups);
-  return [`${n} waiting`, oldest > 0 ? `oldest ${oldest} d` : null, late > 0 ? `${late} past SLA` : null].filter(Boolean).join(" · ");
 }

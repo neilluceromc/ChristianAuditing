@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Role } from "@prisma/client";
-import { approvalClassWhere, canActOnApproval, isApprover } from "./approval-access";
+import { approvalClassKeys, approvalClassWhere, canActOnApproval, isApprover } from "./approval-access";
 
 const ROLES: Role[] = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"];
 
@@ -41,5 +41,21 @@ describe("approvalClassWhere — a role's queue", () => {
   it("derives the class list from MANAGEABLE_CLASSES, not a literal", () => {
     const where = approvalClassWhere("purchasing_staff") as { OR: Array<{ asset?: { cls: { in: string[] } } }> };
     expect(where.OR[1].asset?.cls.in).toEqual(["PURCHASING"]);
+  });
+});
+
+describe("approvalClassKeys — the snapshot classes a role's Approvals page counts", () => {
+  it.each([
+    ["admin", ["it", "purchasing", "none"]],
+    ["it_staff", ["it", "none"]],
+    ["purchasing_staff", ["purchasing", "none"]],
+    ["finance_staff", ["it", "purchasing", "none"]],
+    ["viewer", ["it", "purchasing", "none"]],
+  ] as Array<[Role, string[]]>)("%s → %j", (role, expected) => {
+    expect(approvalClassKeys(role)).toEqual(expected);
+  });
+  it.each(ROLES)("%s: all three classes exactly when approvalClassWhere is unfiltered", (role) => {
+    const unfiltered = Object.keys(approvalClassWhere(role)).length === 0;
+    expect(approvalClassKeys(role).length === 3).toBe(unfiltered);
   });
 });

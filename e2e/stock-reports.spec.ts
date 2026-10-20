@@ -340,15 +340,20 @@ test.describe("stock reports", () => {
 
     await login(page, PURCHASING);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Your requests", level: 2 })).toBeVisible({ timeout: 10_000 });
 
-    const lowTile = page.getByText("Below reorder level", { exact: true }).locator("xpath=..");
-    await expect(lowTile).toContainText(String(expectedLow));
-    await expect(lowTile.getByRole("link")).toHaveAttribute("href", "/stock?low=1");
+    // Phase 46 (spec §3.2): the Purchasing Overview's tiles — each one link whose value is its page's count.
+    const lowTile = page.locator('a[data-kpi="stock.low"]');
+    await expect(lowTile.locator("[data-kpi-value]")).toHaveText(String(expectedLow), { timeout: 10_000 });
+    await expect(lowTile).toHaveAttribute("href", "/stock?low=1");
 
-    const expiringTile = page.getByText("Expiring within 30 days", { exact: true }).locator("xpath=..");
-    await expect(expiringTile).toContainText(String(expectedExpiring));
-    await expect(expiringTile.getByRole("link")).toHaveAttribute("href", "/stock/reports/expiry");
+    // The tile opens the report's Expiring tab at the default window, whose count it is.
+    const expiringTile = page.locator('a[data-kpi="stock.expiringLots"]');
+    await expect(expiringTile.locator("[data-kpi-value]")).toHaveText(String(expectedExpiring));
+    await expect(expiringTile).toHaveAttribute("href", new RegExp(`^/stock/reports/expiry\\?(?=.*\\btab=expiring\\b)(?=.*\\bdays=${DEFAULT_EXPIRY_WINDOW}\\b)`));
+    await expiringTile.click();
+    await expect(page).toHaveURL(/\/stock\/reports\/expiry\?.*tab=expiring/);
+    await expect(page.getByRole("navigation", { name: EXPIRY_TABS }).locator('[aria-current="page"]'))
+      .toHaveText(`Expiring (${expectedExpiring})`);
   });
 
   test("6. No serious or critical axe violations on the three reports and PN-0003's item page", async ({ page }) => {

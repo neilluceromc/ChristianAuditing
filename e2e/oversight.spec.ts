@@ -1,16 +1,16 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
-import { PrismaClient, type ApprovalType } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
-import { fmtDateTime } from "@/lib/format";
-import { DIRECT_KIND_LABEL, DIRECT_WINDOW_DAYS } from "@/lib/approvals-list";
+import { fmtDateTime, localDateISO } from "@/lib/format";
+import { addDays } from "@/lib/deadlines";
 
 /**
  * Phase 21, Task 7 — approvals oversight (spec §§2–4, 9), 7 cases run
  * serially: each case's database writes are read by a later case (case 2's
  * direct change feeds case 4's DB-derived total; case 6's claim feeds its
- * own "Claimed by you"/Worklist split).
+ * own claim/worklist split in Needs you).
  *
  * Seeded fixtures this file depends on (prisma/seed.ts), verified against
  * source rather than assumed from the brief/facts files:
@@ -40,12 +40,12 @@ import { DIRECT_KIND_LABEL, DIRECT_WINDOW_DAYS } from "@/lib/approvals-list";
  *   `approval.appliedDirectly`: the meta line reads "{type label} ·
  *   applied directly by {name} · {fmtDateTime(resolvedAt)}", and the card
  *   heading is "How it was applied" with no "What the system checked" card
- *   at all (not just hidden). Home (src/app/(app)/page.tsx) renders
- *   DirectChangesBody (src/components/home/direct-changes.tsx) inside a
- *   SectionCard titled "Applied directly · last 7 days" (an h2, README 1k),
- *   on the admin branch below "System" and on the IT branch (admin's
- *   default landing) above "Fleet" — both gated on `user.role === "admin"`
- *   and hidden under `!focus`.
+ *   at all (not just hidden). Phase 46: Home is the Overview
+ *   (src/server/modules/home/overview.ts). Direct changes are the Admin
+ *   Overview's "Direct changes" tile (`[data-kpi="direct.week"]`, a plain
+ *   card: the last 7 Manila days) and its "Direct changes per day" trend
+ *   (hidden under focus); the IT Overview has neither. Claims and the
+ *   worklist are one "Needs you" list.
  *
  * Never reference a raw cuid — the DB is reseeded and ids change every run.
  */
@@ -208,68 +208,60 @@ test.describe.serial("oversight", () => {
     await expect(page.getByRole("heading", { name: "How it was applied" })).toHaveCount(0);
   });
 
-  test("4. as admin@ with the admin cookie, Home's 'Applied directly · last 7 days' shows a DB-derived total, by-kind order, J. Sarmiento and the Closed link; the focus toggle hides it", async ({ page }) => {
+  test("4. as admin@ with the admin cookie, Home's 'Direct changes' tile shows the DB-derived count for the last 7 days, the trend splits it per day, and Focus hides the trend", async ({ page }) => {
     // Derived from the DB rather than hardcoded: by this point in the serial
-    // run, case 2 added a fourth direct row on top of the three seeded ones,
-    // so the fresh-seed "3 total / 1 each" numbers the facts file describes
-    // no longer hold — the brief is explicit that this case reads the DB.
-    const since = new Date(Date.now() - DIRECT_WINDOW_DAYS * 86_400_000);
-    const directRows = await db.approval.findMany({
-      where: { appliedDirectly: true, resolvedAt: { gte: since } },
-      select: { type: true },
+    // run, case 2 added a fourth direct row on top of the three seeded ones.
+    // Phase 46 (spec §3.2): the Admin Overview's "Direct changes" tile counts
+    // direct changes resolved in the last 7 Manila days (today and the six
+    // before it, from Manila midnight) — a plain card, no page lists them.
+    const since = new Date(`${addDays(localDateISO(), -6)}T00:00:00+08:00`);
+    const expectedTotal = await db.approval.count({
+      where: { appliedDirectly: true, resolvedAt: { gte: since, lte: new Date() } },
     });
-    const expectedTotal = directRows.length;
-    const kindCounts = new Map<ApprovalType, number>();
-    for (const r of directRows) kindCounts.set(r.type, (kindCounts.get(r.type) ?? 0) + 1);
-    // Same comparator as directChanges() (src/server/modules/home/queries.ts):
-    // count desc, then label asc.
-    const expectedByKind = [...kindCounts.entries()]
-      .map(([type, count]) => ({ label: DIRECT_KIND_LABEL[type], count }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    expect(expectedTotal, "the seed's direct rows and case 2's").toBeGreaterThan(0);
 
     await login(page, ADMIN);
     await switchToAdminBranch(page);
     await page.goto("/");
-    await expect(page.getByText("Who can get in")).toBeVisible();
+    const tile = page.locator('[data-kpis] > [data-kpi="direct.week"]');
+    await expect(tile).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('a[data-kpi="direct.week"]')).toHaveCount(0);
+    await expect(tile).toContainText("Direct changes");
+    await expect(tile.locator("[data-kpi-value]")).toHaveText(String(expectedTotal));
 
-    const card = page.locator("main > div > *").filter({
-      has: page.getByRole("heading", { name: "Applied directly · last 7 days", level: 2 }),
-    });
-    await expect(card).toBeVisible();
-
-    const totalStat = card.getByText("Applied directly", { exact: true }).locator("..");
-    await expect(totalStat).toContainText(String(expectedTotal));
-
-    const kindItems = card.locator("ul").first().locator("li");
-    await expect(kindItems).toHaveCount(expectedByKind.length);
-    for (const [i, k] of expectedByKind.entries()) {
-      await expect(kindItems.nth(i)).toContainText(k.label);
-    }
-
-    await expect(card).toContainText("J. Sarmiento");
-    await expect(card.getByRole("link", { name: "See them in Closed →" })).toHaveAttribute(
-      "href",
-      "/approvals?tab=closed&via=direct",
-    );
+    // The trend: direct changes per day by class, 14 days, with its table.
+    const trend = page.getByRole("heading", { name: "Direct changes per day", level: 2 });
+    await expect(trend).toBeVisible();
+    const chart = page.getByRole("main").locator("section").filter({ has: trend });
+    const showTable = chart.getByRole("button", { name: "Show table" });
+    await waitForHydration(showTable);
+    await showTable.click();
+    await expect(chart.locator("[data-chart-table] tbody tr")).toHaveCount(14);
+    await expect(chart.locator("[data-chart-table] thead th")).toHaveText(["Day", "IT", "Purchasing"]);
 
     const focusToggle = page.getByRole("button", { name: "Focus" });
     await expect(focusToggle).toBeVisible();
     await focusToggle.click();
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "Applied directly · last 7 days", level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Direct changes per day", level: 2 })).toHaveCount(0);
+    // Focus keeps the tiles.
+    await expect(tile).toBeVisible();
   });
 
-  test("5. without the admin cookie, admin@'s (IT-branch, default landing) Home also shows the section; it@'s Home does not", async ({ page }) => {
+  test("5. without the admin cookie, admin@'s Home is the IT Overview (no Direct changes); it@'s is too", async ({ page }) => {
     await login(page, ADMIN);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Applied directly · last 7 days", level: 2 })).toBeVisible();
+    await expect(page.locator('[data-kpis] > [data-kpi="it.spare"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-kpi="direct.week"]')).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Direct changes per day", level: 2 })).toHaveCount(0);
 
     await login(page, IT);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Applied directly · last 7 days", level: 2 })).toHaveCount(0);
+    await expect(page.locator('[data-kpis] > [data-kpi="it.spare"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-kpi="direct.week"]')).toHaveCount(0);
   });
 
-  test("6. double-count (P-5): claiming APR-2040 for admin shows it once, in 'Claimed by you', absent from the Worklist's queue section, and still on /inventory/work", async ({ page }) => {
+  test("6. double-count (P-5): claiming APR-2040 for admin shows it once in Needs you, as a claim, and still on /inventory/work", async ({ page }) => {
     const admin = await db.user.findUniqueOrThrow({ where: { email: ADMIN } });
     await db.approval.update({
       where: { refNo: "APR-2040" },
@@ -279,20 +271,15 @@ test.describe.serial("oversight", () => {
     await login(page, ADMIN);
     await page.goto("/");
 
-    const claimsCard = page.locator("main > div > *").filter({
-      has: page.getByRole("heading", { name: "Claimed by you", level: 2 }),
-    });
-    await expect(claimsCard).toContainText("APR-2040");
-    // One approval, once per screen (spec §4.2) — the refNo's own link text
-    // is exactly "APR-2040" wherever it renders, so a page-wide exact count
-    // of 1 proves it appears nowhere else (in particular, not repeated in
-    // the Worklist's queue section below).
-    await expect(page.getByText("APR-2040", { exact: true })).toHaveCount(1);
-
-    const worklistCard = page.locator("main > div > *").filter({
-      has: page.getByRole("heading", { name: "Worklist", level: 2 }),
-    });
-    await expect(worklistCard).not.toContainText("APR-2040");
+    // Phase 46: "Claimed by you" and the Worklist became one list, Needs you — claims first within a tone, and the
+    // worklist read without the viewer's own claims, so one approval appears once (spec §4.2 of Phase 21).
+    const items = page.locator("[data-needs-you] > li");
+    await expect(items.first()).toBeVisible({ timeout: 20_000 });
+    const apr = items.filter({ hasText: "APR-2040" });
+    await expect(apr).toHaveCount(1);
+    await expect(apr).toContainText("claimed by you");
+    // Past its SLA, so urgent.
+    await expect(apr).toHaveAttribute("data-tone", "bad");
 
     await page.goto("/inventory/work");
     await expect(page.getByText("APR-2040")).toBeVisible();
@@ -313,7 +300,7 @@ test.describe.serial("oversight", () => {
     await login(page, ADMIN);
     await switchToAdminBranch(page);
     await page.goto("/");
-    await expect(page.getByText("Who can get in")).toBeVisible();
+    await expect(page.locator('[data-kpi="admin.activeUsers"]')).toBeVisible();
     await expectNoSeriousAxe(page);
   });
 });

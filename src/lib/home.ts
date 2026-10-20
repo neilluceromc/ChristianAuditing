@@ -1,35 +1,7 @@
 /**
  * Home's arithmetic, kept pure so the dashboard's judgement calls are testable:
- * what breaks first, how old the fleet is, whether the spare pool covers the
- * people starting next week, and what "cleared for the rest of the day" means.
+ * whether the spare pool covers the people starting next week, and what "cleared for the rest of the day" means.
  */
-export const AGE_BUCKETS = ["<1y", "1–2y", "2–3y", "3–4y", "4y+"] as const;
-
-export type AgeBucket = (typeof AGE_BUCKETS)[number];
-
-const YEAR_MS = 365 * 86_400_000;
-
-/** null = no purchase date recorded; an unknown age must not read as "new". */
-export function ageBucket(purchasedAt: Date | null | undefined, now: Date = new Date()): AgeBucket | null {
-  if (!purchasedAt) return null;
-  const years = Math.floor((now.getTime() - purchasedAt.getTime()) / YEAR_MS);
-  if (years <= 0) return "<1y";
-  if (years >= 4) return "4y+";
-  return AGE_BUCKETS[years];
-}
-
-/**
- * Phase 43: the four instants ageBucket splits at — now minus 1, 2, 3 and 4 years of YEAR_MS — so ageHistogram can
- * count in SQL. floor((now − p) / YEAR_MS) ≥ k exactly when p ≤ now − k·YEAR_MS: every value is a whole number of ms
- * far below 2^53, and at k ≤ 4 the division's rounding is ~10^5 times too fine to reach an integer it is short of.
- * So "<1y" is p > b0 (a future date included, as ageBucket has it), bucket k is b(k) < p ≤ b(k−1), and "4y+" is
- * p ≤ b3. Pure ms arithmetic: no timezone enters it (home.test.ts checks it against ageBucket at every boundary).
- */
-export function ageBucketBounds(now: Date): [Date, Date, Date, Date] {
-  const at = (k: number) => new Date(now.getTime() - k * YEAR_MS);
-  return [at(1), at(2), at(3), at(4)];
-}
-
 export interface Coverage {
   covered: number;
   needed: number;
@@ -54,10 +26,6 @@ export function coverageLine(
     ? "no incoming hires need equipment right now"
     : `spare pool covers ${covered} of the ${needed} slot${needed === 1 ? "" : "s"} the incoming hires need`;
   return { covered, needed, text };
-}
-
-export function warrantyDaysLeft(until: Date, now: Date = new Date()): number {
-  return Math.round((until.getTime() - now.getTime()) / 86_400_000);
 }
 
 /** UserPreference key holding today's cleared rows. */
@@ -96,38 +64,4 @@ export function withoutDismissal(value: unknown, today: string, key: string): Di
 /** Asia/Manila day stamp — the business's day, so "the rest of the day" means theirs. */
 export function todayStamp(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(now);
-}
-
-export interface WarrantyLike {
-  id: string;
-  model: string;
-  days: number;
-}
-
-/**
- * README: the runway's job is to surface that *two identical laptops expire the
- * same week* — one row is a diary note, two is a purchase order. "Same week"
- * is relative, not aligned to a fixed calendar boundary: two same-model rows
- * cluster when they're within 7 days of each other, so a pair 2 days apart
- * clusters and a pair 2 months apart doesn't, regardless of where the 7-day
- * window would land if it were pinned to day zero.
- */
-export function warrantyClusters<T extends WarrantyLike>(rows: T[]): Array<T & { clustered: boolean }> {
-  const clustered = new Set<number>();
-  const byModel = new Map<string, number[]>();
-  rows.forEach((r, i) => {
-    const indices = byModel.get(r.model) ?? [];
-    indices.push(i);
-    byModel.set(r.model, indices);
-  });
-  for (const indices of byModel.values()) {
-    const sorted = [...indices].sort((a, b) => rows[a].days - rows[b].days);
-    for (let i = 0; i < sorted.length - 1; i++) {
-      if (Math.abs(rows[sorted[i + 1]].days - rows[sorted[i]].days) < 7) {
-        clustered.add(sorted[i]);
-        clustered.add(sorted[i + 1]);
-      }
-    }
-  }
-  return rows.map((r, i) => ({ ...r, clustered: clustered.has(i) }));
 }

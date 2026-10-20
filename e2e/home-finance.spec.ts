@@ -1,8 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { fmtMoney } from "@/lib/format";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 
 const db = new PrismaClient();
@@ -30,15 +29,20 @@ async function expectNoSeriousAxe(page: Page) {
 // @thebackroomop.com / SEED_PASSWORD:
 //   admin@ (admin, holds APR-2039 CLAIMED) · it@ (J. Sarmiento, it_staff) ·
 //   purchasing@ (A. Reyes) · finance@ (L. Domingo) · viewer@ (viewer)
-//   25 assets total; BR-LT-0148 & BR-LT-0122 (both Dell Latitude 5420) are the
-//   warranty-runway cluster (38 d / 41 d); BR-LT-0027 is MISSING (the DATA
-//   candidate that must not outrank a HIRE row for a shift-queue slot).
-//   APR-2040 breached SLA, APR-2025 EXECUTION_FAILED, Dennis Ong offboarding,
-//   Karen Uy / Nina Robles recent hires short a required slot.
+//   BR-LT-0027 is MISSING. APR-2040 breached SLA, APR-2025 EXECUTION_FAILED,
+//   Dennis Ong offboarding, Karen Uy / Nina Robles recent hires short a
+//   required slot.
 //   PR-0198 SUBMITTED (bounced back from finance) · PR-0201 DRAFT ·
 //   PR-0195 IT_REVIEWED (₱45,000, reviewed 3 days ago).
 // Rows never reference raw cuids: the DB can be reseeded between runs and ids
 // are cuids that change on every seed.
+//
+// Phase 46 (spec §3): every workspace's Home is the Overview — six KPI tiles
+// ([data-kpis] > [data-kpi]), then Row A ("Needs you" beside the trend), then
+// Row B (the make-up beside the ranked breakdown). The old cards (Worklist,
+// Claimed by you, Fleet, Age, Warranty runway, Your requests, the money
+// headline) are gone; e2e/phase-46-home.spec.ts checks every tile against its
+// page. This file keeps the seeded-story checks, read through the Overview.
 
 // Spec files share one database and run in alphabetical order — each file
 // reseeds so no file inherits another's mutations.
@@ -49,70 +53,64 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-test.describe("home — IT dashboard leads with work, not KPIs", () => {
-  test("the card headings render in the documented order; no KPI row sits above the Worklist", async ({ page }) => {
+/** The Overview's Needs you items (src/components/home/overview/needs-you.tsx). */
+const needsItems = (page: Page) => page.locator("[data-needs-you] > li");
+const needsItem = (page: Page, text: string): Locator => needsItems(page).filter({ hasText: text });
+const TONE_RANK: Record<string, number> = { bad: 0, warn: 1, info: 2 };
+
+/** The IT Overview's secondary panels — what Focus hides. */
+const IT_SECONDARY = ["Asset movements per week", "Fleet by status", "Missing kit by client"];
+
+test.describe("home — IT Overview: the numbers, then the work, then the make-up", () => {
+  test("six tiles lead; Needs you sits beside the trend; the make-up beside the breakdown", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    // Scoped to <main> — this list is the page's own cards. (The sidebar's nav
-    // groups were h3s until Phase 42; they have no headings now, but nothing
-    // outside <main> belongs in this list either.)
+    // Scoped to <main> — this list is the page's own cards (the sidebar has no headings).
     const headings = page.locator("main").getByRole("heading", { level: 2 });
-    // Phase 32 (spec §5.4): no Jump to on IT's Home, and it@ holds no claim in
-    // the seed — "Claimed by you" is then one muted line under the Worklist,
-    // not a card of its own.
-    await expect(headings).toHaveText([
-      "Worklist", "Fleet", "Age", "Warranty runway",
-    ]);
-    await expect(page.locator("main").getByText("You hold no claims.", { exact: true })).toBeVisible();
-    // Spec §5.3/§5.4: the nav's Worklist count, the card's headline and its header link.
-    await expect(page.getByRole("complementary", { name: "Primary" }).getByLabel(/^\d+ waiting on the worklist$/)).toBeVisible();
-    await expect(page.locator("main").getByText(/^\d+ waiting( · oldest \d+ d)?( · \d+ past SLA)?$/)).toBeVisible();
-    await expect(page.locator("main").getByRole("link", { name: "Open worklist" })).toHaveAttribute("href", "/inventory/work");
+    await expect(headings).toHaveText(["Needs you", ...IT_SECONDARY]);
 
-    // Structural proof there's no KPI-tile row above it: the Worklist card
-    // is literally the first child of the page's content column (the h1
-    // "Hello, …" lives in a sibling <header>, not this container).
-    const firstCard = page.locator("main > div > *").first();
-    await expect(firstCard.getByRole("heading", { level: 2 })).toHaveText("Worklist");
+    // Spec §3.1: the KPI row is the Overview's first child, six tiles.
+    await expect(page.locator("[data-overview] > *").first()).toHaveAttribute("data-kpis", "");
+    await expect(page.locator("[data-kpis] > [data-kpi]")).toHaveCount(6);
+    await expect(page.locator('[data-row="a"]').getByRole("heading", { level: 2 })).toHaveText(["Needs you", "Asset movements per week"]);
+    await expect(page.locator('[data-row="b"]').getByRole("heading", { level: 2 })).toHaveText(["Fleet by status", "Missing kit by client"]);
+
+    // Spec §5.3/§5.4 (Phase 32): the nav's Worklist count still shows, and Needs you opens the full worklist.
+    await expect(page.getByRole("complementary", { name: "Primary" }).getByLabel(/^\d+ waiting on the worklist$/)).toBeVisible();
+    await expect(page.locator("main").getByRole("link", { name: /^See all/ })).toHaveAttribute("href", "/inventory/work");
   });
 });
 
-// Phase 15: "Your shift" (a flat, globally 5-row-capped list) is gone —
-// replaced by the Worklist, whose fixed sections (worklist.ts,
-// WORK_SECTIONS) are each capped independently (limit: 2 on Home). The seeded
-// SLA row (APR-2040), the EXECUTION_FAILED retry (APR-2025) and Dennis Ong's
-// leaver row all land in the same "Approvals & leavers" (queue) section, so
-// that section alone now needs a "See all" escape — and, the actual payoff of
-// independent per-section caps, a DATA row (BR-LT-0027, MISSING) in a
-// DIFFERENT section is no longer crowded out by the queue's own volume.
-test.describe("home — worklist sections: what breaks first", () => {
-  test("APR-2040 leads the Approvals & leavers section, capped at 2 with a See all link to the rest", async ({ page }) => {
+// Phase 15's point survives the Overview: what breaks first comes first. Needs
+// you flattens the worklist by urgency (bad, then warn, then info), so a DATA
+// row (BR-LT-0027, MISSING) is not crowded out by the queue's own volume, and
+// the full queue is one click away.
+test.describe("home — Needs you: what breaks first", () => {
+  test("urgent items lead, BR-LT-0027 among them; See all opens the worklist with APR-2040 and Dennis Ong", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    const queueSection = page.locator("section#queue");
-    await expect(queueSection.getByRole("heading", { name: "Approvals & leavers" })).toBeVisible();
-    // Severity for the queue section is days since the row went stale — the
-    // breached SLA (1 day over) outranks the same-day EXECUTION_FAILED retry
-    // and Dennis Ong's leaver row, so it is the first of the (at most two)
-    // rows Home shows.
-    const queueRows = queueSection.locator("ol > li");
-    await expect(queueRows.first()).toContainText("APR-2040");
+    const items = needsItems(page);
+    await expect(items.first()).toBeVisible();
+    const n = await items.count();
+    expect(n).toBeLessThanOrEqual(6);
+    const tones = await items.evaluateAll((els) => els.map((e) => e.getAttribute("data-tone") ?? ""));
+    expect(tones[0], "the first item is urgent").toBe("bad");
+    const ranks = tones.map((t) => TONE_RANK[t]);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    // The panel says how many are urgent, and each urgent item carries the word (not only its tint).
+    await expect(page.locator("main section").filter({ has: page.getByRole("heading", { name: "Needs you" }) }))
+      .toContainText(`${tones.filter((t) => t === "bad").length} urgent`);
+    await expect(items.first()).toContainText("Urgent");
 
-    // Three real rows (APR-2040, APR-2025, Dennis Ong) feed this section but
-    // Home caps it at 2 — the third is behind "See all 3", not silently gone.
-    const seeAll = queueSection.getByRole("link", { name: /See all 3/ });
-    await expect(seeAll).toBeVisible();
+    const missing = needsItem(page, "BR-LT-0027 is missing");
+    await expect(missing).toHaveCount(1);
+    await expect(missing).toHaveAttribute("data-tone", "bad");
+    await expect(missing.getByRole("link", { name: /^Investigate/ })).toHaveAttribute("href", /^\/inventory\/[a-z0-9]+$/i);
 
-    // The actual point of per-section caps replacing one flat 5-row list:
-    // BR-LT-0027 (MISSING) is a real "Missing & records" candidate in the
-    // seed, and it is NOT crowded out by the queue section's own volume any
-    // more — it renders directly on Home, in its own section.
-    await expect(page.getByText("BR-LT-0027")).toBeVisible();
-
-    await seeAll.click();
-    await expect(page).toHaveURL(/\/inventory\/work#queue$/);
+    await page.locator("main").getByRole("link", { name: /^See all/ }).click();
+    await expect(page).toHaveURL(/\/inventory\/work$/);
     const fullQueue = page.locator("section#queue");
     await expect(fullQueue).toContainText("APR-2040");
     await expect(fullQueue).toContainText("Dennis Ong is leaving");
@@ -120,33 +118,41 @@ test.describe("home — worklist sections: what breaks first", () => {
 });
 
 test.describe("home — claims sit above the pool", () => {
-  test("as admin@, Claimed by you lists APR-2039 and appears before Fleet", async ({ page }) => {
+  test("as admin@, APR-2039 (claimed by you) is in Needs you, ahead of the unclaimed work of its tone", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/");
 
-    const texts = await page.locator("main").getByRole("heading", { level: 2 }).allTextContents();
-    expect(texts.indexOf("Claimed by you")).toBeGreaterThanOrEqual(0);
-    expect(texts.indexOf("Claimed by you")).toBeLessThan(texts.indexOf("Fleet"));
-
-    const claimsCard = page.locator("main > div > *").filter({
-      has: page.getByRole("heading", { name: "Claimed by you", level: 2 }),
-    });
-    await expect(claimsCard).toContainText("APR-2039");
+    const claim = needsItem(page, "APR-2039");
+    await expect(claim).toHaveCount(1);
+    await expect(claim).toContainText("claimed by you");
+    // Within a tone, claims come first (needsFromWork): no unclaimed item of the claim's tone sits above it.
+    const tone = (await claim.getAttribute("data-tone"))!;
+    const rows = await needsItems(page).evaluateAll((els) =>
+      els.map((e) => ({ tone: e.getAttribute("data-tone"), claim: (e.textContent ?? "").includes("claimed by you"), apr: (e.textContent ?? "").includes("APR-2039") })));
+    const at = rows.findIndex((r) => r.apr);
+    expect(rows.slice(0, at).filter((r) => r.tone === tone && !r.claim)).toEqual([]);
   });
 });
 
 test.describe("home — viewer is read-only", () => {
-  test("the Worklist reads read-only, no row menus, READ-ONLY badge shows, Fleet still renders", async ({ page }) => {
+  test("Needs you reads Open everywhere, no row menus, no claims, READ-ONLY badge shows, the fleet still renders", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/");
 
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    // Phase 32 (plan P-10): the viewer sees the worklist, with Open links and no controls.
-    await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toBeVisible();
+    // Phase 32 (plan P-10): the viewer sees the work, with Open links and no controls.
+    await expect(page.getByRole("heading", { name: "Needs you", level: 2 })).toBeVisible();
+    const items = needsItems(page);
+    await expect(items.first()).toBeVisible();
+    const n = await items.count();
+    for (let i = 0; i < n; i++) {
+      await expect(items.nth(i).getByRole("link")).toHaveText(/^Open\b/);
+      await expect(items.nth(i).getByRole("button")).toHaveCount(0);
+    }
     await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0);
     await expect(page.getByLabel(/waiting on the worklist$/)).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Claimed by you", level: 2 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible();
+    await expect(needsItem(page, "claimed by you")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fleet by status", level: 2 })).toBeVisible();
   });
 });
 
@@ -155,92 +161,63 @@ test.describe("home — purchasing to-do", () => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/");
 
-    const row0198 = page.locator("li").filter({ hasText: "PR-0198" });
+    const row0198 = needsItem(page, "PR-0198");
     await expect(row0198).toContainText("came back from L. Domingo");
-    await expect(row0198.getByRole("link", { name: "Fix and resubmit" })).toBeVisible();
+    // A bounced request needs attention; a draft is only to do.
+    await expect(row0198).toHaveAttribute("data-tone", "warn");
+    await expect(row0198.getByRole("link", { name: /^Fix and resubmit/ })).toBeVisible();
 
-    const row0201 = page.locator("li").filter({ hasText: "PR-0201" });
+    const row0201 = needsItem(page, "PR-0201");
     await expect(row0201).toContainText("still a draft");
-    await expect(row0201.getByRole("link", { name: "Submit" })).toBeVisible();
+    await expect(row0201).toHaveAttribute("data-tone", "info");
+    await expect(row0201.getByRole("link", { name: /^Submit/ })).toBeVisible();
   });
 });
 
 test.describe("home — finance leads with money, not counts", () => {
-  test("headline reads ₱45,000 waiting, oldest 3 days, and sits before the stat tiles", async ({ page }) => {
+  test("the first tile reads ₱45,000 waiting on you, oldest 3 days; PR-0195 is to review", async ({ page }) => {
     await login(page, "finance@thebackroomop.com");
     await page.goto("/");
 
-    const headline = page.getByText(/₱[\d,]+ waiting/);
-    await expect(headline).toContainText("₱45,000 waiting");
-    await expect(headline).toContainText("oldest 3 days");
+    // Spec §3.2: Finance's first tile is the money waiting, a plain card (no page shows that total).
+    const first = page.locator("[data-kpis] > [data-kpi]").first();
+    await expect(first).toHaveAttribute("data-kpi", "fin.waitingC");
+    await expect(first).toContainText("Waiting on you");
+    await expect(first.locator("[data-kpi-value]")).toHaveText("₱45,000");
+    await expect(first).toContainText("oldest 3 days");
+    await expect(page.locator('a[data-kpi="fin.waitingC"]')).toHaveCount(0);
+    // The count is the supporting tile beside it, linked to the requests it counts.
+    await expect(page.locator('a[data-kpi="fin.waitingCount"]')).toHaveAttribute("href", "/purchases?state=IT_REVIEWED");
 
-    // The money line must sit ABOVE the stat-tile grid, not just be present
-    // somewhere on the page — compare vertical position, not DOM/text order,
-    // since the Stat label is visually uppercased by CSS (text-transform),
-    // which would make a naive text-index comparison brittle.
-    const headlineBox = await headline.boundingBox();
-    const statBox = await page.getByText("Requests waiting").boundingBox();
-    expect(headlineBox).not.toBeNull();
-    expect(statBox).not.toBeNull();
-    expect(headlineBox!.y).toBeLessThan(statBox!.y);
-
-    await expect(page.locator("li").filter({ hasText: "PR-0195" })).toBeVisible();
-    await expect(page.locator("li").filter({ hasText: "PR-0195" }).getByRole("link", { name: "Review" })).toBeVisible();
-
-    // The Capitalized stat tile (financeHome() in
-    // src/server/modules/home/queries.ts) is the one asset query in that file
-    // deliberately NOT pinned to a single class — Finance gets both classes'
-    // totals here, matching /finance/assets' own two-tab, both-classes view
-    // (D-16). Derive the expectation from the same aggregate the page runs,
-    // rather than hardcoding it, then pin the seed total once so a future
-    // reseed change is caught here too.
-    const capitalizedAgg = await db.asset.aggregate({
-      where: { cost: { not: null } },
-      _sum: { cost: true },
-      _count: { _all: true },
-    });
-    const totalCost = Number(capitalizedAgg._sum.cost ?? 0);
-    const totalCount = capitalizedAgg._count._all;
-    // Seed pin: IT ₱807,000 / 25 assets + Purchasing ₱47,635,000 / 7 assets.
-    expect(totalCost).toBe(48_442_000);
-    expect(totalCount).toBe(32);
-
-    const capitalizedTile = page.getByText("Capitalized", { exact: true }).locator("..");
-    await expect(capitalizedTile).toContainText(fmtMoney(totalCost));
-    await expect(capitalizedTile).toContainText(`${totalCount} assets`);
+    const pr0195 = needsItem(page, "PR-0195");
+    await expect(pr0195).toBeVisible();
+    await expect(pr0195).toContainText("₱45,000");
+    await expect(pr0195.getByRole("link", { name: /^Review/ })).toBeVisible();
   });
 });
 
-test.describe("home — fleet coverage, age distribution and warranty runway", () => {
-  test("fleet bar, age histogram (4y+ non-zero) and the clustered warranty pair all read correctly", async ({ page }) => {
+test.describe("home — the fleet's make-up and the missing kit breakdown", () => {
+  test("the fleet bar links each status and carries the coverage line; a breakdown row's number is its page's", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
-    // Phase 25 (spec §4 row 7): the fleet bar is a GROUP OF LINKS now, not an
-    // image — every segment and every legend status links to the inventory
-    // filtered to that status, so the old `role="img"` name
-    // ("Fleet of 25 assets by status") no longer exists. The legend link
-    // carries the bare status as its name; the segment carries sr-only text.
-    // The age histogram two assertions below is untouched — it is still an img.
-    // Phase 40 §6: the legend and the segment name the status in words.
+    // Phase 25 / Phase 40 §6: every segment and legend status links to the inventory filtered to it; the legend
+    // carries the bare status as its name, the segment its sr-only "Deployed: N assets".
     await expect(page.getByRole("link", { name: "Deployed", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Deployed: \d+ assets$/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Deployed: \d+ assets$/ })).toHaveAttribute("href", "/inventory?status=DEPLOYED");
     await expect(page.getByText("spare pool covers 4 of the 10 slots the incoming hires need")).toBeVisible();
 
-    // Note the EN DASH (–) in the bucket labels, not a hyphen.
-    await expect(
-      page.getByRole("img", { name: "<1y: 3, 1–2y: 14, 2–3y: 1, 3–4y: 3, 4y+: 4" }),
-    ).toBeVisible();
-
-    const row0148 = page.locator("li").filter({ hasText: "BR-LT-0148" });
-    await expect(row0148).toContainText("Dell Latitude 5420");
-    await expect(row0148).toContainText("same week");
-    await expect(row0148).toContainText("38 d");
-
-    const row0122 = page.locator("li").filter({ hasText: "BR-LT-0122" });
-    await expect(row0122).toContainText("Dell Latitude 5420");
-    await expect(row0122).toContainText("same week");
-    await expect(row0122).toContainText("41 d");
+    // Spec §3.2: people missing required kit, by client — each row links to that page's filter, so its number is
+    // the people count there.
+    const breakdown = page.locator("[data-ranked] > li").first();
+    await expect(breakdown).toBeVisible();
+    const value = Number((await breakdown.locator("span").last().innerText()).replace(/,/g, ""));
+    const link = breakdown.getByRole("link");
+    await expect(link).toHaveAttribute("href", /^\/employees\?.*gaps=1/);
+    await link.click();
+    await expect(page).toHaveURL(/\/employees\?.*gaps=1/);
+    await expect(page.locator('p[aria-live="polite"]').filter({ hasText: /\d[\d,]* (people|person)\b/ }))
+      .toHaveText(new RegExp(`^${value.toLocaleString("en-US")} (people|person)\\b`));
   });
 });
 
@@ -298,9 +275,8 @@ test.describe("home — /finance/activity", () => {
   });
 });
 
-// Runs here, before the dismissal/focus block below mutates it@'s shift
-// queue and view state, so the row-ordering assertions above still see the
-// untouched fresh-seed shift order.
+// Runs here, before the dismissal/focus block below mutates it@'s worklist
+// and view state.
 test.describe("home — axe", () => {
   test("/, viewer /, /finance/assets, /finance/activity — no serious/critical violations", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
@@ -329,9 +305,10 @@ test.describe("home — axe", () => {
 test.describe("home — dismissal and focus mode (mutating, serial)", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("hiding a worklist row until tomorrow removes it, and it stays gone after a reload", async ({ page }) => {
+  test("hiding a worklist row until tomorrow removes it, it stays gone after a reload, and Home's Needs you drops it too", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/");
+    // Phase 46: Home's Needs you has no row menus (one action link per item); the row menu lives on the worklist.
+    await page.goto("/inventory/work");
 
     // Nina Robles' row lives in the "New hires" section — any section's row
     // hides the same way (the row menu's Hide until tomorrow,
@@ -346,21 +323,27 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
     // Per-user, per-day preference, not component state — must survive a reload.
     await page.reload();
     await expect(page.locator("li").filter({ hasText: "Nina Robles" })).toHaveCount(0, { timeout: 15_000 });
+
+    // Needs you reads the same worklist, so a hidden row is not there either.
+    await page.goto("/");
+    await expect(needsItems(page).first()).toBeVisible();
+    await expect(needsItem(page, "Nina Robles")).toHaveCount(0);
   });
 
-  test("Focus collapses to the Worklist + Claimed by you, survives a reload, and never touches the URL", async ({ page }) => {
+  test("Focus keeps the tiles and Needs you, survives a reload, and never touches the URL", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
 
     await page.getByRole("button", { name: "Focus" }).click();
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
 
-    await expect(page.getByRole("heading", { name: "Worklist", level: 2 })).toBeVisible();
-    // it@ holds no claim: "Claimed by you" survives Focus as its one muted line.
-    await expect(page.locator("main").getByText("You hold no claims.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Age", level: 2 })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Warranty runway", level: 2 })).toHaveCount(0);
+    // Spec §3.1: focus shows only the KPI row and Needs you.
+    await expect(page.locator("[data-kpis] > [data-kpi]")).toHaveCount(6);
+    await expect(page.getByRole("heading", { name: "Needs you", level: 2 })).toBeVisible();
+    for (const heading of IT_SECONDARY) {
+      await expect(page.getByRole("heading", { name: heading, level: 2 }), heading).toHaveCount(0);
+    }
+    await expect(page.getByText(/^Focus mode — the trend, make-up and breakdown are hidden\./)).toBeVisible();
     expect(page.url()).not.toContain("focus");
 
     await expectNoSeriousAxe(page);
@@ -368,11 +351,11 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
     // A cookie, not component state — must survive a real reload.
     await page.reload();
     await expect(page.getByRole("button", { name: "Show everything" })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fleet by status", level: 2 })).toHaveCount(0);
     expect(page.url()).not.toContain("focus");
 
     await page.getByRole("button", { name: "Show everything" }).click();
     await expect(page.getByRole("button", { name: "Focus" })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Fleet by status", level: 2 })).toBeVisible({ timeout: 15_000 });
   });
 });

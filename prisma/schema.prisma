@@ -1104,3 +1104,18 @@ model CrisPendingAction {
 
   @@index([userId, createdAt])
 }
+
+/// Phase 46 (spec §2): one value per key per Manila calendar day, written by the worker's nightly snapshot
+/// (src/server/modules/metrics/snapshot.ts) and read back as the Overview's 8-week history. Keys are SNAPSHOT_KEYS
+/// (src/lib/snapshot.ts); values are counts, or centavos for money keys. Pruned after 400 days.
+model MetricSnapshot {
+  id        String   @id @default(cuid())
+  /// the Manila calendar day (UTC-midnight Date in Prisma)
+  day       DateTime @db.Date
+  key       String
+  value     BigInt
+  createdAt DateTime @default(now())
+
+  @@unique([day, key])
+  @@index([key, day])
+}

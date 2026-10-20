@@ -1,14 +1,16 @@
 import { prisma } from "@/server/db/client";
 import { lockReason, roleWorkspaces, ROLE_OPTIONS, type TargetUser } from "@/lib/admin-users";
 import { FLAG_SPECS, flagEnabled, type FlagState } from "@/lib/admin-flags";
+import { isFlagUnavailable, usersWhere, type UsersDisabled } from "@/lib/admin-lists";
 import { fmtDateTime } from "@/lib/format";
 import {
-  DELIVERY_TABS, deliveryStage, partitionEvents, replayBlockedReason, type DeliveryTab,
+  deliveryStage, deliveryTabWhere, partitionEvents, replayBlockedReason, type DeliveryTab,
   type WebhookEvent,
 } from "@/lib/webhooks";
 import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
-import type { Prisma, Role } from "@prisma/client";
+import type { DeliveryStatus, Prisma, Role } from "@prisma/client";
+import { dayWindowStart } from "@/lib/overview";
 
 export interface UserRow {
   id: string;
@@ -31,15 +33,18 @@ export interface UserRow {
   target: TargetUser;
 }
 
-export async function listUsers(requestedPage: number): Promise<{
+/** Every user, or (Phase 46, `?disabled=0|1`) only the active or disabled ones — `usersWhere`, nothing else excluded. */
+export async function listUsers(requestedPage: number, disabled: UsersDisabled = null): Promise<{
   rows: UserRow[]; total: number; page: number; pageCount: number;
 }> {
+  const where = usersWhere(disabled);
   const { rows: users, total, page, pageCount } = await pagedSnapshot(
     ENTITY_PAGE_SIZE,
     requestedPage,
-    (tx) => tx.user.count(),
+    (tx) => tx.user.count({ where }),
     (tx, pg) =>
       tx.user.findMany({
+        where,
         orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
         select: {
           id: true, name: true, email: true, role: true,
@@ -219,10 +224,45 @@ export async function adminHome(): Promise<AdminHome> {
       // `spec` is already the FLAG_SPECS entry for this key, so reading
       // spec.unavailable directly is the same lookup specFor(spec.key) would
       // do, minus the redundant re-scan of the array we're already iterating.
-      unavailable: !!spec.unavailable,
+      unavailable: isFlagUnavailable(spec),
     })),
     webhooks: { endpoints, inactive, dead, delivered },
   };
+}
+
+/** Phase 46 (spec §3.2, Admin make-up): webhook deliveries created in the `days` Manila days ending today, per status. */
+export async function deliveriesByStatus(now: Date = new Date(), days = 7): Promise<Record<DeliveryStatus, number>> {
+  const groups = await prisma.webhookDelivery.groupBy({
+    by: ["status"],
+    where: { createdAt: { gte: dayWindowStart(now, days) } },
+    _count: { _all: true },
+  });
+  const counts: Record<DeliveryStatus, number> = { PENDING: 0, RETRYING: 0, DELIVERED: 0, DEAD: 0 };
+  for (const g of groups) counts[g.status] = g._count._all;
+  return counts;
+}
+
+/** Phase 46 (Admin Needs you): endpoints with dead-lettered deliveries, most dead first. No secret is read. */
+export async function failingEndpoints(): Promise<Array<{ id: string; url: string; dead: number; active: boolean }>> {
+  const dead = await prisma.webhookDelivery.groupBy({ by: ["endpointId"], where: { status: "DEAD" }, _count: { _all: true } });
+  if (dead.length === 0) return [];
+  const endpoints = await prisma.webhookEndpoint.findMany({
+    where: { id: { in: dead.map((d) => d.endpointId) } },
+    select: { id: true, url: true, active: true },
+  });
+  const deadBy = new Map(dead.map((d) => [d.endpointId, d._count._all]));
+  return endpoints
+    .map((e) => ({ id: e.id, url: e.url, active: e.active, dead: deadBy.get(e.id) ?? 0 }))
+    .sort((a, b) => b.dead - a.dead || a.url.localeCompare(b.url));
+}
+
+/** Phase 46 (Admin Needs you): admin accounts that are disabled — a locked-out admin is worth a look. */
+export async function disabledAdmins(): Promise<Array<{ id: string; name: string; email: string }>> {
+  return prisma.user.findMany({
+    where: { role: "admin", disabled: true },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+    select: { id: true, name: true, email: true },
+  });
 }
 
 export interface DeliveryRow {
@@ -277,10 +317,7 @@ export async function listDeliveries(
   tab: DeliveryTab,
   requestedPage: number,
 ): Promise<{ rows: DeliveryRow[]; total: number; deadReplayable: number; page: number; pageCount: number }> {
-  const statuses = DELIVERY_TABS.find((t) => t.id === tab)!.statuses;
-  const where: Prisma.WebhookDeliveryWhereInput = statuses
-    ? { status: { in: [...statuses] } }
-    : {};
+  const where = deliveryTabWhere(tab);
 
   const { rows, total, page, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,

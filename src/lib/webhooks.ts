@@ -1,4 +1,4 @@
-import type { DeliveryStatus } from "@prisma/client";
+import type { DeliveryStatus, Prisma } from "@prisma/client";
 import { MAX_JOB_ATTEMPTS } from "./jobs";
 
 /**
@@ -281,4 +281,13 @@ export type DeliveryTab = (typeof DELIVERY_TABS)[number]["id"];
  */
 export function parseDeliveryTab(raw: string | null | undefined): DeliveryTab {
   return (DELIVERY_TABS.some((t) => t.id === raw) ? raw : "ALL") as DeliveryTab;
+}
+
+/**
+ * The rows a tab lists: its statuses, or every delivery for ALL. `listDeliveries` pages this where, and the sidebar's
+ * Failed deliveries count (Phase 46) counts it for DEAD.
+ */
+export function deliveryTabWhere(tab: DeliveryTab): Prisma.WebhookDeliveryWhereInput {
+  const statuses = DELIVERY_TABS.find((t) => t.id === tab)!.statuses;
+  return statuses ? { status: { in: [...statuses] } } : {};
 }

@@ -182,15 +182,15 @@ test.describe("axe sweep", () => {
     await login(page, "admin@thebackroomop.com");
     for (const path of ADMIN_ROUTES) await scanRoute(page, path);
 
-    // Home's admin branch (AdminHomeBody) is NOT what an admin sees by
+    // Home's admin branch (Phase 46: adminOverview) is NOT what an admin sees by
     // default: resolveWorkspace's fallback is allowed[0], which for admin is
     // "it" (ROLE_WORKSPACES.admin = ["it","purchasing","finance","admin"]) —
     // admin is the only role whose default landing on "/" is NOT its own
-    // dedicated home branch. Reaching AdminHomeBody at all requires the
+    // dedicated home branch. Reaching the Admin Overview at all requires the
     // br.dept=admin cookie that switchWorkspace() sets; without this, "/"
     // renders the same IT/viewer branch already covered by the viewer sweep
-    // below, and the admin-only branch (users/flags/webhooks counts, "Who
-    // can get in") is never exercised by any spec in this suite.
+    // below, and the admin-only branch (users/flags/webhooks tiles) is never
+    // exercised by any spec in this suite.
     // `path` MUST be explicit: addCookies({ url }) alone derives the cookie's
     // path from that URL's directory (here /admin/webhooks/, the last route
     // visited above) rather than "/" — the cookie then never reaches "/" at
@@ -203,7 +203,8 @@ test.describe("axe sweep", () => {
     ]);
     await page.goto("/");
     expect(new URL(page.url()).pathname).toBe("/");
-    await expect(page.getByText("Who can get in")).toBeVisible();
+    // Phase 46: the Admin Overview's own tile is the branch marker (the IT Overview has none of these).
+    await expect(page.locator('[data-kpi="admin.activeUsers"]')).toBeVisible();
     await page.mouse.move(0, 0);
     await page.waitForTimeout(700);
     const results = await new AxeBuilder({ page }).analyze();

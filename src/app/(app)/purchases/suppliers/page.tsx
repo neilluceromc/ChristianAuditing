@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
-import { toSearchParams, parseListState, serializeListState, type ListState } from "@/lib/url-state";
-import { SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
+import {
+  clearFilters, toSearchParams, parseListState, serializeListState, withFilter, type ListState,
+} from "@/lib/url-state";
+import { RENEWING_LABEL, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
+import { ChipFilterRow } from "@/components/patterns/chip-filter-row";
 import { canManageSuppliers } from "@/lib/supplier-access";
 import { listSuppliers } from "@/server/modules/suppliers/queries";
 import { PageHeader } from "@/components/ui/page-header";
@@ -27,6 +30,7 @@ export default async function SuppliersPage({
   const href = (s: ListState) => "/purchases/suppliers" + serializeListState(s, SUPPLIER_LIST_CONFIG);
   const manage = canManageSuppliers(user.role);
   const filtered = Boolean(state.q) || Object.keys(state.filters).length > 0;
+  const renewing = (state.filters.renewing?.length ?? 0) > 0;
 
   const actions = manage ? (
     <>
@@ -45,6 +49,13 @@ export default async function SuppliersPage({
       />
       <div className="flex flex-col gap-3">
         <SuppliersToolbar state={state} facets={data.facets} />
+        {/* Phase 46 (spec §4.3): the sidebar's Renewing soon view; the toolbar has no control for it, so its chip does. */}
+        {renewing && (
+          <ChipFilterRow
+            chips={[{ label: RENEWING_LABEL, removeHref: href(withFilter(state, "renewing", [])) }]}
+            clearHref={href(clearFilters(state))}
+          />
+        )}
         {data.rows.length > 0 ? (
           <>
             <SuppliersTable rows={data.rows} />

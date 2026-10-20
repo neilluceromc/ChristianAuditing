@@ -695,6 +695,35 @@ export async function stockExportRows(state: ListState, today: string = localDat
 }
 
 /**
+ * Phase 46 (spec §4.3, the Below reorder view's count): how many items `/stock` lists under `state` with `low=1` —
+ * `listStockItems`'s own `lowCount`: the low filter is derived, so the candidates are the page's where without it, and
+ * the low ones among them are counted (one candidate pass, one balances groupBy).
+ */
+export async function stockLowCount(state: ListState): Promise<number> {
+  const candidates = await candidateBalances(buildStockItemWhere({ ...state, filters: { ...state.filters, low: [] } }));
+  return candidates.filter((c) => isLow(c.balance, c.reorderLevel)).length;
+}
+
+/** OPEN stocktakes whose close-by day is before today (Manila): the Home count and the Overview's Needs-you rows. */
+export function stocktakesOverdueWhere(today: string): Prisma.StocktakeWhereInput {
+  return { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } };
+}
+
+/** Phase 46: the overdue stocktakes themselves, longest overdue first — Purchasing's Needs you. */
+export async function overdueStocktakes(
+  today: string,
+  take = 6,
+): Promise<Array<{ id: string; refNo: string; scope: string; dueAt: Date }>> {
+  const rows = await prisma.stocktake.findMany({
+    where: stocktakesOverdueWhere(today),
+    orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+    take,
+    select: { id: true, refNo: true, dueAt: true, category: { select: { name: true } } },
+  });
+  return rows.map((s) => ({ id: s.id, refNo: s.refNo, scope: s.category?.name ?? "All", dueAt: s.dueAt }));
+}
+
+/**
  * Spec §0 decision 7 / §6.5: Purchasing Home's two tiles. `low` mirrors
  * `listStockItems`'s own `lowCount` over every active item (one candidate
  * pass, one balances groupBy); `expiringLots` counts LOTS (not items) still
@@ -710,7 +739,7 @@ export async function stockHomeSignals(today: string): Promise<{ low: number; ex
       where: { expiresAt: { not: null }, item: { archivedAt: null } },
       select: { id: true, expiresAt: true, quantity: true },
     }),
-    prisma.stocktake.count({ where: { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } } }),
+    prisma.stocktake.count({ where: stocktakesOverdueWhere(today) }),
   ]);
 
   const [balanceSums, allocSums] = await Promise.all([

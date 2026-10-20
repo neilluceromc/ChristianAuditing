@@ -7,7 +7,7 @@ export type IconName =
   | "workstation" | "mouse" | "hub" | "bag" | "other" | "scan"
   | "keyboard" | "webcam" | "ups" | "license" | "menu"
   | "home" | "worklist" | "offboarding" | "reservations" | "reports" | "activity" | "setup"
-  | "requests" | "suppliers" | "stock" | "depreciation" | "users" | "webhooks" | "flags" | "chevron";
+  | "requests" | "suppliers" | "stock" | "depreciation" | "users" | "webhooks" | "flags" | "chevron" | "sidebar";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   laptop: (<><rect x="3" y="4" width="12" height="8" /><line x1="1.5" y1="14.5" x2="16.5" y2="14.5" /></>),
@@ -55,6 +55,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   webhooks: (<><line x1="7.5" y1="10.5" x2="10.5" y2="7.5" /><path d="M8.5 5 L10 3.5 a2.5 2.5 0 0 1 3.5 0 l1 1 a2.5 2.5 0 0 1 0 3.5 L13 9.5" /><path d="M9.5 13 L8 14.5 a2.5 2.5 0 0 1 -3.5 0 l-1 -1 a2.5 2.5 0 0 1 0 -3.5 L5 8.5" /></>),
   flags: (<><line x1="4" y1="2" x2="4" y2="16" /><polyline points="4,3 14.5,3 12,6.5 14.5,10 4,10" /></>),
   chevron: (<><polyline points="7,4 12,9 7,14" /></>),
+  sidebar: (<><rect x="2.5" y="3" width="13" height="12" /><line x1="7" y1="3" x2="7" y2="15" /></>),
 };
 
 export function Icon({

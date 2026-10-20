@@ -22,21 +22,34 @@ function CurrentWorkspace({ label, count }: { label: string; count: number }) {
   );
 }
 
+/** The workspace menu: every allowed workspace, ✓ on the current one. */
+const menuItems = (current: WorkspaceId, allowed: WorkspaceId[], meta: WorkspaceMeta) =>
+  allowed.map((ws) => ({
+    label: meta[ws].label + (ws === current ? " ✓" : ""),
+    onSelect: () => void switchWorkspace(ws),
+  }));
+
 /**
  * Phase 42 spec §4.4: the workspace's name as a small tag at the right end of the sidebar's brand row — a 6 px
  * accent dot and the label. One workspace: plain text, not a control. Several: a button opening the workspace
  * menu (✓ on the current one); its name keeps "{n} workspaces" for `auth-shell.spec`.
+ *
+ * Phase 46 spec §4.1: in the icon rail there is no room for the tag, so `variant="logo"` makes the BR mark itself
+ * the switch (same name, same menu), with the accent dot on its corner; for one workspace it is the plain mark.
  */
 export function WorkspaceTag({
   current,
   allowed,
   meta,
+  variant = "tag",
 }: {
   current: WorkspaceId;
   allowed: WorkspaceId[];
   meta: WorkspaceMeta;
+  variant?: "tag" | "logo";
 }) {
   const label = meta[current].label;
+  if (variant === "logo") return <LogoSwitch current={current} allowed={allowed} meta={meta} />;
   const tag = (
     <>
       <span aria-hidden className="size-[6px] shrink-0 rounded-full bg-accent" />
@@ -62,10 +75,33 @@ export function WorkspaceTag({
           <Icon name="chevron" size={9} className="rotate-90 text-fg-muted" />
         </button>
       )}
-      items={allowed.map((ws) => ({
-        label: meta[ws].label + (ws === current ? " ✓" : ""),
-        onSelect: () => void switchWorkspace(ws),
-      }))}
+      items={menuItems(current, allowed, meta)}
+    />
+  );
+}
+
+/** The BR mark, as the sidebar's brand row draws it. */
+const MARK = "grid size-6 shrink-0 place-items-center rounded-[5px] bg-fg font-mono text-[11px] font-bold text-canvas";
+
+function LogoSwitch({ current, allowed, meta }: { current: WorkspaceId; allowed: WorkspaceId[]; meta: WorkspaceMeta }) {
+  const label = meta[current].label;
+  if (allowed.length === 1) return <span className={MARK}>BR</span>;
+  return (
+    <Menu
+      align="start"
+      trigger={(p) => (
+        <button
+          {...p}
+          type="button"
+          aria-label={`Switch workspace — ${label}, ${workspaceCountLabel(allowed.length)}`}
+          title={`${label} workspace`}
+          className="relative grid size-9 place-items-center rounded-(--radius-ctl) hover:bg-surface-subtle"
+        >
+          <span aria-hidden className={MARK}>BR</span>
+          <span aria-hidden className="absolute bottom-1 right-1 size-[6px] rounded-full bg-accent ring-2 ring-surface" />
+        </button>
+      )}
+      items={menuItems(current, allowed, meta)}
     />
   );
 }
