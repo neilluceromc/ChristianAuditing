@@ -4,8 +4,9 @@ Staging moves off the office laptop (http://192.168.1.193:3000) to **Vercel** fo
 **Supabase** for Postgres and uploaded files, and the current staging data comes along.
 Design: `docs/superpowers/specs/2026-10-20-cloud-staging-vercel-supabase-design.md`.
 
-**Status:** the code is merged into `main` and pushed. Nothing is cut over yet; staging is still the
-laptop. Every step below happens only on your word.
+**Status:** cut over on 2026-10-20. Staging runs on Vercel + Supabase; the laptop's web and worker
+are stopped (see [The laptop stack](#the-laptop-stack-fallback)). The steps below are the record of
+how it was done, and the guide for doing it again.
 
 **The ground rules:**
 - **You paste every secret** into the Supabase and Vercel dashboards, or into your own terminal.
