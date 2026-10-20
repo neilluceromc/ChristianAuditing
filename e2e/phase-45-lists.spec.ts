@@ -16,7 +16,8 @@ import { INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
  *              value reads as 25, and a change lands on page 1
  *   sticky     toolbar, head and footer stay in view after a scroll; focusing a stuck bar's control does not
  *              scroll the window, and a focused row clears the pinned head; at 1280×800 the default inventory
- *              table fits its card, and the wide views (Repairs, Registration) scroll inside the card
+ *              table fits its card, and the wide views (Repairs, Registration) scroll inside the card, their head
+ *              at the card's top (not the toolbar's height down inside it) at 1100 and 1440
  *   row size   Dense is 36 px and one line, Compact 48 px, the top-bar button goes Dense → Comfortable
  *   zebra      even body rows are tinted, odd rows are not
  *   columns    Serial number by default; Registration only once chosen in Columns
@@ -416,6 +417,90 @@ test.describe("sticky toolbar, head and footer", () => {
       expect(wide.pageOverflow, `${url}: no sideways page scroll`).toBeLessThanOrEqual(0);
     }
     await expect(page.getByRole("columnheader", { name: "Registration" })).toBeVisible();
+  });
+
+  /** After a window scroll: the head, the table card and the body rows, against each other and the toolbar. */
+  async function headInCard(page: Page) {
+    return page.locator(".list-sticky-head").evaluate((card) => {
+      const head = card.querySelector("thead")!.getBoundingClientRect();
+      const bar = document.querySelector("[data-sticky-list] > [data-stuck]")?.getBoundingClientRect();
+      const box = card.getBoundingClientRect();
+      // a body row whose top is above the head's bottom edge, inside the card (hidden under the head)
+      const under = [...card.querySelectorAll("tbody tr")].filter((r) => {
+        const b = r.getBoundingClientRect();
+        return b.top < head.bottom - 1 && b.bottom > box.top;
+      }).length;
+      return {
+        headTop: head.top,
+        cardTop: box.top,
+        barBottom: bar ? bar.bottom : null,
+        rowsUnderHead: under,
+        scrollsInside: card.scrollWidth > card.clientWidth,
+        overflowX: getComputedStyle(card).overflowX,
+      };
+    });
+  }
+
+  /** /inventory?per=100 loaded and hydrated, its toolbar measured, then the window scrolled 600 px. */
+  async function scrolledInventory(page: Page) {
+    await page.goto("/inventory?per=100");
+    await expect(page.locator("tbody tr")).toHaveCount(100, { timeout: 20_000 });
+    await waitForHydration(page.locator("tbody tr"));
+    await expect
+      .poll(() => page.locator("[data-sticky-list]").evaluate((el) => (el as HTMLElement).style.getPropertyValue("--list-sticky-top")), { timeout: 20_000 })
+      .not.toBe("");
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect(page.locator("[data-sticky-list] > [data-stuck]")).toHaveCount(1);
+  }
+
+  test("7b. a table scrolling inside its card keeps its head at the card's top (1100 and 1440 with Registration); a fitting one pins it under the toolbar", async ({ page }) => {
+    test.setTimeout(120_000);
+    const user = await db.user.findUniqueOrThrow({ where: { email: IT } });
+    const keys = ["columns:inventory", INVENTORY_COLUMNS_SEEN_KEY];
+    const before = await db.userPreference.findMany({ where: { userId: user.id, key: { in: keys } } });
+    try {
+      await db.userPreference.deleteMany({ where: { userId: user.id, key: { in: keys } } });
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await login(page, IT);
+
+      // The default columns fit the card at 1440: the head pins right under the stuck toolbar (unchanged).
+      await scrolledInventory(page);
+      await expect(page.locator(".list-sticky-head")).not.toHaveAttribute("data-scrolls-in-card", /.*/);
+      await expect(async () => {
+        const m = await headInCard(page);
+        expect(m.overflowX, "default columns: the card does not clip").toBe("visible");
+        expect(m.barBottom).not.toBeNull();
+        expect(Math.abs(m.headTop - m.barBottom!), "default columns: the head right under the toolbar").toBeLessThanOrEqual(1);
+      }).toPass({ timeout: 10_000 });
+
+      // Registration on (Columns): wider than the card at 1440 and at 1100.
+      const columns = page.getByRole("button", { name: "Columns", exact: true });
+      await waitForHydration(columns);
+      await columns.click();
+      const chooser = page.getByRole("dialog", { name: "Choose columns" });
+      await chooser.getByRole("checkbox", { name: "Registration", exact: true }).check();
+      await chooser.getByRole("button", { name: "Apply", exact: true }).click();
+      await expect(chooser).toBeHidden({ timeout: 15_000 });
+      await expect(page.getByRole("columnheader", { name: "Registration" })).toBeVisible({ timeout: 15_000 });
+
+      for (const width of [1440, 1100]) {
+        await page.setViewportSize({ width, height: 800 });
+        await scrolledInventory(page);
+        await expect(page.getByRole("columnheader", { name: "Registration" })).toBeVisible();
+        await expect(async () => {
+          const m = await headInCard(page);
+          expect(m.scrollsInside, `${width}: the card scrolls sideways`).toBe(true);
+          expect(m.cardTop, `${width}: the card's top is above the window after the scroll`).toBeLessThan(0);
+          expect(Math.abs(m.headTop - m.cardTop), `${width}: the head at the card's top`).toBeLessThanOrEqual(2);
+          expect(m.rowsUnderHead, `${width}: no body row under the head`).toBe(0);
+        }).toPass({ timeout: 10_000 });
+      }
+    } finally {
+      await db.userPreference.deleteMany({ where: { userId: user.id, key: { in: keys } } });
+      for (const p of before) {
+        await db.userPreference.create({ data: { userId: p.userId, key: p.key, value: p.value as never } });
+      }
+    }
   });
 });
 

@@ -145,14 +145,22 @@
    themselves to the card's inner radius: neither the head nor a tinted last row shows past the corners. The table
    uses the separated border model for that (border-radius on cells is undefined under border-collapse: collapse,
    and Firefox ignores it); with no spacing it draws the same, since the header's bottom rule is on its cells and
-   striped rows have no borders. */
+   striped rows have no borders.
+   The window offset applies only while the card is overflow-visible (from 1280 px, and not [data-scrolls-in-card]).
+   Otherwise the card is a scroll container, so the head's sticky `top` is measured from the card's own top: the
+   toolbar's height there would push the head that far down inside the card, over the rows. So it is 0 there. */
 .list-sticky-head table {
   border-collapse: separate;
   border-spacing: 0;
 }
 .list-sticky-head thead {
-  top: var(--list-sticky-top, 0px);
+  top: 0;
   background-color: transparent;
+}
+.list-sticky-head:not([data-scrolls-in-card]) thead {
+  @variant xl {
+    top: var(--list-sticky-top, 0px);
+  }
 }
 .list-sticky-head thead th {
   background-color: var(--surface-subtle);
@@ -176,7 +184,10 @@
    is taller (--cris-clear, cris-widget.css). The clearance is the rows' scroll margin, not the window's scroll
    padding: padding would also cover the sticky bars themselves, so focusing a toolbar or footer control would scroll
    the window. For the same reason a list page drops Cris's window scroll-padding-bottom (the rows carry it instead);
-   `:root:has()` (0,2,0) outranks Cris's `html:has([data-cris-dock])` (0,1,1), whichever stylesheet loads last. */
+   `:root:has()` (0,2,0) outranks Cris's `html:has([data-cris-dock])` (0,1,1), whichever stylesheet loads last.
+   When the table scrolls inside its card the same margin stays: the card has no height of its own, so it never
+   scrolls vertically and the margin only acts on the window, where the toolbar still pins (the head then scrolls
+   away with the card, so the head's share is a harmless extra row of clearance). */
 @media screen {
   :root:has([data-sticky-list]) {
     scroll-padding-bottom: 0;
