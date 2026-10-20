@@ -640,7 +640,8 @@ export interface PurchasingHome {
   stocktakesOverdue: number;
 }
 
-const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
+/** A request's value in pesos: qty × unit price over its units (a unit with no price counts 0). */
+export const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
   units.reduce((sum, u) => sum + u.qty * (u.unitPrice === null || u.unitPrice === undefined ? 0 : Number(u.unitPrice)), 0);
 
 /**
@@ -722,21 +723,29 @@ export interface FinanceHome {
 }
 
 /**
+ * The requests waiting on Finance (IT_REVIEWED), oldest review first: Finance Home's headline and queue, and the
+ * snapshot's `fin.waitingC` / `fin.waitingCount` (Phase 46), so the two can never disagree.
+ */
+export function financeWaitingRows() {
+  return prisma.purchaseRequest.findMany({
+    where: { state: "IT_REVIEWED" },
+    orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true, refNo: true, reviewedAt: true, updatedAt: true,
+      requestedBy: { select: { name: true } },
+      units: { select: { qty: true, unitPrice: true } },
+    },
+  });
+}
+
+/**
  * README 5d: Finance Home leads with MONEY AND AGE, not counts — "₱208k
  * waiting, oldest 2 days". The count is the supporting detail, not the headline.
  */
 export async function financeHome(now: Date = new Date()): Promise<FinanceHome> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const [waiting, completed, capitalized, totals, toReviewIt, toReviewPurchasing] = await Promise.all([
-    prisma.purchaseRequest.findMany({
-      where: { state: "IT_REVIEWED" },
-      orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true, refNo: true, reviewedAt: true, updatedAt: true,
-        requestedBy: { select: { name: true } },
-        units: { select: { qty: true, unitPrice: true } },
-      },
-    }),
+    financeWaitingRows(),
     prisma.purchaseRequest.findMany({
       where: { state: "COMPLETED", completedAt: { gte: monthStart } },
       select: { units: { select: { qty: true, unitPrice: true } } },

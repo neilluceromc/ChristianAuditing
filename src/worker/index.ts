@@ -3,9 +3,11 @@ import { executeApproval } from "./execute-approval";
 import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
 import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
 import { pruneRetention } from "./retention";
-import { RETENTION_DAYS, pruneDue } from "../lib/retention";
+import { METRIC_SNAPSHOT_DAYS, RETENTION_DAYS, pruneDue } from "../lib/retention";
 import { expireHolds } from "./holds";
 import { expireDue } from "../lib/holds";
+import { writeSnapshot } from "../server/modules/metrics/snapshot";
+import { manilaDay, snapshotDue } from "../lib/snapshot";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
@@ -15,6 +17,8 @@ const ONCE = process.argv.includes("--once");
 let draining = false;
 let lastPruneAt: Date | null = null;
 let lastExpireAt: Date | null = null;
+/** The Manila day of the last snapshot written; null until one succeeds, so a failure retries on the next loop. */
+let lastSnapshotDay: string | null = null;
 
 interface LeasedJob {
   id: string;
@@ -112,6 +116,9 @@ async function safePrune(): Promise<void> {
     if (r.crisConversations || r.crisPending) {
       console.log(`[worker] pruned ${r.crisConversations} Cris chat${r.crisConversations === 1 ? "" : "s"}, ${r.crisPending} Cris pending action${r.crisPending === 1 ? "" : "s"}`);
     }
+    if (r.metricSnapshots) {
+      console.log(`[worker] pruned ${r.metricSnapshots} metric snapshot${r.metricSnapshots === 1 ? "" : "s"} older than ${METRIC_SNAPSHOT_DAYS} days`);
+    }
   } catch (err) {
     console.error(`[worker] prune failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
@@ -131,16 +138,33 @@ async function safeExpire(): Promise<void> {
   }
 }
 
+/**
+ * Phase 46 (spec §2.3): today's MetricSnapshot, at start and on the first loop of each Manila day. A failure is
+ * logged and leaves lastSnapshotDay alone, so the next loop retries; it never stops job processing.
+ */
+async function safeSnapshot(): Promise<void> {
+  const now = new Date();
+  try {
+    await writeSnapshot(now);
+    lastSnapshotDay = manilaDay(now);
+    console.log(`[worker] metric snapshot written for ${lastSnapshotDay}`);
+  } catch (err) {
+    console.error(`[worker] metric snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`[worker] ${WORKER_ID} starting${ONCE ? " (--once)" : ""}`);
   await recoverStale();
   await safePrune();
   await safeExpire();
+  await safeSnapshot();
   let cycles = 0;
   for (;;) {
     if (draining) break;
     if (pruneDue(lastPruneAt, new Date())) await safePrune();
     if (expireDue(lastExpireAt, new Date())) await safeExpire();
+    if (snapshotDue(lastSnapshotDay, new Date())) await safeSnapshot();
     const worked = await tick();
     if (!worked) {
       if (ONCE) break;

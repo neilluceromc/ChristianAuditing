@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CRIS_CONVERSATION_DAYS, CRIS_PENDING_DAYS, PRUNE_BATCH, PRUNE_INTERVAL_MS, RETENTION_DAYS, RETENTION_NOTE,
-  crisConversationCutoff, crisPendingCutoff, pruneDue, retentionCutoff,
+  CRIS_CONVERSATION_DAYS, CRIS_PENDING_DAYS, METRIC_SNAPSHOT_DAYS, PRUNE_BATCH, PRUNE_INTERVAL_MS, RETENTION_DAYS,
+  RETENTION_NOTE, crisConversationCutoff, crisPendingCutoff, metricSnapshotCutoff, pruneDue, retentionCutoff,
 } from "./retention";
 
 describe("retention", () => {
@@ -25,5 +25,12 @@ describe("retention", () => {
     expect(crisPendingCutoff(now).toISOString()).toBe("2026-10-16T10:00:00.000Z");
     // across a month end
     expect(crisConversationCutoff(new Date("2026-03-01T00:00:00Z")).toISOString()).toBe("2026-01-30T00:00:00.000Z");
+  });
+  it("MetricSnapshot (Phase 46 spec §2.3): rows older than 400 Manila days go", () => {
+    expect(METRIC_SNAPSHOT_DAYS).toBe(400);
+    // 2026-10-20 in Manila; the cutoff is that day's UTC-midnight date minus 400 days (a @db.Date compare)
+    expect(metricSnapshotCutoff(new Date("2026-10-20T03:00:00Z")).toISOString()).toBe("2025-09-15T00:00:00.000Z");
+    // 16:00Z is already the next Manila day
+    expect(metricSnapshotCutoff(new Date("2026-10-20T16:00:00Z")).toISOString()).toBe("2025-09-16T00:00:00.000Z");
   });
 });

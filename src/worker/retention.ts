@@ -1,11 +1,12 @@
 import { prisma } from "../server/db/client";
-import { PRUNE_BATCH, crisConversationCutoff, crisPendingCutoff, retentionCutoff } from "../lib/retention";
+import { PRUNE_BATCH, crisConversationCutoff, crisPendingCutoff, metricSnapshotCutoff, retentionCutoff } from "../lib/retention";
 
-export interface PruneResult { deliveries: number; jobs: number; crisConversations: number; crisPending: number }
+export interface PruneResult { deliveries: number; jobs: number; crisConversations: number; crisPending: number; metricSnapshots: number }
 
 /**
  * One full pass, in id batches: finished deliveries and jobs older than the cutoff, and (Phase 41, spec §7) Cris
- * chats untouched for 30 days (their messages cascade) and Cris pending actions older than a day.
+ * chats untouched for 30 days (their messages cascade) and Cris pending actions older than a day; and (Phase 46,
+ * spec §2.3) MetricSnapshot days older than 400 days.
  */
 export async function pruneRetention(now: Date = new Date()): Promise<PruneResult> {
   const cutoff = retentionCutoff(now);
@@ -30,7 +31,9 @@ export async function pruneRetention(now: Date = new Date()): Promise<PruneResul
     () => prisma.crisPendingAction.findMany({ where: { createdAt: { lt: pendingCutoff } }, select: { id: true }, take: PRUNE_BATCH }),
     (ids) => prisma.crisPendingAction.deleteMany({ where: { id: { in: ids }, createdAt: { lt: pendingCutoff } } }),
   );
-  return { deliveries, jobs, crisConversations, crisPending };
+  // At most one row per key per day, so one statement: no batching needed, and nothing revives an old day.
+  const metricSnapshots = (await prisma.metricSnapshot.deleteMany({ where: { day: { lt: metricSnapshotCutoff(now) } } })).count;
+  return { deliveries, jobs, crisConversations, crisPending, metricSnapshots };
 }
 
 async function pruneTable(pick: () => Promise<{ id: string }[]>, drop: (ids: string[]) => Promise<{ count: number }>): Promise<number> {
