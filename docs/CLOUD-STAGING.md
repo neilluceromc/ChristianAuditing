@@ -11,9 +11,10 @@ laptop. Every step below happens only on your word.
 - **You paste every secret** into the Supabase and Vercel dashboards, or into your own terminal.
   Never into a file, never into chat. Claude never sees, types or prints one. This file holds
   placeholders only (`<like-this>`).
-- **Never set `QUICK_LOGIN_EMAILS` on Vercel.** It is one-click sign-in with no password. The laptop
-  uses it on the office network; on the public internet anyone could use it. As a backstop the app
-  ignores the variable (no provider, no buttons) whenever `VERCEL` is set.
+- **Quick login on Vercel is a deliberate, temporary choice.** It is one-click sign-in with no
+  password, and on the public internet anyone with the link can use it. On Vercel the app ignores
+  `QUICK_LOGIN_EMAILS` unless `QUICK_LOGIN_PUBLIC=1` is also set. The owner turns both on for
+  presentations (2026-10-20) and turns them off afterwards: delete `QUICK_LOGIN_PUBLIC` and Redeploy.
 - **`SECRET_ENCRYPTION_KEY` must be exactly the laptop's value.** Any other value makes every
   encrypted field in the copied data unreadable.
 - **Never seed staging.** The seed empties every table.
@@ -160,7 +161,8 @@ Functions run in Singapore (`sin1`, set in `vercel.json`), next to the database.
 | `SUPABASE_SERVICE_ROLE_KEY` | the **secret key** (`sb_secret_…`), recommended; or the legacy `service_role` key | Supabase → Project Settings → **API Keys** → **Secret keys** → Reveal and copy (create one if none is listed). The legacy `service_role` key (the **Legacy API keys** tab, a long `eyJ…` value) also works. Server-only: never in a `NEXT_PUBLIC_` variable. |
 | `CRON_SECRET` | a new random value, also stored in Supabase Vault | Make one in your terminal: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The same value goes into Vault in step 6. |
 | `SIGNUP_REQUIRES_APPROVAL` | `1` | Fixed value; see [Sign-up](#sign-up-on-the-public-internet). |
-| `QUICK_LOGIN_EMAILS` | **never set on Vercel** | One-click sign-in with no password. The laptop uses it; on the public internet anyone could use it. |
+| `QUICK_LOGIN_EMAILS` | only for presentations: the accounts that get a "Continue as" button, comma-separated | One-click sign-in with no password; anyone with the link can use it. Works on Vercel only together with `QUICK_LOGIN_PUBLIC`. |
+| `QUICK_LOGIN_PUBLIC` | `1` only while presenting | The deliberate switch for the line above. Delete it and Redeploy to turn quick login off. |
 | `ANTHROPIC_API_KEY` | only if Cris should work on cloud staging | Your Anthropic console. Without it Cris runs in preview mode. |
 | `AUTH_MICROSOFT_ENTRA_ID_*` | only if Entra sign-in is used | The Entra app registration. Its redirect URIs must then also list `https://<project>.vercel.app/api/auth/callback/microsoft-entra-id`. |
 

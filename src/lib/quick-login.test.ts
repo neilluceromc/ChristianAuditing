@@ -12,6 +12,24 @@ describe("quick login on Vercel", () => {
     expect(quickLoginUser("a@b.co", "a@b.co", row)).toBeNull();
   });
 
+  it("is off on Vercel when QUICK_LOGIN_PUBLIC is anything but \"1\"", () => {
+    vi.stubEnv("VERCEL", "1");
+    for (const v of ["", "0", "true", "yes"]) {
+      vi.stubEnv("QUICK_LOGIN_PUBLIC", v);
+      expect(parseQuickLoginEmails("a@b.co")).toEqual([]);
+    }
+  });
+
+  it("is on on Vercel only with QUICK_LOGIN_PUBLIC=1 and a list", () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("QUICK_LOGIN_PUBLIC", "1");
+    expect(parseQuickLoginEmails("a@b.co")).toEqual(["a@b.co"]);
+    expect(parseQuickLoginEmails("")).toEqual([]);
+    const row = { id: "u1", email: "a@b.co", name: "A", role: "admin" as const, disabled: false };
+    expect(quickLoginUser("a@b.co", "a@b.co", row)).toEqual({ id: "u1", email: "a@b.co", name: "A", role: "admin" });
+    expect(quickLoginUser("a@b.co", "a@b.co", { ...row, disabled: true })).toBeNull();
+  });
+
   it("still works when VERCEL is unset", () => {
     vi.stubEnv("VERCEL", "");
     expect(parseQuickLoginEmails("a@b.co")).toEqual(["a@b.co"]);
