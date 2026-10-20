@@ -15,6 +15,10 @@ const h = vi.hoisted(() => ({
   assets: new Map<string, Record<string, unknown>>(),
   audits: [] as Array<Record<string, unknown>>,
   revalidated: [] as string[],
+  /** Runs once just before the next asset write lands: another person's change slipping in between read and write. */
+  interfere: null as null | (() => void),
+  /** The order of the row lock and the reads/writes inside a transaction. */
+  ops: [] as string[],
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
@@ -41,16 +45,22 @@ vi.mock("@/server/db/client", () => {
     });
   const asset = {
     findUnique: async ({ where }: { where: { id: string } }) => {
+      h.ops.push("read");
       const a = h.assets.get(where.id);
       return a ? { ...a } : null;
     },
     updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      h.ops.push("write");
+      const meddle = h.interfere;
+      h.interfere = null;
+      meddle?.();
       const a = h.assets.get(where.id as string);
       if (!a || !matches(a, where)) return { count: 0 };
       Object.assign(a, data);
       return { count: 1 };
     },
     update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      h.ops.push("write");
       const a = h.assets.get(where.id)!;
       Object.assign(a, data);
       return { ...a };
@@ -68,7 +78,11 @@ vi.mock("@/server/db/client", () => {
       return structuredClone(rows.slice(0, take ?? rows.length));
     },
   };
-  const client = { asset, auditEntry };
+  const $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    h.ops.push(`raw:${strings.join("$").replace(/\s+/g, " ").trim()}:${values.join(",")}`);
+    return [];
+  };
+  const client = { asset, auditEntry, $queryRaw };
   return { prisma: { ...client, $transaction: async (fn: (tx: typeof client) => Promise<unknown>) => fn(client) } };
 });
 
@@ -122,6 +136,8 @@ beforeEach(() => {
   h.assets = new Map();
   h.audits = [];
   h.revalidated = [];
+  h.interfere = null;
+  h.ops = [];
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -346,5 +362,52 @@ describe("admin reopen", () => {
       () => reopenFinanceReview({ assetId: "0243", reason: "Wrong category" }),
       "BR-LT-0243 isn't approved, so there is no review to reopen.",
     );
+  });
+});
+
+describe("fix round 1: races", () => {
+  const LOCK = (id: string) => `raw:SELECT "id" FROM "Asset" WHERE "id" = $ FOR UPDATE:${id}`;
+
+  it("undo and reopen lock the asset row before they read it", async () => {
+    seed("0250");
+    await confirmAssetDetails({ id: "0250" });
+    h.ops = [];
+    expect((await undoFinanceAction({ assetId: "0250", kind: "approve" })).ok).toBe(true);
+    expect(h.ops.slice(0, 2)).toEqual([LOCK("0250"), "read"]);
+
+    seed("0251", { financeConfirmedAt: T0, financeConfirmedById: ANA.id });
+    as(ADA);
+    h.ops = [];
+    expect((await reopenFinanceReview({ assetId: "0251", reason: "Wrong category" })).ok).toBe(true);
+    expect(h.ops.slice(0, 2)).toEqual([LOCK("0251"), "read"]);
+  });
+
+  it("an undo whose guarded write misses says so and writes no audit entry", async () => {
+    seed("0252");
+    await confirmAssetDetails({ id: "0252" });
+    h.interfere = () => { asset("0252").financeConfirmedById = BEN.id; };
+    const r = await undoFinanceAction({ assetId: "0252", kind: "approve" });
+    expect(r).toMatchObject({ ok: false, kind: "conflict", message: "BR-LT-0252 was changed by someone else just now. Reload and try again." });
+    expect(h.audits).toHaveLength(1);
+    expect(asset("0252").financeConfirmedAt).toEqual(T0);
+  });
+
+  it("an override set reads inside the transaction and refuses when the override changed under it, so its before is never stale", async () => {
+    seed("0253", { depreciationLifeMonths: 36, depreciationSalvage: 500, depreciationNote: "Older model" });
+    h.interfere = () => { Object.assign(asset("0253"), { depreciationLifeMonths: 48 }); };
+    const r = await setAssetOverride({ assetId: "0253", lifeMonths: 24, salvage: 1000, note: "Heavy field use" });
+    expect(r).toMatchObject({ ok: false, kind: "conflict" });
+    expect(h.audits).toHaveLength(0);
+    expect(asset("0253").depreciationLifeMonths).toBe(48);
+    expect(h.ops[0]).toBe("read");
+  });
+
+  it("an override removal does the same", async () => {
+    seed("0254", { depreciationLifeMonths: 36, depreciationSalvage: 500, depreciationNote: "Older model" });
+    h.interfere = () => { Object.assign(asset("0254"), { depreciationNote: "Changed meanwhile" }); };
+    const r = await clearAssetOverride({ assetId: "0254" });
+    expect(r).toMatchObject({ ok: false, kind: "conflict" });
+    expect(h.audits).toHaveLength(0);
+    expect(asset("0254").depreciationLifeMonths).toBe(36);
   });
 });

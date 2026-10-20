@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -40,6 +41,11 @@ const ASSET_SELECT = {
 
 const RACE = (tag: string) => `${tag} was changed by someone else just now. Reload and try again.`;
 
+/** `SELECT … FOR UPDATE` on the asset's row, held until the transaction ends (no row: nothing locked, the read refuses). */
+async function lockAsset(tx: Prisma.TransactionClient, id: string): Promise<void> {
+  await tx.$queryRaw`SELECT "id" FROM "Asset" WHERE "id" = ${id} FOR UPDATE`;
+}
+
 function revalidateAsset(id: string, settings = false) {
   revalidatePath(`/inventory/${id}`);
   revalidatePath("/inventory");
@@ -66,6 +72,8 @@ export async function undoFinanceAction(input: unknown): Promise<ActionResult<{ 
   let failure: ActionResult<{ tag: string; id: string }> | null = null;
 
   await prisma.$transaction(async (tx) => {
+    // Lock the row first: any other write to this asset waits behind the undo, so what undoCheck reads stays true.
+    await lockAsset(tx, assetId);
     const asset = await tx.asset.findUnique({ where: { id: assetId }, select: ASSET_SELECT });
     if (!asset) {
       failure = validationError({ assetId: "Unknown asset" });
@@ -173,6 +181,7 @@ export async function reopenFinanceReview(input: unknown): Promise<ActionResult<
   let failure: ActionResult<{ tag: string; id: string }> | null = null;
 
   await prisma.$transaction(async (tx) => {
+    await lockAsset(tx, assetId);
     const asset = await tx.asset.findUnique({
       where: { id: assetId },
       select: { id: true, tag: true, financeConfirmedAt: true, financeNotCapitalised: true },

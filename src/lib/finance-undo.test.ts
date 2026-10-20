@@ -116,6 +116,10 @@ describe("undoState: only while it is the latest finance change (Review Focus 1)
       entry("note.posted", later),
       entry("document.uploaded", { diff: { document: { from: null, to: "or.pdf" } }, ...later }),
       entry("depreciation.policy", { entityType: "asset-category", ...later }),
+      // on the purchase record too, where the history files everything under Cost (fix round 1)
+      entry("document.uploaded", { entityType: "purchase-record", diff: { document: { from: null, to: "inv.pdf" } }, ...later }),
+      entry("attachment.uploaded", { entityType: "purchase-record", ...later }),
+      entry("note.posted", { entityType: "purchase-record", ...later }),
     ];
     expect(undoState(APPROVED, entries, ANA.id, after(2))?.kind).toBe("approve");
   });

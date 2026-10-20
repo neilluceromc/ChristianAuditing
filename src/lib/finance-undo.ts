@@ -84,6 +84,8 @@ type Diff = Record<string, Change | null | undefined>;
 const asDiff = (diff: unknown): Diff | null => (diff !== null && typeof diff === "object" && !Array.isArray(diff) ? (diff as Diff) : null);
 const has = (c: Change | null | undefined, side: "from" | "to"): c is Change => c !== null && typeof c === "object" && side in c;
 
+const NEVER_BLOCK = ["document.", "attachment.", "note.", "asset-note."];
+
 /**
  * A finance change on the asset: anything the Financial history shows as an approval, review, cost or settings change
  * on the asset or its purchase record. Notes, documents and the category's policy do not count: they change nothing
@@ -91,6 +93,8 @@ const has = (c: Change | null | undefined, side: "from" | "to"): c is Change => 
  */
 export function blocksUndo(e: Pick<UndoEntry, "entityType" | "action" | "diff">): boolean {
   if (e.entityType !== "asset" && e.entityType !== "purchase-record") return false;
+  // By prefix first: the history files every purchase-record entry under Cost, a document or note on it included.
+  if (NEVER_BLOCK.some((p) => e.action.startsWith(p))) return false;
   if (!isFinanceRelevant(e)) return false;
   const kind = historyKind(e.entityType, e.action);
   return kind !== "docs" && kind !== "notes";
