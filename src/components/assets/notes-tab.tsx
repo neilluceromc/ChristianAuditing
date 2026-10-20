@@ -64,7 +64,8 @@ export function NotesTab({ assetId, threads, canPost }: { assetId: string; threa
                   aria-label={`Note by ${t.authorLabel}${resolved ? ", resolved" : ""}`}
                   className={cn(
                     "flex flex-col gap-3 rounded-(--radius-card) border border-border bg-surface px-4 py-3 shadow-card",
-                    resolved && "opacity-70",
+                    // dimmed by a quieter card, not by opacity: opacity took its muted text below AA contrast (Task 9 axe)
+                    resolved && "border-border-faint bg-surface-subtle shadow-none",
                   )}
                 >
                   <div className="flex items-start gap-2">

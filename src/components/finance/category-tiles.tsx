@@ -23,7 +23,9 @@ export function categoryGridClass(n: number): string {
     case n === 3: return "grid-cols-2 sm:grid-cols-3";
     case n === 4: return "grid-cols-2 sm:grid-cols-4";
     case n === 5: return "grid-cols-2 sm:grid-cols-5";
-    default: return "grid-cols-2 sm:grid-cols-4 min-[1001px]:grid-cols-6";
+    // Both widths arbitrary on purpose: Tailwind v4 emits arbitrary `min-[…]` variants BEFORE the named breakpoints,
+    // so `sm:grid-cols-4` would beat `min-[1001px]:grid-cols-6` at every width (Task 9 found 4 columns at 1440 px).
+    default: return "grid-cols-2 min-[640px]:grid-cols-4 min-[1001px]:grid-cols-6";
   }
 }
 

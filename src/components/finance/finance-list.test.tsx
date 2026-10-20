@@ -34,7 +34,9 @@ describe("category grid columns (spec §3 item 3)", () => {
   it("6 on desktop, 4 up to 1000 px, 2 at phone width", () => {
     for (const n of [6, 7, 12, 18]) {
       const c = categoryGridClass(n).split(" ");
-      expect(c).toEqual(expect.arrayContaining(["grid-cols-2", "sm:grid-cols-4", "min-[1001px]:grid-cols-6"]));
+      // both arbitrary: Tailwind v4 orders arbitrary min-[…] variants before sm:, which would then win at 1440 px
+      expect(c).toEqual(expect.arrayContaining(["grid-cols-2", "min-[640px]:grid-cols-4", "min-[1001px]:grid-cols-6"]));
+      expect(c.some((k) => k.startsWith("sm:"))).toBe(false);
     }
   });
   it("five or fewer tiles: one row of exactly that many columns (two at phone width)", () => {

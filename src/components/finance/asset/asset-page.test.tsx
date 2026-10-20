@@ -212,7 +212,9 @@ describe("NotesTab (spec §4.3, shared with the Inventory record)", () => {
     expect(html).toContain("Reopen");
     expect(html).toContain("Resolved");
     expect(html.indexOf("Body n2")).toBeLessThan(html.indexOf("Body n1"));
-    expect(tagWith(html, 'data-resolved="true"')).toContain("opacity-");
+    // dimmed by a quieter card (opacity broke the text's contrast under axe)
+    expect(tagWith(html, 'data-resolved="true"')).toContain("bg-surface-subtle");
+    expect(tagWith(html, 'data-resolved="true"')).not.toContain("opacity-");
     // focus finds each thread's toggle again after the refresh (form-focus.ts)
     expect(html).toMatch(/<button[^>]*data-resolve-toggle="n2"/);
     expect(html).toMatch(/<button[^>]*data-resolve-toggle="n1"/);
