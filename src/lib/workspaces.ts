@@ -40,9 +40,10 @@ export type CountKey =
 
 /**
  * What a view matches on, param by param: a string is the param's exact value; a list matches when any of the
- * param's comma-separated values is in it (Repairs' `stage`, as `isRepairView` reads it).
+ * param's comma-separated values is in it (Repairs' `stage`, as `isRepairView` reads it); `null` matches only while the
+ * param is absent (and has no page default) — Finance's All assets on the Purchasing class, with no `fin`.
  */
-export type NavMatch = Record<string, string | readonly string[]>;
+export type NavMatch = Record<string, string | readonly string[] | null>;
 
 /** One view under a link: shown while that link is the current one, or its toggle opened it (Phase 46 spec §4.2). */
 export interface NavView {
@@ -351,7 +352,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           href: "/finance/assets",
           icon: "inventory",
           views: [
-            { label: "All assets", href: "/finance/assets" },
+            // Also the whole Purchasing class (`?cls=PURCHASING`, no `fin`), so the nav keeps a current entry there.
+            { label: "All assets", href: "/finance/assets", match: [{}, { cls: "PURCHASING", fin: null }] },
             {
               label: "To confirm · IT",
               href: "/finance/assets?fin=with-finance",

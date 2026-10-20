@@ -37,7 +37,10 @@ export default async function FlagsPage({
         {rows.length > 0 ? (
           <FlagRows rows={rows} />
         ) : (
-          <EmptyState title="No unavailable flags" description="Every flag in this build can be switched on." />
+          <EmptyState
+            title={state ? "No unavailable flags" : "No flags"}
+            description={state ? "Every flag in this build can be switched on." : undefined}
+          />
         )}
       </div>
     </>

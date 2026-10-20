@@ -46,8 +46,8 @@ export default async function UsersPage({
           </>
         ) : (
           <EmptyState
-            title={disabled ? "No disabled accounts" : "No active accounts"}
-            description="Every account is in the other list."
+            title={disabled === null ? "No accounts yet" : disabled ? "No disabled accounts" : "No active accounts"}
+            description={disabled === null ? undefined : "Every account is in the other list."}
           />
         )}
       </div>

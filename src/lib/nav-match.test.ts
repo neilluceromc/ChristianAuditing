@@ -62,8 +62,10 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["finance", "finance_staff", "/finance/assets?fin=with-finance", "Assets", "To confirm · IT"],
   ["finance", "finance_staff", "/finance/assets?cls=PURCHASING&fin=with-finance", "Assets", "To confirm · Purchasing"],
   ["finance", "finance_staff", "/finance/assets?fin=approved&page=2", "Assets", "Capitalized"],
+  // Fix round 1 ruling: the whole Purchasing class (no fin) is All assets, so the nav keeps aria-current there.
+  ["finance", "finance_staff", "/finance/assets?cls=PURCHASING", "Assets", "All assets"],
+  ["finance", "finance_staff", "/finance/assets?cls=PURCHASING&q=dell&page=2", "Assets", "All assets"],
   // The IT views name their class (the page default): another class lights none of them.
-  ["finance", "finance_staff", "/finance/assets?cls=PURCHASING", "Assets", null],
   ["finance", "finance_staff", "/finance/assets?cls=PURCHASING&fin=approved", "Assets", null],
   ["finance", "finance_staff", "/finance/assets?fin=no-cost", "Assets", null],
   ["finance", "finance_staff", "/finance/depreciation?tab=schedule&year=2026&cls=IT", "Depreciation", "Schedule"],

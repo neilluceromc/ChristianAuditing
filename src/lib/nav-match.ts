@@ -34,8 +34,12 @@ interface ViewMatch {
   params: NavMatch;
 }
 
-/** A URL value against a match value: exactly, or (a list) any of its comma-separated values in the list. */
-function valueMatches(actual: string | null, want: string | readonly string[]): boolean {
+/**
+ * A URL value against a match value: exactly, or (a list) any of its comma-separated values in the list, or (null)
+ * only while absent.
+ */
+function valueMatches(actual: string | null, want: string | readonly string[] | null): boolean {
+  if (want === null) return actual == null;
   if (actual == null) return false;
   if (typeof want === "string") return actual === want;
   return actual.split(",").some((v) => want.includes(v.trim()));

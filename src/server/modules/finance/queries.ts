@@ -39,7 +39,7 @@ export function financeViewWhere(cls: AssetClass, fin: FinFilter): Prisma.AssetW
   return { AND: [financeListWhere({ cls, status: null, q: "" }), finWhere(fin)] };
 }
 
-const BY_COST: Prisma.AssetOrderByWithRelationInput[] =[{ cost: { sort: "desc", nulls: "last" } }, { tag: "asc" }, { id: "asc" }];
+const BY_COST: Prisma.AssetOrderByWithRelationInput[] = [{ cost: { sort: "desc", nulls: "last" } }, { tag: "asc" }, { id: "asc" }];
 const BY_AGE: Prisma.AssetOrderByWithRelationInput[] = [{ createdAt: "asc" }, { id: "asc" }];
 
 /**

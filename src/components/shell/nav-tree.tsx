@@ -155,7 +155,14 @@ function ItemRow({
 function useNavToggles(workspace: WorkspaceId, currentItem: string | null) {
   const [toggles, setToggles] = useState<NavToggles>(NO_TOGGLES);
   const [seenCurrent, setSeenCurrent] = useState(currentItem);
-  if (seenCurrent !== currentItem) {
+  const [seenWorkspace, setSeenWorkspace] = useState(workspace);
+  if (seenWorkspace !== workspace) {
+    // Another workspace: drop this one's toggles during the render, so they never show under its links; the effect
+    // below then reads the new workspace's stored ones.
+    setSeenWorkspace(workspace);
+    setSeenCurrent(currentItem);
+    setToggles(NO_TOGGLES);
+  } else if (seenCurrent !== currentItem) {
     setSeenCurrent(currentItem);
     if (toggles.closedCurrent !== null) setToggles({ ...toggles, closedCurrent: null });
   }

@@ -489,6 +489,8 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
   it("the IT-class finance views name their class through the page default, so a Purchasing URL never lights them", () => {
     const assets = item("finance", "finance_staff", "Assets").views;
     expect(Object.fromEntries(assets.filter((v) => v.match).map((v) => [v.label, v.match]))).toEqual({
+      // its own href, or the whole Purchasing class with no fin (fix round 1 ruling)
+      "All assets": [{}, { cls: "PURCHASING", fin: null }],
       "To confirm · IT": { cls: "IT", fin: "with-finance" },
       Capitalized: { cls: "IT", fin: "approved" },
     });
