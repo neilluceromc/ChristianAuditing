@@ -4,7 +4,11 @@ import { normalizeEmail } from "./auth-shared";
 // Staging-only one-click sign-in. QUICK_LOGIN_EMAILS (comma-separated) both
 // switches the feature on and lists the accounts it may sign in as; unset or
 // empty means off — no buttons and the quick-login provider is not registered.
+//
+// Never on Vercel: whenever VERCEL is set the list is empty, whatever QUICK_LOGIN_EMAILS says. Every consumer
+// (the provider registration, quickSignIn, the login card) goes through here, so the guard is in one place.
 export function parseQuickLoginEmails(raw: string | undefined): string[] {
+  if (process.env.VERCEL) return [];
   const out: string[] = [];
   for (const part of (raw ?? "").split(",")) {
     const email = normalizeEmail(part);

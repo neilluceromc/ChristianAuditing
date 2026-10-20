@@ -75,7 +75,7 @@ export function LotDocumentDialog({ lotId }: { lotId: string }) {
               className="text-xs text-fg-secondary"
             />
             <FormError>{fieldErrors.file}</FormError>
-            <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 10 MB</p>
+            <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 4 MB</p>
           </div>
         </div>
       </Dialog>

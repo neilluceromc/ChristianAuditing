@@ -61,7 +61,7 @@ describe("crisLine", () => {
   it("greets each step", () => {
     expect(crisLine("login-email", { email: "", name: "" })).toBe("Hi again! What's your work email?");
     expect(crisLine("signup-name", { email: "", name: "" })).toBe("Hi, I'm Cris! Let's set up your account.");
-    expect(crisLine("signup-done", { email: "", name: "" })).toBe("You're all set! An admin will give you a role soon.");
+    expect(crisLine("signup-done", { email: "", name: "" })).toBe("Account created! An admin will take it from here.");
   });
   it("names the person on the password step when the email gives a first name", () => {
     expect(crisLine("login-password", { email: "neil.lucero@x.com", name: "" })).toBe(

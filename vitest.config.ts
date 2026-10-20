@@ -4,7 +4,8 @@ import path from "node:path";
 export default defineConfig({
   test: {
     // scripts/**/*.test.mjs: the load harness's pure helpers (Phase 43) — plain Node ESM, no TypeScript.
-    include: ["src/**/*.test.{ts,tsx}", "prisma/**/*.test.ts", "scripts/**/*.test.mjs"],
+    // scripts/**/*.test.ts: the cloud-staging vercel-build gate.
+    include: ["src/**/*.test.{ts,tsx}", "prisma/**/*.test.ts", "scripts/**/*.test.{mjs,ts}"],
     // Unit tests are node-only by design; component behaviour is covered by Playwright e2e.
     environment: "node",
   },

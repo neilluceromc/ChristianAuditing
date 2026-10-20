@@ -1,17 +1,11 @@
 import { prisma } from "../server/db/client";
-import { executeApproval } from "./execute-approval";
-import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
-import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
-import { pruneRetention } from "./retention";
-import { METRIC_SNAPSHOT_DAYS, RETENTION_DAYS, pruneDue } from "../lib/retention";
-import { expireHolds } from "./holds";
+import { pruneDue } from "../lib/retention";
 import { expireDue } from "../lib/holds";
-import { writeSnapshot } from "../server/modules/metrics/snapshot";
 import { manilaDay, snapshotAttemptDue } from "../lib/snapshot";
+import { recoverStale, safeExpire, safePrune, safeSnapshot, tick } from "./run";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
-const STALE_MS = 5 * 60_000;
 const ONCE = process.argv.includes("--once");
 
 let draining = false;
@@ -22,155 +16,42 @@ let lastSnapshotDay: string | null = null;
 /** When safeSnapshot last ran, success or failure: a failing snapshot retries at most every 10 minutes. */
 let lastSnapshotAttemptAt: Date | null = null;
 
-interface LeasedJob {
-  id: string;
-  type: string;
-  payload: unknown;
-  attempts: number;
+/* The steps live in ./run (cloud staging, spec §4.3), shared with the cron routes and kickWorker(). This loop keeps
+   only its own schedule: when each step last ran, so it knows when the next one is due. */
+
+async function prune(): Promise<void> {
+  await safePrune();
+  lastPruneAt = new Date();
 }
 
-/** One atomic statement: pick, lock, lease. SKIP LOCKED makes concurrent workers safe. */
-async function leaseNext(): Promise<LeasedJob | null> {
-  const rows = await prisma.$queryRaw<LeasedJob[]>`
-    UPDATE "Job"
-    SET status = 'RUNNING', "lockedAt" = now(), "lockedBy" = ${WORKER_ID},
-        attempts = attempts + 1, "updatedAt" = now()
-    WHERE id = (
-      SELECT id FROM "Job"
-      WHERE status = 'PENDING' AND "runAt" <= now()
-      ORDER BY "runAt" ASC
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING id, type, payload, attempts`;
-  return rows[0] ?? null;
-}
-
-/** A crashed worker never strands a job: stale RUNNING leases return to PENDING. */
-async function recoverStale(): Promise<void> {
-  const recovered = await prisma.job.updateMany({
-    where: { status: "RUNNING", lockedAt: { lt: new Date(Date.now() - STALE_MS) } },
-    data: { status: "PENDING", lockedAt: null, lockedBy: null },
-  });
-  if (recovered.count > 0) console.log(`[worker] recovered ${recovered.count} stale lease(s)`);
-}
-
-async function handle(job: LeasedJob): Promise<void> {
-  if (job.type === "EXECUTE_APPROVAL") {
-    const approvalId = String((job.payload as { approvalId?: unknown } | null)?.approvalId ?? "");
-    if (!approvalId) throw new Error("EXECUTE_APPROVAL job has no approvalId");
-    await executeApproval(approvalId);
-    return;
-  }
-  if (job.type === "DELIVER_WEBHOOK") {
-    // Job_deliver_payload_shape (Task 9's migration) makes a job without this
-    // key impossible to insert, so this throw is a belt-and-braces check on a
-    // row that predates the constraint — not the guard the invariant rests on.
-    const deliveryId = String((job.payload as { deliveryId?: unknown } | null)?.deliveryId ?? "");
-    if (!deliveryId) throw new Error("DELIVER_WEBHOOK job has no deliveryId");
-    await deliverWebhook(deliveryId, job.attempts);
-    return;
-  }
-  throw new Error(`Unknown job type ${job.type}`);
-}
-
-async function tick(): Promise<boolean> {
-  const job = await leaseNext();
-  if (!job) return false;
-  try {
-    await handle(job);
-    // handle() may have terminal-ized the job itself (DEAD) — only close RUNNING ones.
-    await prisma.job.updateMany({ where: { id: job.id, status: "RUNNING" }, data: { status: "DONE" } });
-    console.log(`[worker] ${job.type} ${job.id} done`);
-  } catch (err) {
-    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    // A 404, a disabled endpoint, an undecryptable secret or a vanished
-    // delivery row cannot succeed on attempt five either — dead-letter it now
-    // rather than spending the budget to reach the same answer four failures
-    // later. The delivery row is already DEAD in that case (deliver-webhook.ts
-    // marks it before throwing, which is what `permanent()` exists to
-    // guarantee), so the ledger and the job agree without a second write.
-    const dead = job.attempts >= MAX_JOB_ATTEMPTS || err instanceof PermanentDeliveryError;
-    await prisma.job.update({
-      where: { id: job.id },
-      data: dead
-        ? { status: "DEAD", lastError: message }
-        : {
-            status: "PENDING",
-            lastError: message,
-            lockedAt: null,
-            lockedBy: null,
-            runAt: new Date(Date.now() + 2 ** job.attempts * 30_000),
-          },
-    });
-    console.error(`[worker] ${job.type} ${job.id} ${dead ? "DEAD" : "retrying"}: ${message}`);
-  }
-  return true;
-}
-
-/** Phase 24 (spec §5.3): retention runs at start and hourly; a failure is logged and never stops job processing. */
-async function safePrune(): Promise<void> {
-  try {
-    const r = await pruneRetention();
-    if (r.deliveries || r.jobs) {
-      console.log(`[worker] pruned ${r.deliveries} deliver${r.deliveries === 1 ? "y" : "ies"}, ${r.jobs} job${r.jobs === 1 ? "" : "s"} older than ${RETENTION_DAYS} days`);
-    }
-    if (r.crisConversations || r.crisPending) {
-      console.log(`[worker] pruned ${r.crisConversations} Cris chat${r.crisConversations === 1 ? "" : "s"}, ${r.crisPending} Cris pending action${r.crisPending === 1 ? "" : "s"}`);
-    }
-    if (r.metricSnapshots) {
-      console.log(`[worker] pruned ${r.metricSnapshots} metric snapshot${r.metricSnapshots === 1 ? "" : "s"} older than ${METRIC_SNAPSHOT_DAYS} days`);
-    }
-  } catch (err) {
-    console.error(`[worker] prune failed: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    lastPruneAt = new Date();
-  }
-}
-
-/** Phase 26 (spec §4.3): holds expire at start and hourly; a failure is logged and never stops job processing. */
-async function safeExpire(): Promise<void> {
-  try {
-    const n = await expireHolds();
-    if (n) console.log(`[worker] expired ${n} hold${n === 1 ? "" : "s"}`);
-  } catch (err) {
-    console.error(`[worker] hold sweep failed: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    lastExpireAt = new Date();
-  }
+async function expire(): Promise<void> {
+  await safeExpire();
+  lastExpireAt = new Date();
 }
 
 /**
- * Phase 46 (spec §2.3): today's MetricSnapshot, at start and on the first loop of each Manila day. A failure is
- * logged and leaves lastSnapshotDay alone, so it is retried, at most every 10 minutes (snapshotAttemptDue); it
- * never stops job processing.
+ * Phase 46 (spec §2.3): today's MetricSnapshot, at start and on the first loop of each Manila day. A failure leaves
+ * lastSnapshotDay alone, so it is retried, at most every 10 minutes (snapshotAttemptDue).
  */
-async function safeSnapshot(): Promise<void> {
+async function snapshot(): Promise<void> {
   const now = new Date();
-  try {
-    await writeSnapshot(now);
-    lastSnapshotDay = manilaDay(now);
-    console.log(`[worker] metric snapshot written for ${lastSnapshotDay}`);
-  } catch (err) {
-    console.error(`[worker] metric snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    lastSnapshotAttemptAt = new Date();
-  }
+  if (await safeSnapshot(now)) lastSnapshotDay = manilaDay(now);
+  lastSnapshotAttemptAt = new Date();
 }
 
 async function main(): Promise<void> {
   console.log(`[worker] ${WORKER_ID} starting${ONCE ? " (--once)" : ""}`);
   await recoverStale();
-  await safePrune();
-  await safeExpire();
-  await safeSnapshot();
+  await prune();
+  await expire();
+  await snapshot();
   let cycles = 0;
   for (;;) {
     if (draining) break;
-    if (pruneDue(lastPruneAt, new Date())) await safePrune();
-    if (expireDue(lastExpireAt, new Date())) await safeExpire();
-    if (snapshotAttemptDue(lastSnapshotDay, lastSnapshotAttemptAt, new Date())) await safeSnapshot();
-    const worked = await tick();
+    if (pruneDue(lastPruneAt, new Date())) await prune();
+    if (expireDue(lastExpireAt, new Date())) await expire();
+    if (snapshotAttemptDue(lastSnapshotDay, lastSnapshotAttemptAt, new Date())) await snapshot();
+    const worked = await tick(WORKER_ID);
     if (!worked) {
       if (ONCE) break;
       await new Promise((r) => setTimeout(r, POLL_MS));

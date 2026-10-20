@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { writeObject } from "./storage";
 
-export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+// Decimal 4 MB, just under the 4 MiB server-action body limit (next.config.ts), so the multipart
+// boundaries and form fields around a maximum-size file still fit.
+export const UPLOAD_MAX_BYTES = 4_000_000;
 export const UPLOAD_TYPES: Record<string, string> = {
   ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 };
@@ -10,7 +12,7 @@ export const UPLOAD_TYPES: Record<string, string> = {
 /** Pure: the same three refusals uploadDocument has always made, in one place. */
 export function checkUploadMeta(meta: { name: string; type: string; size: number }): string | null {
   if (meta.size === 0) return "Pick a file first";
-  if (meta.size > UPLOAD_MAX_BYTES) return "Too big — the cap is 10 MB";
+  if (meta.size > UPLOAD_MAX_BYTES) return "Too big — the cap is 4 MB";
   const ext = path.extname(meta.name).toLowerCase();
   if (!UPLOAD_TYPES[ext] || (meta.type && meta.type !== UPLOAD_TYPES[ext])) return "That type isn't allowed. Accepted: PDF, PNG, JPG.";
   return null;
@@ -40,7 +42,6 @@ export async function storeUpload(relDir: string, file: File): Promise<{ relPath
   const checksum = createHash("sha256").update(bytes).digest("hex");
   const safeName = path.basename(file.name).replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
   const relPath = path.posix.join(relDir, `${Date.now()}-${safeName}`);
-  await mkdir(path.join(process.cwd(), "uploads", ...relDir.split("/")), { recursive: true });
-  await writeFile(path.join(process.cwd(), "uploads", relPath), bytes);
+  await writeObject(relPath, bytes, UPLOAD_TYPES[path.extname(safeName).toLowerCase()] ?? "application/octet-stream");
   return { relPath, checksum, fileName: path.basename(file.name) };
 }

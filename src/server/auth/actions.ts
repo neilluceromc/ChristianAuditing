@@ -16,6 +16,8 @@ export interface AuthFormState {
   error?: string;
   field?: SignUpField;
   created?: boolean;
+  /** Sign-up made a disabled account that an admin must approve; nobody was signed in. */
+  pendingApproval?: boolean;
 }
 
 function safeNext(raw: FormDataEntryValue | null): string | undefined {
@@ -79,10 +81,12 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) return { error: "An account with that email already exists.", field: "email" };
 
+  // Cloud staging: the app is on the open internet, so a new account waits, disabled, until an admin enables it.
+  const needsApproval = process.env.SIGNUP_REQUIRES_APPROVAL === "1";
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
     // Least privilege: every signup is a viewer; admins promote via /admin/users.
-    data: { name, email, passwordHash, role: "viewer" },
+    data: { name, email, passwordHash, role: "viewer", ...(needsApproval ? { disabled: true } : {}) },
   });
   await prisma.auditEntry.create({
     data: {
@@ -91,9 +95,15 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
       entityType: "user",
       entityId: user.id,
       action: "signup",
-      diff: { role: { from: null, to: "viewer" } },
+      diff: {
+        role: { from: null, to: "viewer" },
+        ...(needsApproval ? { disabled: { from: null, to: true } } : {}),
+      },
     },
   });
+
+  // No session for an account that is waiting: sign-in would refuse it anyway (authorize() rejects disabled users).
+  if (needsApproval) return { created: true, pendingApproval: true };
 
   try {
     await signIn("credentials", { email, password, redirect: false });

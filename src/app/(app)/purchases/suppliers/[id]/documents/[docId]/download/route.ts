@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
+import { readUpload } from "@/server/storage";
 import { contentDisposition, UPLOAD_TYPES } from "@/server/uploads";
 
 /**
@@ -19,11 +19,7 @@ export async function GET(
   if (!doc) return new Response("Not found", { status: 404 });
   if (doc.vendorId !== id) return new Response("Not found", { status: 404 });
 
-  const root = path.resolve(process.cwd(), "uploads");
-  const abs = path.resolve(root, doc.path);
-  if (!abs.startsWith(root + path.sep)) return new Response("Not found", { status: 404 }); // traversal guard
-
-  const bytes = await readFile(abs).catch(() => null);
+  const bytes = await readUpload(doc.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });
 
   return new Response(new Uint8Array(bytes), {

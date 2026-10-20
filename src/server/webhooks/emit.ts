@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 // src/worker). emit.ts is imported from BOTH the worker (execute-approval.ts)
 // and Next server actions, so it has to use the style that works in both.
 import type { WebhookEvent } from "../../lib/webhooks";
+import { kickWorker } from "../worker-kick";
 
 /**
  * The only producer of DELIVER_WEBHOOK jobs. Called from INSIDE the transaction
@@ -78,4 +79,8 @@ export async function emitWebhook(
       data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
     });
   }
+  // Cloud staging (spec §4.3): one job per endpoint above, so this is "at least one job queued". One kick for
+  // all of them: on Vercel it works them once the response is sent (after this transaction commits). Inside
+  // the worker it is a no-op: no request scope (swallowed) or a tick already running (isTicking).
+  if (endpoints.length > 0) kickWorker();
 }

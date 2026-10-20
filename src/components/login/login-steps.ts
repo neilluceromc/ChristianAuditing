@@ -84,7 +84,7 @@ export function crisLine(step: Step, ctx: { email: string; name: string }): stri
         : "Nice to meet you. Pick a password with at least 10 characters.";
     }
     case "signup-done":
-      return "You're all set! An admin will give you a role soon.";
+      return "Account created! An admin will take it from here.";
   }
 }
 

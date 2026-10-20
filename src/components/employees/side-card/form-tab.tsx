@@ -178,7 +178,7 @@ function RecordAcknowledgementDialog({ employeeId, primary }: { employeeId: stri
               />
             )}
           </FormField>
-          <FormField label="Signed form (scan or photo)" required hint="PDF · PNG · JPG — max 10 MB." error={fieldErrors.file}>
+          <FormField label="Signed form (scan or photo)" required hint="PDF · PNG · JPG — max 4 MB." error={fieldErrors.file}>
             {(p) => (
               <input
                 id={p.id}
