@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { WorkGroup, WorkRow, WorkSectionId } from "./worklist";
-import { WORK_SECTIONS } from "./worklist";
+import { WORK_SECTIONS, leaverRow, loanRow } from "./worklist";
 import {
-  countDelta, deltaTone, fleetMakeUp, kitGapRanked, liveSpark, needsFromWork, sumHistories, sumWeekBuckets,
+  countDelta, deltaTone, fleetMakeUp, itMove, kitGapRanked, liveSpark, needsFromWork, sumHistories, sumWeekBuckets,
   weekBuckets, weekLabels, weekOverWeek, weekWindowStart, type KpiTile,
 } from "./overview";
 
@@ -135,9 +135,22 @@ describe("needsFromWork — worklist plus claims, by urgency", () => {
     expect(items.every((i) => i.action === "Open")).toBe(true);
     expect(items.find((i) => i.title === "queue:lv")?.href).toBe("/offboarding/lv");
   });
-  it("an overdue loan is bad; a loan due soon is a warning", () => {
-    const items = needsFromWork([group("loans", [row("loans", "loans:1", { severity: 503 }), row("loans", "loans:2", { severity: 4 })])], [], true);
-    expect(items.map((i) => i.tone)).toEqual(["bad", "warn"]);
+  it("an overdue loan is bad; a loan due soon or with no date is a warning", () => {
+    const items = needsFromWork([group("loans", [
+      row("loans", "loans:1", { severity: 503, overdue: true }), row("loans", "loans:2", { severity: 4 }),
+      row("loans", "loans:3", { severity: 1000 }),
+    ])], [], true);
+    expect(items.map((i) => i.tone)).toEqual(["bad", "warn", "warn"]);
+  });
+  it("the tone comes from the row's overdue flag, not its severity: 600 days overdue is still bad", () => {
+    const loan = loanRow({ id: "a", tag: "LT-1", model: "m", loanDueAt: new Date("2025-02-27T04:00:00Z"), holder: "P" }, NOW);
+    expect(loan?.severity).toBeGreaterThanOrEqual(1000);
+    const leaver = leaverRow({
+      id: "e", name: "L", employeeNo: "E-1", itemsOut: 1, employment: "OFFBOARDING", dueAt: new Date("2025-02-27T04:00:00Z"),
+      undecided: 0, failed: null, m365Status: null, itAccess: 0,
+    }, "2026-10-20");
+    const items = needsFromWork([group("loans", [loan!]), group("queue", [leaver])], [], true);
+    expect(items.map((i) => [i.title, i.tone])).toEqual([["LT-1 overdue by 600 d", "bad"], ["L is leaving", "bad"]]);
   });
 });
 
@@ -176,5 +189,32 @@ describe("fleetMakeUp", () => {
       { label: "Defective", value: 1, tone: "warn", href: "/inventory?status=DEFECTIVE" },
       { label: "Dispose", value: 1, tone: "neutral", href: "/inventory?status=DISPOSE" },
     ]);
+  });
+});
+
+describe("itMove — which IT trend series an audit entry counts in", () => {
+  const m = (action: string, statusTo: string | null = null, toPerson: boolean | null = null) => itMove({ action, statusTo, toPerson });
+  it("assign and return, direct or executed", () => {
+    expect([m("lifecycle.assign"), m("lifecycle.assign executed")]).toEqual(["assigned", "assigned"]);
+    expect([m("lifecycle.return"), m("lifecycle.return executed")]).toEqual(["returned", "returned"]);
+  });
+  it("change-status and triage count as To repair only when they land on DEFECTIVE", () => {
+    expect(m("lifecycle.change-status", "DEFECTIVE")).toBe("toRepair");
+    expect(m("lifecycle.change-status executed", "DEFECTIVE")).toBe("toRepair");
+    expect(m("lifecycle.triage", "DEFECTIVE")).toBe("toRepair");
+    expect(m("lifecycle.triage executed", "DEFECTIVE")).toBe("toRepair");
+    expect(m("lifecycle.change-status", "SPARE")).toBeNull();
+    expect(m("lifecycle.triage", null)).toBeNull(); // kept as spare: no status change
+  });
+  it("a replace is one Returned (the old device's entry) and one Assigned (the new device's entry)", () => {
+    expect(m("lifecycle.replace", "SPARE", false)).toBe("returned");
+    expect(m("lifecycle.replace", "DEPLOYED", true)).toBe("assigned");
+    expect(m("lifecycle.replace executed", null, true)).toBe("assigned");
+    expect(m("lifecycle.replace", null, null)).toBeNull();
+  });
+  it("transfers and anything else stay out", () => {
+    expect(m("lifecycle.transfer", "DEPLOYED", true)).toBeNull();
+    expect(m("lifecycle.transfer executed", "DEPLOYED", true)).toBeNull();
+    expect(m("update", "DEFECTIVE")).toBeNull();
   });
 });

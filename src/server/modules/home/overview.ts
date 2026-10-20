@@ -6,8 +6,8 @@ import { defaultClassFor, withViewClsQS } from "@/lib/asset-class";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { TILE_SPECS, tileState } from "@/lib/inventory-tiles";
 import {
-  countDelta, fleetMakeUp, kitGapRanked, liveSpark, needsFromWork, sumHistories, weekBuckets, weekLabels,
-  weekWindowStart, type KpiTile, type Overview, type TrendSeries,
+  countDelta, fleetMakeUp, itMove, IT_MOVE_ACTIONS, kitGapRanked, liveSpark, needsFromWork, sumHistories, weekBuckets,
+  weekLabels, weekWindowStart, type ItMove, type KpiTile, type MoveEntry, type Overview, type TrendSeries,
 } from "@/lib/overview";
 import { HISTORY_POINTS, type SnapshotKey } from "@/lib/snapshot";
 import { parseListState, serializeListState } from "@/lib/url-state";
@@ -22,44 +22,33 @@ const TREND_WEEKS = 12;
 const WEEK_AGO = HISTORY_POINTS - 2;
 
 /**
- * The IT trend's audit actions. A direct change writes the bare action; one that went through the queue is written
- * by the worker as `<action> executed` (APPROVAL_TYPE_LABEL), so both are the same movement.
- */
-const MOVES = {
-  assigned: ["lifecycle.assign", "lifecycle.assign executed"],
-  returned: ["lifecycle.return", "lifecycle.return executed"],
-  toRepair: ["lifecycle.change-status", "lifecycle.change-status executed"],
-} as const;
-type Move = keyof typeof MOVES;
-const MOVE_OF = new Map<string, Move>(
-  (Object.keys(MOVES) as Move[]).flatMap((m) => MOVES[m].map((a) => [a, m] as [string, Move])),
-);
-
-/**
- * Spec §3.2 IT trend: IT assets assigned, returned, and changed to DEFECTIVE (the diff's `status.to`, which
- * lifecycle/apply.ts writes) since `since`. Prisma stores DateTime as the UTC wall clock in `timestamp(3)`, so the
- * bound is read back AT TIME ZONE 'UTC' (the ageHistogramSql convention).
+ * Spec §3.2 IT trend (and the Task 2 ruling): IT asset entries for every IT_MOVE_ACTIONS action since `since`, with
+ * the two diff fields itMove classifies by — `status.to` (lifecycle/apply.ts writes it on every status change) and
+ * whether `assignee.to` is a person. Change-status and triage rows come back only when they land on DEFECTIVE.
+ * Prisma stores DateTime as the UTC wall clock in `timestamp(3)`, so the bound is read back AT TIME ZONE 'UTC'
+ * (the ageHistogramSql convention).
  */
 export function itMovementsSql(since: Date): Prisma.Sql {
   return Prisma.sql`
-    SELECT e."action", e."createdAt"
+    SELECT e."action", e."createdAt",
+      e."diff"->'status'->>'to' AS "statusTo",
+      CASE WHEN e."diff"->'assignee' IS NOT NULL THEN (e."diff"->'assignee'->>'to') IS NOT NULL END AS "toPerson"
     FROM "AuditEntry" e JOIN "Asset" a ON a."id" = e."entityId"
     WHERE e."entityType" = 'asset' AND a."cls" = 'IT'::"AssetClass"
       AND e."createdAt" >= (${since}::timestamptz AT TIME ZONE 'UTC')
-      AND (
-        e."action" IN (${Prisma.join([...MOVES.assigned, ...MOVES.returned])})
-        OR (e."action" IN (${Prisma.join([...MOVES.toRepair])}) AND e."diff"->'status'->>'to' = 'DEFECTIVE')
-      )
+      AND e."action" IN (${Prisma.join(IT_MOVE_ACTIONS)})
+      AND (e."action" NOT LIKE 'lifecycle.change-status%' AND e."action" NOT LIKE 'lifecycle.triage%'
+        OR e."diff"->'status'->>'to' = 'DEFECTIVE')
   `;
 }
 
 async function itTrend(now: Date): Promise<TrendSeries> {
-  const rows = await prisma.$queryRaw<Array<{ action: string; createdAt: Date }>>(
+  const rows = await prisma.$queryRaw<Array<MoveEntry & { createdAt: Date }>>(
     itMovementsSql(weekWindowStart(now, TREND_WEEKS)),
   );
-  const dates: Record<Move, Date[]> = { assigned: [], returned: [], toRepair: [] };
+  const dates: Record<ItMove, Date[]> = { assigned: [], returned: [], toRepair: [] };
   for (const r of rows) {
-    const move = MOVE_OF.get(r.action);
+    const move = itMove(r);
     if (move) dates[move].push(r.createdAt);
   }
   return {
@@ -128,7 +117,7 @@ export async function itOverview(user: Pick<User, "id" | "role">, now: Date = ne
       key: t.key, label: t.label, value, hint: t.hint, upIs: t.upIs,
       href: inventoryTileHref(t.tile, "IT", user.role),
       spark: liveSpark(history[t.key], value),
-      delta: countDelta(value, history[t.key][WEEK_AGO]),
+      delta: countDelta(value, history[t.key][WEEK_AGO] ?? null),
     };
   });
   const approvalsHistory = sumHistories(openKeys.map((k) => history[k]));

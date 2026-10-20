@@ -156,14 +156,11 @@ export interface ClaimLike {
 
 const TONE_RANK: Record<NeedItem["tone"], number> = { bad: 0, warn: 1, info: 2 };
 
-/** loanRow / leaverRow severities: 500 + days late when overdue, 1000 when no date is set. */
-const overdue = (r: WorkRow) => r.severity > 500 && r.severity < 1000;
-
 function rowTone(r: WorkRow): NeedItem["tone"] {
   switch (r.section) {
     case "missing": return "bad";
-    case "queue": return (r.rank ?? 0) < 2 || overdue(r) ? "bad" : "warn";
-    case "loans": return overdue(r) ? "bad" : "warn";
+    case "queue": return (r.rank ?? 0) < 2 || r.overdue ? "bad" : "warn";
+    case "loans": return r.overdue ? "bad" : "warn";
     case "repairs": case "hires": return "warn";
     case "triage": case "check": case "purchases": return "info";
   }
@@ -262,4 +259,37 @@ export function kitGapRanked(groups: KitGapGroup[]): Ranked {
       ? [...clients, { label: "Internal teams", value: internal, href: employeesGapsHref(withFilter(empty, "kind", ["INTERNAL"])) }]
       : clients,
   };
+}
+
+// ── IT: the trend's movements ─────────────────────────────────────────────
+
+export type ItMove = "assigned" | "returned" | "toRepair";
+
+/** One IT asset audit entry, as itMovementsSql reads it. */
+export interface MoveEntry {
+  action: string;
+  /** the diff's `status.to`; null when the status did not change */
+  statusTo: string | null;
+  /** the diff's `assignee.to` is a person (true), nobody (false), or the diff has no assignee (null) */
+  toPerson: boolean | null;
+}
+
+/** The audit actions the trend reads, in both forms: direct, and `<action> executed` (the worker, APPROVAL_TYPE_LABEL). */
+export const IT_MOVE_ACTIONS = ["lifecycle.assign", "lifecycle.return", "lifecycle.replace", "lifecycle.change-status", "lifecycle.triage"]
+  .flatMap((a) => [a, `${a} executed`]);
+
+/**
+ * Which IT trend series an entry counts in (spec §3.2 plus the Task 2 ruling): assign → Assigned, return → Returned;
+ * a replace writes one entry per device, so the old device's (assignee → nobody) is Returned and the new one's
+ * (assignee → a person) Assigned; a change-status or triage landing on DEFECTIVE is To repair. Transfers stay out.
+ */
+export function itMove(e: MoveEntry): ItMove | null {
+  switch (e.action.replace(/ executed$/, "")) {
+    case "lifecycle.assign": return "assigned";
+    case "lifecycle.return": return "returned";
+    case "lifecycle.replace": return e.toPerson === null ? null : e.toPerson ? "assigned" : "returned";
+    case "lifecycle.change-status":
+    case "lifecycle.triage": return e.statusTo === "DEFECTIVE" ? "toRepair" : null;
+    default: return null;
+  }
 }

@@ -12,15 +12,20 @@ const h = vi.hoisted(() => ({
 vi.mock("@/server/db/client", () => ({
   prisma: {
     approval: {
-      count: async (args: { where: { AND: unknown[] } }) => {
+      count: async (args: { where: { AND: Array<Record<string, unknown>> } }) => {
         h.counts.push(args);
-        return args.where.AND.length === 3 ? 2 : 9; // past SLA : open
+        return args.where.AND.some((w) => "slaAt" in w) ? 2 : 9; // past SLA : open
       },
     },
     $queryRaw: async () => [
-      { action: "lifecycle.assign", createdAt: new Date("2026-10-19T02:00:00Z") },
-      { action: "lifecycle.assign executed", createdAt: new Date("2026-10-12T02:00:00Z") },
-      { action: "lifecycle.change-status executed", createdAt: new Date("2026-10-19T02:00:00Z") },
+      { action: "lifecycle.assign", createdAt: new Date("2026-10-19T02:00:00Z"), statusTo: "DEPLOYED", toPerson: true },
+      { action: "lifecycle.assign executed", createdAt: new Date("2026-10-12T02:00:00Z"), statusTo: "DEPLOYED", toPerson: true },
+      { action: "lifecycle.change-status executed", createdAt: new Date("2026-10-19T02:00:00Z"), statusTo: "DEFECTIVE", toPerson: null },
+      // one replace: the old device's leg (returned) and the new device's leg (assigned)
+      { action: "lifecycle.replace", createdAt: new Date("2026-10-18T02:00:00Z"), statusTo: "SPARE", toPerson: false },
+      { action: "lifecycle.replace", createdAt: new Date("2026-10-18T02:00:00Z"), statusTo: "DEPLOYED", toPerson: true },
+      { action: "lifecycle.triage", createdAt: new Date("2026-10-12T02:00:00Z"), statusTo: "DEFECTIVE", toPerson: null },
+      { action: "lifecycle.triage", createdAt: new Date("2026-10-12T02:00:00Z"), statusTo: null, toPerson: null },
     ],
   },
 }));
@@ -86,10 +91,18 @@ describe("itOverview", () => {
     expect(o.kpis[1].delta).toEqual({ kind: "none" }); // no history yet → "collecting history"
   });
 
+  it("a short history gives \"collecting history\", never NaN", async () => {
+    h.history["it.missing"] = [4, 5];
+    h.history["approvals.open.it"] = [1];
+    const o = await itOverview(user("it_staff"), NOW);
+    expect(o.kpis[3].delta).toEqual({ kind: "none" });
+    expect(o.kpis[5].delta).toEqual({ kind: "none" });
+  });
+
   it("trend, needs-you, make-up and breakdown come from their sources", async () => {
     const o = await itOverview(user("it_staff"), NOW);
     expect(o.trend.series.map((s) => [s.name, s.values.slice(-2)])).toEqual([
-      ["Assigned", [1, 1]], ["Returned", [0, 0]], ["To repair", [0, 1]],
+      ["Assigned", [1, 2]], ["Returned", [0, 1]], ["To repair", [1, 1]],
     ]);
     expect(o.trend.labels).toHaveLength(12);
     expect(o.needsYou).toEqual([expect.objectContaining({ title: "APR-1 · Assign", tone: "bad", href: "/approvals/c1" })]);
