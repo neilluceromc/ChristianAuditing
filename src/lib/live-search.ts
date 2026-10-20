@@ -28,6 +28,11 @@ export function createLiveSearch(opts: {
   initial: string;
   debounceMs: number;
   submit: (q: string, how: { enter: boolean }) => void;
+  /**
+   * Every keystroke, before the debounce. SearchBox passes `cancelStuckNavWatch` (Task 6 review I2): an earlier live
+   * search's stuck-navigation fallback must not reload the page over newer typing; the next search starts its own.
+   */
+  onInput?: () => void;
   setTimeout?: (fn: () => void, ms: number) => unknown;
   clearTimeout?: (id: unknown) => void;
 }): LiveSearch {
@@ -52,6 +57,7 @@ export function createLiveSearch(opts: {
 
   return {
     input(text) {
+      opts.onInput?.();
       cancel();
       timer = set(() => {
         timer = null;

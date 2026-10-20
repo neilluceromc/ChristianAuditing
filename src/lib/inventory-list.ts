@@ -238,18 +238,12 @@ export function identifierWhere(
 }
 
 /**
- * Spec 7.2 (2026-10-21): the USB scanner contract. A scanner types the tag and presses Enter, and an exact tag then
- * opens the record. Since the search filters as you type, typing or pasting a full tag must only filter, so the
- * search box sends `go=1` on Enter alone (`withScannerGo`) and the page asks `scannerRedirect` what to do with it.
+ * Spec §7.2 (2026-10-21): the USB scanner contract by URL. Since the search filters as you type, `?q=<exact tag>` on
+ * its own only filters; `?q=<tag>&go=1` opens the record (direct links and e2e). The search box's Enter does not use
+ * it: it asks the `findExactTag` action and pushes the record (`inventorySearchSubmit`). `stuck-nav.ts`'s
+ * ONE_SHOT_PARAMS names the same param, so a navigation the page answers by stripping it counts as committed.
  */
 export const SCANNER_GO_PARAM = "go";
-
-/** `href` with `go=1`: the search box's Enter on Inventory. */
-export function withScannerGo(href: string): string {
-  const url = new URL(href, "http://x");
-  url.searchParams.set(SCANNER_GO_PARAM, "1");
-  return url.pathname + url.search;
-}
 
 /**
  * Where the list page must redirect for the scanner contract, or null to render the list. Without `go=1`: null, and

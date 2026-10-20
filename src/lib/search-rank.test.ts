@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { prefixFirst, prefixFirstPage, rankFirst, startsWithAny } from "./search-rank";
+import {
+  ASSET_SEARCH_HIT_SELECT, assetHitStartsWith, assetStartsWith, prefixFirst, prefixFirstPage, rankFirst, startsWithAny,
+} from "./search-rank";
 
 /* Spec §7.2: while searching, matches that START WITH the text come first, then the ones that only contain it. */
 
@@ -97,5 +99,22 @@ describe("prefixFirstPage", () => {
     const t = table(all);
     await prefixFirstPage([t.rows.map((r) => r.id)], all.length, { skip: 0, take: 25 }, t.fetch);
     expect(t.fetch).toHaveBeenCalledTimes(1); // everything starts with it: no read of an empty rest
+  });
+});
+
+describe("the asset starts-with fields (Inventory and Finance share them)", () => {
+  it("are tag, model, serial and holder name", () => {
+    const a = { tag: "BR-LT-0001", model: "Latitude", serial: null, holder: null };
+    expect(assetStartsWith("br", a)).toBe(true);
+    expect(assetStartsWith("lat", a)).toBe(true);
+    expect(assetStartsWith("sn", { ...a, serial: "SN-1" })).toBe(true);
+    expect(assetStartsWith("ella", { ...a, holder: "Ella Cruz" })).toBe(true);
+    expect(assetStartsWith("cruz", { ...a, holder: "Ella Cruz" })).toBe(false);
+  });
+  it("read off the search's narrow select, which asks for exactly those fields", () => {
+    expect(ASSET_SEARCH_HIT_SELECT).toEqual({ id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } } });
+    const hit = { id: "a", tag: "X-1", model: "M", serial: null, assignee: { name: "Eve" } };
+    expect(assetHitStartsWith("eve", hit)).toBe(true);
+    expect(assetHitStartsWith("eve", { ...hit, assignee: null })).toBe(false);
   });
 });

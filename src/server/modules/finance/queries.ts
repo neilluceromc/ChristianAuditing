@@ -8,7 +8,7 @@ import {
   categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortRows,
   type CategoryTile, type FinanceSort, type LifeFilter, type LifeStage,
 } from "@/lib/finance-list";
-import { prefixFirst, startsWithAny } from "@/lib/search-rank";
+import { ASSET_SEARCH_HIT_SELECT, assetHitStartsWith, prefixFirst } from "@/lib/search-rank";
 import { depRows, type DepAssetRow } from "./depreciation-queries";
 
 export interface FinanceListParams {
@@ -75,11 +75,6 @@ export interface FinanceAssetsResult {
   asOfLabel: string;
 }
 
-/** The search's id pass also reads the fields a starts-with match is judged on (spec §7.2). */
-const SEARCH_HIT_SELECT = {
-  id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } },
-} as const satisfies Prisma.AssetSelect;
-
 type Computed = Omit<FinanceAssetsResult, "rows" | "total" | "page" | "pageCount" | "per"> & { sorted: FinanceRow[] };
 
 /**
@@ -99,13 +94,13 @@ async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed
   const q = p.q.trim();
   const [classRows, hits] = await Promise.all([
     depRows({ cls: p.cls }, now),
-    q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: SEARCH_HIT_SELECT }) : null,
+    q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: ASSET_SEARCH_HIT_SELECT }) : null,
   ]);
   const rows: FinanceRow[] = classRows.map((r) => ({ ...r, lifeStage: lifeStage(r.result, r.reg, r.notCapitalised, r.costC, r.category) }));
   const found = hits ? new Set(hits.map((h) => h.id)) : null;
   // spec §7.2: the hits whose tag, model, serial or holder START with the search rank first
   const startsWith = hits
-    ? new Set(hits.filter((h) => startsWithAny(q, [h.tag, h.model, h.serial, h.assignee?.name])).map((h) => h.id))
+    ? new Set(hits.filter((h) => assetHitStartsWith(q, h)).map((h) => h.id))
     : null;
 
   const tileInput = rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.category, costC: r.result?.cost ?? null, bookC: r.result?.bookValue ?? null }));

@@ -41,7 +41,7 @@ export function ApprovalsToolbar({
         <SearchBox
           value={q}
           ariaLabel="Search approvals"
-          placeholder="Search ref no, tag, person · Enter"
+          placeholder="Search ref no, tag, person"
           onSubmit={(next) => replace(approvalsHref({ tab, via, q: next, types }))}
         />
         <FacetDropdown

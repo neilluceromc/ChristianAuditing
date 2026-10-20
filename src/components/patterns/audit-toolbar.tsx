@@ -9,8 +9,8 @@ import { AUDIT_LIST_CONFIG } from "@/lib/audit-list";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 
 /**
- * Phase 33 (spec §6): the house list shape on /audit — the shared SearchBox (keyed on q, Clear ×,
- * `· Enter`) finding tags, people and ref nos as well as actions and actors; the Entity facet; the
+ * Phase 33 (spec §6): the house list shape on /audit — the shared SearchBox (seeded from q, Clear ×,
+ * searching as you type since spec §7.2 of 2026-10-21) finding tags, people and ref nos as well as actions and actors; the Entity facet; the
  * When pills; every navigation in the list's shared transition so the table reads busy.
  */
 export function AuditToolbar({
@@ -33,7 +33,7 @@ export function AuditToolbar({
         value={state.q}
         // P-14: the accessible name stays "Search audit log" (e2e pins it); only the placeholder changed.
         ariaLabel="Search audit log"
-        placeholder="Search tag, person, ref no, action · Enter"
+        placeholder="Search tag, person, ref no, action"
         onSubmit={(q) => replace(href(withSearch(state, q)))}
       />
       <FacetDropdown

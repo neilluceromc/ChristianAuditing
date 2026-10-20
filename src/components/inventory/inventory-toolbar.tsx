@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
@@ -11,7 +12,7 @@ import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { PeopleFacet } from "@/components/patterns/people-facet";
 import { searchAssignees } from "@/server/modules/employees/people-search";
 import {
-  INVENTORY_LIST_CONFIG, withPurchaseYearQS, withScannerGo, type PurchaseYearValue, type YearChip,
+  INVENTORY_LIST_CONFIG, withPurchaseYearQS, type PurchaseYearValue, type YearChip,
 } from "@/lib/inventory-list";
 import { CLASS_LABEL, withViewClsQS } from "@/lib/asset-class";
 import { REPAIRS_SAVED_VIEW, isRepairStage, isRepairView } from "@/lib/repairs";
@@ -19,6 +20,8 @@ import { serializeListState, withFilter, withSearch, type ListState } from "@/li
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { useListNavigation } from "@/components/patterns/list-navigation";
 import { SearchBox } from "@/components/patterns/search-box";
+import { inventorySearchSubmit } from "@/lib/inventory-search-submit";
+import { findExactTag } from "@/server/modules/inventory/scan-actions";
 import { MoreFilters } from "./more-filters";
 
 /** Phase 30 (spec §6.2): the view switches are pill toggles — links, so e2e and a middle-click reach them. */
@@ -140,6 +143,8 @@ export function InventoryToolbar({
   children?: React.ReactNode;
 }) {
   const { navigate, replace } = useListNavigation();
+  // the newest search the box sent: an Enter lookup that comes back after a newer search is dropped
+  const searchSeq = useRef(0);
   const hrefFor = useInventoryHref(cls, defaultCls, purchaseYear);
   const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -192,15 +197,21 @@ export function InventoryToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {/* The house search (spec §7.2: as you type). Enter alone sends go=1 — the USB scanner contract: an exact tag
-          opens the record only on Enter, so typing or pasting a full tag just filters. */}
+      {/* The house search (spec §7.2: as you type). Enter is the USB scanner contract: an exact tag opens the record
+          (pushed, so Back returns here); typing or pasting a full tag just filters. See inventorySearchSubmit. */}
       <SearchBox
         value={state.q}
         ariaLabel="Search assets"
-        placeholder="Search tag, model, serial, holder · Enter"
-        onSubmit={(q, { enter }) => {
-          const to = hrefFor(withSearch(state, q));
-          replace(enter && q.trim() ? withScannerGo(to) : to);
+        placeholder="Search tag, model, serial, holder"
+        onSubmit={(q, how) => {
+          const seq = ++searchSeq.current;
+          void inventorySearchSubmit(q, how, {
+            listHref: hrefFor(withSearch(state, q)),
+            find: findExactTag,
+            push: navigate,
+            replace,
+            stillCurrent: () => seq === searchSeq.current,
+          });
         }}
         className="w-[300px]"
         inputClassName="h-9 py-0 text-[13px]"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSET_STATUSES, assigneeWhere, attentionFacetOption, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
-  parsePurchaseYear, purchaseYearChips, scannerRedirect, withPurchaseYearQS, withScannerGo,
+  parsePurchaseYear, purchaseYearChips, scannerRedirect, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
 import { STATUSES_BY_CLASS } from "./asset-class";
@@ -283,14 +283,10 @@ describe("buildAssetWhere attention facet (Phase 45 §2.1)", () => {
   });
 });
 
-describe("the scanner contract opens an exact tag only on Enter (spec 7.2)", () => {
+describe("the scanner contract by URL opens an exact tag only with go=1 (spec 7.2)", () => {
   const hit = async (q: string) => (q === "BR-LT-0148" ? { id: "a148" } : null);
   const sp = (qs: string) => new URLSearchParams(qs);
 
-  it("Enter sends go=1 beside the list's own query", () => {
-    expect(withScannerGo("/inventory?q=BR-LT-0148")).toBe("/inventory?q=BR-LT-0148&go=1");
-    expect(withScannerGo("/inventory?cls=PURCHASING&q=x&go=1")).toBe("/inventory?cls=PURCHASING&q=x&go=1");
-  });
   it("a typed or pasted exact tag (no go=1) only filters: no redirect, and the tag is not even looked up", async () => {
     let looked = 0;
     const lookup = async (q: string) => { looked++; return hit(q); };

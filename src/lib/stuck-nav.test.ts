@@ -193,6 +193,47 @@ describe("watchSamePageNav", () => {
     h.run();
     expect(h.assign).toHaveBeenCalledOnce();
   });
+  it("a one-shot go=1 the server stripped counts as committed (Enter's scanner miss redirects back to the list)", () => {
+    // Task 6 review I1: the search had landed (q=Carlo), Enter sent q=Carlo&go=1, the page found no exact tag and
+    // redirected to q=Carlo, which is where the navigation started. That is a finished navigation, not a stuck one.
+    const h = harness("/inventory?q=Carlo");
+    watchSamePageNav(to("/inventory?q=Carlo&go=1"), { ...h.deps, history: "replace" });
+    h.request("/inventory?q=Carlo&go=1&_rsc=a1");
+    h.run();
+    expect(h.replace).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+  it("go=1 stripped elsewhere in the query still counts (params in any order)", () => {
+    const h = harness("/inventory?cls=PURCHASING&q=car");
+    watchSamePageNav(to("/inventory?q=car&go=1&cls=PURCHASING"), h.deps);
+    h.request("/inventory?q=car&go=1&cls=PURCHASING&_rsc=b");
+    h.run();
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+  it("without a one-shot param, landing back where it started is still stuck", () => {
+    const h = harness("/inventory?q=Carlo");
+    watchSamePageNav(to("/inventory?q=Carl"), h.deps);
+    h.request("/inventory?q=Carl&_rsc=c");
+    h.run();
+    expect(h.assign).toHaveBeenCalledOnce();
+  });
+  it("runs beforeFallback just before the ordinary load (the search box remembers its text and caret)", () => {
+    const h = harness("/inventory");
+    const order: string[] = [];
+    h.replace.mockImplementation(() => void order.push("load"));
+    watchSamePageNav(to("/inventory?q=Ca"), { ...h.deps, history: "replace", beforeFallback: () => void order.push("remember") });
+    h.request("/inventory?q=Ca&_rsc=d");
+    h.run();
+    expect(order).toEqual(["remember", "load"]);
+  });
+  it("does not run beforeFallback when nothing is loaded", () => {
+    const h = harness("/inventory");
+    const before = vi.fn();
+    watchSamePageNav(to("/inventory?q=Ca"), { ...h.deps, beforeFallback: before });
+    h.go("/inventory?q=Ca");
+    h.run();
+    expect(before).not.toHaveBeenCalled();
+  });
   it("falls back with location.replace for a replace navigation", () => {
     const h = harness("/equipment-by-client?tab=client");
     watchSamePageNav(to("/equipment-by-client?tab=client&group=g1"), { ...h.deps, history: "replace" });

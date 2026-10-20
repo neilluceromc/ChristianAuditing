@@ -11,7 +11,7 @@ import { SearchBox } from "./search-box";
 
 const box = (value: string) =>
   renderToStaticMarkup(
-    <SearchBox value={value} ariaLabel="Search assets" placeholder="Search tag · Enter" onSubmit={() => {}} />,
+    <SearchBox value={value} ariaLabel="Search assets" placeholder="Search tag" onSubmit={() => {}} />,
   );
 
 describe("SearchBox", () => {

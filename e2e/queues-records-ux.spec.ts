@@ -319,7 +319,7 @@ test.describe("queues-records-ux — approvals", () => {
 
       const search = page.getByRole("searchbox", { name: "Search approvals" });
       await waitForHydration(search);
-      await expect(search).toHaveAttribute("placeholder", /· Enter$/);
+      await expect(search).toHaveAttribute("placeholder", "Search ref no, tag, person");
       await search.fill(SHARED_PREFIX);
       await search.press("Enter");
       await page.waitForURL(new RegExp(`q=${SHARED_PREFIX}`));

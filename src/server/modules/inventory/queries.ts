@@ -14,7 +14,7 @@ import {
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
 import { pageOf } from "@/lib/paging";
-import { prefixFirst, prefixFirstPage, startsWithAny } from "@/lib/search-rank";
+import { ASSET_SEARCH_HIT_SELECT, assetHitStartsWith, assetStartsWith, prefixFirst, prefixFirstPage } from "@/lib/search-rank";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
@@ -247,11 +247,6 @@ export async function attentionOrdered(
   return orderByAttention(all.map((a) => toRow(a, now)), dir);
 }
 
-/** The search's narrow pass: the fields a starts-with match is judged on (spec §7.2). */
-const SEARCH_HIT_SELECT = {
-  id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } },
-} as const satisfies Prisma.AssetSelect;
-
 export async function listAssets(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
@@ -289,7 +284,7 @@ export async function listAssets(
     const attentionOrder = await attentionOrdered(where, orderBy, attentionSort.dir, now);
     // spec §7.2: while searching, the rows that start with the search come first, each group in the Attention order
     const ordered = state.q
-      ? prefixFirst(attentionOrder, (r) => startsWithAny(state.q, [r.tag, r.model, r.serial, r.assignee]))
+      ? prefixFirst(attentionOrder, (r) => assetStartsWith(state.q, { ...r, holder: r.assignee }))
       : attentionOrder;
     const pg = pageOf(ordered.length, state.page, state.per);
     return {
@@ -311,8 +306,8 @@ export async function listAssets(
     state.page,
     async (tx) => {
       if (!state.q) return tx.asset.count({ where });
-      const hits = await tx.asset.findMany({ where, select: SEARCH_HIT_SELECT });
-      prefixIds = hits.filter((h) => startsWithAny(state.q, [h.tag, h.model, h.serial, h.assignee?.name])).map((h) => h.id);
+      const hits = await tx.asset.findMany({ where, select: ASSET_SEARCH_HIT_SELECT });
+      prefixIds = hits.filter((h) => assetHitStartsWith(state.q, h)).map((h) => h.id);
       return hits.length;
     },
     (tx, pg) =>

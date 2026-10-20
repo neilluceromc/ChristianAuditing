@@ -87,8 +87,8 @@ export default async function InventoryPage({
   // ejecting the user from the view they clicked in. Same rule, same place.
   if (cls !== "IT" && state.filters.stage) state = withFilter(state, "stage", []);
 
-  // USB scanner contract: an exact tag match opens the record, not a list -- on Enter only (spec 7.2). The search
-  // filters as you type, so typing or pasting a full tag only filters; Enter sends go=1, which is stripped after use.
+  // USB scanner contract by URL (spec §7.2): `?q=<exact tag>&go=1` opens the record; `go` is stripped after use. A
+  // bare `?q=` only filters, since the search filters as you type. The search box's Enter asks `findExactTag` instead.
   const scanTo = await scannerRedirect(sp, state.q, exactTagMatch);
   if (scanTo) redirect(scanTo);
 

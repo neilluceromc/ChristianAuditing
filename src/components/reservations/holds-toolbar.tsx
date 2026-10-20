@@ -16,8 +16,8 @@ function holdsHref(s: ListState, tab: ReservationTab): string {
 
 /**
  * Phase 26 (spec §5.4): search + Employee/Department facets over the current tab.
- * Phase 33 (spec §5.2): the house list shape — the shared SearchBox (keyed on q,
- * Clear ×, `· Enter`), value-only chips, navigations in the list's shared
+ * Phase 33 (spec §5.2): the house list shape — the shared SearchBox (seeded from q,
+ * Clear ×, searching as you type since spec §7.2), value-only chips, navigations in the list's shared
  * transition — and a count line naming how many live holds run out within two days.
  */
 export function HoldsToolbar({ tab, state, total, soon, facets }: {
@@ -49,7 +49,7 @@ export function HoldsToolbar({ tab, state, total, soon, facets }: {
         <SearchBox
           value={state.q}
           ariaLabel="Search holds"
-          placeholder="Tag, model or person · Enter"
+          placeholder="Tag, model or person"
           onSubmit={(q) => replace(href(withSearch(state, q)))}
         />
         <FacetDropdown label="Employee" options={facets.employee} selected={state.filters.employee ?? []}

@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 /**
  * Spec §7.2 (2026-10-21): while a list is searched, the matches that START WITH the text come first, then the ones
  * that only contain it, each group in the list's chosen sort. Inventory, Finance → Assets and Employees use these.
@@ -11,6 +13,31 @@ export function startsWithAny(q: string, values: ReadonlyArray<string | null | u
   const needle = q.trim().toLowerCase();
   if (!needle) return false;
   return values.some((v) => typeof v === "string" && v.toLowerCase().startsWith(needle));
+}
+
+/**
+ * The asset fields a starts-with match is judged on (spec §7.2 table: Inventory and Finance → Assets alike): tag,
+ * model, serial and holder name. One list, so the two lists cannot drift apart.
+ */
+export interface AssetStartsWithFields {
+  tag: string;
+  model: string;
+  serial: string | null;
+  holder: string | null | undefined;
+}
+export function assetStartsWith(q: string, a: AssetStartsWithFields): boolean {
+  return startsWithAny(q, [a.tag, a.model, a.serial, a.holder]);
+}
+
+/** The search's narrow read of the matching assets: their id and the starts-with fields. */
+export const ASSET_SEARCH_HIT_SELECT = {
+  id: true, tag: true, model: true, serial: true, assignee: { select: { name: true } },
+} as const satisfies Prisma.AssetSelect;
+export type AssetSearchHit = Prisma.AssetGetPayload<{ select: typeof ASSET_SEARCH_HIT_SELECT }>;
+
+/** `assetStartsWith` for a row read with ASSET_SEARCH_HIT_SELECT. */
+export function assetHitStartsWith(q: string, h: AssetSearchHit): boolean {
+  return assetStartsWith(q, { ...h, holder: h.assignee?.name });
 }
 
 /** A stable ranking: rows by `tierOf` (lowest first), each tier keeping the order given. */

@@ -12,6 +12,8 @@
  * stays instant; a stuck one recovers in about a second and a half.
  */
 
+import { rememberPageSearch } from "./search-restore";
+
 /** How long a same-page query navigation gets to commit before the page is loaded the ordinary way. */
 export const STUCK_NAV_MS = 1200;
 
@@ -52,6 +54,27 @@ export interface WatchDeps {
   since?: number;
   /** The browser's recorded requests (performance.getEntriesByType("resource")). */
   getResourceEntries?: () => ReadonlyArray<ResourceEntryLike>;
+  /**
+   * Runs just before the ordinary load. Defaults to `rememberPageSearch` (spec §7.2): when the page's search box has
+   * focus, its text and caret survive the reload.
+   */
+  beforeFallback?: () => void;
+}
+
+/**
+ * Query parameters a page consumes and then strips with a redirect: Inventory's `go=1` (spec §7.2, the scanner
+ * contract — the search box's Enter). A navigation to a URL carrying one has committed once the address bar shows that
+ * URL without it, even when that is the page it started from.
+ */
+export const ONE_SHOT_PARAMS: readonly string[] = ["go"];
+
+/** True when `target` carries a one-shot param and `here` is `target` without it. */
+function landedStripped(here: LocationLike, target: URL): boolean {
+  const params = new URLSearchParams(target.search);
+  if (!ONE_SHOT_PARAMS.some((p) => params.has(p))) return false;
+  for (const p of ONE_SHOT_PARAMS) params.delete(p);
+  const qs = params.toString();
+  return here.pathname === target.pathname && normalisedSearch(here.search) === normalisedSearch(qs ? `?${qs}` : "");
 }
 
 /** The parts of a PerformanceResourceTiming entry `requestedSince` reads. */
@@ -116,6 +139,7 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
 
   const now = deps.now ?? (() => window.performance.now());
   const getEntries = deps.getResourceEntries ?? (() => window.performance.getEntriesByType("resource"));
+  const beforeFallback = deps.beforeFallback ?? (() => rememberPageSearch());
 
   const from = deps.from ?? pathAndSearch(loc);
   const to = pathAndSearch(target);
@@ -133,11 +157,13 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
     if (latestWatch?.token === token) latestWatch = null;
     if (token !== latestToken) return;
     const here = pathAndSearch(loc);
-    // Committed (here === to), or the operator has gone somewhere else meanwhile (here !== from): leave it alone.
-    if (here === to || here !== from) return;
+    // Committed (here === to, or `to` minus a one-shot param the page stripped), or the operator has gone somewhere
+    // else meanwhile (here !== from): leave it alone.
+    if (here === to || landedStripped(loc, target) || here !== from) return;
     // Self-protection: only a navigation the router actually started can be stuck. A click the app cancelled
     // (without calling cancelStuckNavWatch) never fetched the target, and reloading would throw away its work.
     if (!requestedSince(target, since, getEntries())) return;
+    beforeFallback();
     fallback(target.href);
   }, STUCK_NAV_MS);
   const cancel = () => {

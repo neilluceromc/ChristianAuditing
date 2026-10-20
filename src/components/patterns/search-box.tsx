@@ -4,6 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
 import { SEARCH_DEBOUNCE_MS, createLiveSearch } from "@/lib/live-search";
+import { takePageSearch } from "@/lib/search-restore";
+import { cancelStuckNavWatch } from "@/lib/stuck-nav";
 
 /** How a search was sent: `enter` for the Enter key (Inventory's scanner contract opens an exact tag only then). */
 export interface SearchSubmit { enter: boolean }
@@ -21,6 +23,12 @@ export interface SearchSubmit { enter: boolean }
  * while the person types. Instead the controller (`createLiveSearch`) tells a new q that is the URL catching up with
  * this box's own search (kept: the person may have typed on) from one that changed elsewhere — Clear filters, Back,
  * a link — which replaces the text (the Phase 29 "Clear search left the typed text" fix, kept).
+ *
+ * Task 6 review I2: every keystroke cancels a pending stuck-navigation watch (`cancelStuckNavWatch`), so an older
+ * live search can never reload the page over newer typing; the next search starts its own watch. If a fallback load
+ * does happen while the box has focus, `stuck-nav` notes the text and caret (`rememberPageSearch`) and the reloaded
+ * box takes the note once on mount (`takePageSearch`): focus, text and caret come back, and a search the reload
+ * missed goes out.
  */
 export function SearchBox({
   value, ariaLabel, placeholder, onSubmit, className, inputClassName, debounceMs = SEARCH_DEBOUNCE_MS,
@@ -36,8 +44,33 @@ export function SearchBox({
     submitRef.current = onSubmit;
   }, [onSubmit]);
   const [live] = useState(() =>
-    createLiveSearch({ initial: value, debounceMs, submit: (q, how) => submitRef.current(q, how) }),
+    createLiveSearch({
+      initial: value, debounceMs, submit: (q, how) => submitRef.current(q, how), onInput: cancelStuckNavWatch,
+    }),
   );
+  // a caret to put back once a restored text has rendered
+  const pendingCaret = useRef<number | null>(null);
+  useEffect(() => {
+    const restored = takePageSearch();
+    const el = inputRef.current;
+    if (!restored || !el) return;
+    el.focus();
+    if (restored.text === el.value) {
+      el.setSelectionRange(restored.caret, restored.caret);
+      return;
+    }
+    pendingCaret.current = restored.caret;
+    setText(restored.text);
+    live.input(restored.text); // the reload showed the older search: the typed one goes out after the usual pause
+  }, [live]);
+  useEffect(() => {
+    const el = inputRef.current;
+    const caret = pendingCaret.current;
+    if (!el || caret === null) return;
+    pendingCaret.current = null;
+    el.focus();
+    el.setSelectionRange(caret, caret);
+  }, [text]);
   useEffect(() => {
     if (live.onValue(value)) setText(value);
   }, [live, value]);

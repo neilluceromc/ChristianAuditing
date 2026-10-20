@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SEARCH_DEBOUNCE_MS, createLiveSearch } from "./live-search";
+import { STUCK_NAV_MS, cancelStuckNavWatch, watchSamePageNav } from "./stuck-nav";
 
 /*
  * Spec §7.2: the house search box filters as you type. The box's timing and its "is this the URL catching up with me,
@@ -135,5 +136,35 @@ describe("createLiveSearch — the URL catching up keeps the box (focus and care
     expect(s.onValue("Carlo")).toBe(false);
     expect(s.onValue("")).toBe(true);
     expect(s.onValue("")).toBe(false);
+  });
+});
+
+describe("createLiveSearch — a keystroke stops an older search's reload (Task 6 review I2)", () => {
+  it("calls onInput on every keystroke, before the debounce", () => {
+    const onInput = vi.fn();
+    const s = createLiveSearch({ initial: "", debounceMs: SEARCH_DEBOUNCE_MS, submit, onInput });
+    s.input("C");
+    s.input("Ca");
+    expect(onInput).toHaveBeenCalledTimes(2);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("wired to cancelStuckNavWatch, typing on cancels the pending fallback of the search before", () => {
+    // a live search for "Ca" has started a stuck-navigation watch (production only; forced on here)...
+    const loc = { origin: "https://app.example", pathname: "/inventory", search: "" };
+    const replace = vi.fn();
+    watchSamePageNav(new URL("https://app.example/inventory?q=Ca"), {
+      enabled: true, location: loc, history: "replace", replace, now: () => 0,
+      getResourceEntries: () => [{ name: "https://app.example/inventory?q=Ca&_rsc=1", startTime: 1 }],
+      beforeFallback: () => {},
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+    });
+    // ...and the person types on within the window: the older search must not reload the page over the new text
+    const s = createLiveSearch({ initial: "", debounceMs: SEARCH_DEBOUNCE_MS, submit, onInput: cancelStuckNavWatch });
+    s.input("Car");
+    vi.advanceTimersByTime(STUCK_NAV_MS);
+    expect(replace).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledWith("Car", { enter: false }); // the newer search still goes out (and gets its own watch)
   });
 });

@@ -7,8 +7,8 @@ import { ACTIVITY_LIST_CONFIG } from "@/lib/activity-list";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 
 /**
- * Phase 33 (spec §6): the house list shape on the four feeds — the shared SearchBox (keyed on q,
- * Clear ×, `· Enter`) finding tags, people and ref nos as well as actions and actors; the Action
+ * Phase 33 (spec §6): the house list shape on the four feeds — the shared SearchBox (seeded from q, Clear ×,
+ * searching as you type since spec §7.2 of 2026-10-21) finding tags, people and ref nos as well as actions and actors; the Action
  * facet; the entry count. Every navigation runs in the list's shared transition so the feed reads
  * busy. The value-only chips and Clear filters sit under it (activity-list-page.tsx).
  */
@@ -25,7 +25,7 @@ export function ActivityToolbar({
         value={state.q}
         // P-14: the feeds' own accessible name; /audit keeps "Search audit log".
         ariaLabel="Search activity"
-        placeholder="Search tag, person, ref no · Enter"
+        placeholder="Search tag, person, ref no"
         onSubmit={(q) => replace(href(withSearch(state, q)))}
       />
       <FacetDropdown
