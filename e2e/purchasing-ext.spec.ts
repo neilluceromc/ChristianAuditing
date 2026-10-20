@@ -185,7 +185,7 @@ test.describe.serial("purchasing extensions", () => {
     const pr0198 = await reqByRef("PR-0198");
 
     await page.goto(`/purchases/${pr0198.id}`);
-    const supplierSelect = page.getByLabel("Supplier");
+    const supplierSelect = page.getByRole("main").getByLabel("Supplier");
     await waitForHydration(supplierSelect);
     await supplierSelect.selectOption({ label: "Quezon Furniture Works" });
     await page.getByRole("button", { name: "Save supplier" }).click();
@@ -209,12 +209,12 @@ test.describe.serial("purchasing extensions", () => {
     // Old Line Trading is archived in the seed itself and is not the
     // currently-set supplier here — it must not appear at all.
     await expect(
-      page.getByLabel("Supplier").locator("option", { hasText: "Old Line Trading" }),
+      page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Old Line Trading" }),
     ).toHaveCount(0);
 
     // Re-affirm Quezon (case 3 already set it) so this case does not depend
     // on case 3 having run first.
-    const supplierSelect = page.getByLabel("Supplier");
+    const supplierSelect = page.getByRole("main").getByLabel("Supplier");
     await waitForHydration(supplierSelect);
     await supplierSelect.selectOption({ label: "Quezon Furniture Works" });
     await page.getByRole("button", { name: "Save supplier" }).click();
@@ -231,7 +231,7 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByText("ARCHIVED", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     await page.goto(`/purchases/${pr0198.id}`);
-    const reopenedSelect = page.getByLabel("Supplier");
+    const reopenedSelect = page.getByRole("main").getByLabel("Supplier");
     await expect(reopenedSelect).toBeVisible({ timeout: 10_000 });
     const selectedText = await reopenedSelect.evaluate(
       (el: HTMLSelectElement) => el.options[el.selectedIndex]?.text,

@@ -153,7 +153,7 @@ test.describe.serial("stock", () => {
     await page.getByLabel(/^Name\b/).fill("Marker blue");
     await page.getByLabel(/^Unit\b/).fill("piece");
     await page.getByLabel("Pack size").fill("10");
-    await page.getByLabel("Reorder level").fill("5");
+    await page.getByRole("main").getByLabel("Reorder level").fill("5");
     await page.getByRole("button", { name: "Create item" }).click();
     await expect(page.getByRole("heading", { name: "TS-0001 · Marker blue", level: 1 })).toBeVisible({
       timeout: 10_000,
@@ -195,7 +195,7 @@ test.describe.serial("stock", () => {
     await expect(page.getByText("5 packs × 10 = 50 pieces")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByLabel(/^Quantity\b/)).toHaveValue("50");
 
-    const supplier = page.getByLabel("Supplier");
+    const supplier = page.getByRole("main").getByLabel("Supplier");
     await pickFromCombo(supplier, "TechServe", /TechServe PH/);
     await expect(supplier).toHaveValue("TechServe PH");
     await page.getByLabel("Reference").fill("DR-9001");
@@ -233,7 +233,7 @@ test.describe.serial("stock", () => {
     await waitForHydration(quantityField);
     await quantityField.fill("20");
     await page.getByLabel(/^Department\b/).selectOption({ label: "HR" });
-    const employee = page.getByLabel("Employee");
+    const employee = page.getByRole("main").getByLabel("Employee");
     await pickFromCombo(employee, "Marites", /EMP-0042/);
     await expect(employee).toHaveValue("Marites Bautista · EMP-0042");
     await page.getByLabel("Purpose").fill("Test");
@@ -305,7 +305,7 @@ test.describe.serial("stock", () => {
     const item = await ts0001();
 
     await page.goto(`/stock/items/${item.id}/edit`);
-    const reorderField = page.getByLabel("Reorder level");
+    const reorderField = page.getByRole("main").getByLabel("Reorder level");
     await waitForHydration(reorderField);
     await reorderField.fill("40");
     const saveBtn = page.getByRole("button", { name: "Save changes" });

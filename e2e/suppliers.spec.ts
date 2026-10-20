@@ -296,7 +296,7 @@ test.describe.serial("suppliers", () => {
     await page.getByRole("link", { name: "PR-0198" }).click();
     await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible({ timeout: 10_000 });
     await expect(
-      page.getByLabel("Supplier").locator("option", { hasText: "Bayside Networks" }),
+      page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Bayside Networks" }),
     ).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${vendor.id}`);

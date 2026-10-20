@@ -533,7 +533,7 @@ test.describe("holds", () => {
     await expect(page.locator("tbody tr")).toContainText("BR-MN-0910");
 
     await page.goto("/reservations?state=ACTIVE");
-    const employeeFacet = page.getByRole("button", { name: "Employee" });
+    const employeeFacet = page.getByRole("main").getByRole("button", { name: "Employee" });
     await waitForHydration(employeeFacet);
     await employeeFacet.click();
     const facet = page.getByRole("dialog", { name: "Filter by Employee" });

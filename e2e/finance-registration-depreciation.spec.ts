@@ -472,7 +472,9 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     await expect(book).toContainText("Book value");
     await expect(book).toContainText("as of today");
     await expect(page.locator('a[data-kpi="fin.bookC"]')).toHaveCount(0);
-    await expect(page.locator("[data-needs-you]").getByRole("link", { name: /^Review: \d+ (IT|Purchasing) registrations? to confirm$/ }).first())
+    // The action names its item in visually hidden text; Chromium's accessible name puts a space before that
+    // (absolutely positioned) span, so the name reads "Review : 25 IT registrations to confirm".
+    await expect(page.locator("[data-needs-you]").getByRole("link", { name: /^Review\s*: \d+ (IT|Purchasing) registrations? to confirm$/ }).first())
       .toHaveAttribute("href", /^\/finance\/assets\?(cls=PURCHASING&)?fin=with-finance$/);
   });
 

@@ -188,7 +188,7 @@ test.describe.serial("quick forms", () => {
     await waitForHydration(itemCombo);
 
     // Spec §8: the Employee field stopped being a <select>.
-    const employeeCombo = page.getByLabel("Employee");
+    const employeeCombo = page.getByRole("main").getByLabel("Employee");
     await expect(employeeCombo).toHaveAttribute("role", "combobox");
 
     await itemCombo.fill(pn0001.code);
@@ -263,7 +263,7 @@ test.describe.serial("quick forms", () => {
 
     // Phase 27 (spec §5.5): focus alone no longer opens the list, so each combobox needs its own
     // click before its list is expected to be visible.
-    const employeeCombo = page.getByLabel("Employee");
+    const employeeCombo = page.getByRole("main").getByLabel("Employee");
     await employeeCombo.click();
     const employeeList = comboList(employeeCombo);
     await expect(employeeList).toBeVisible({ timeout: 10_000 });

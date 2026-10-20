@@ -164,7 +164,9 @@ test.describe.serial("approvals lifecycle — it@", () => {
     // carries the open count alone.
     const reviews = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
     const nav = 'nav[aria-label="Workspace"]';
-    const linkBadge = page.locator(`${nav} > ul > li > a[href="/approvals"] span[aria-label*="open approval"]`);
+    // Phase 46 (spec §4.2): the link sits in a row with its "{Link} views" toggle (li > div > a), so the top-level
+    // link is "not inside a view list" rather than a direct child of its li.
+    const linkBadge = page.locator(`${nav} > ul > li > div > a[href="/approvals"] span[aria-label*="open approval"]`);
     const sidebarBadge = page.locator(`${nav} li li a[href="/approvals"] span[aria-label*="open approval"]`);
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
