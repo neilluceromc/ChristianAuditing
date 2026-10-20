@@ -344,21 +344,12 @@ test.describe("worklist", () => {
 
     await page.goto("/");
 
-    const worklistCard = page.locator("main > div > *").filter({
-      has: page.getByRole("heading", { name: "Worklist", level: 2 }),
-    });
-    // Sections with real rows by this point in the file: case 4's replace
-    // sent BR-LT-0201 back for triage (BR-LT-0210 is the one that came OUT
-    // of triage, DEPLOYED to Carlo — it does not reappear here), and the
-    // seed's own Karen Uy/Nina Robles are still short a required slot.
-    // "Awaiting IT check" never has a row anywhere in this suite — every
-    // seed IT asset (and case 6's own registration) is born checked — so
-    // its heading is never asserted here.
-    for (const heading of ["Triage", "Repairs to chase", "New hires"]) {
-      await expect(worklistCard.getByRole("heading", { name: heading })).toBeVisible();
-    }
-    await expect(worklistCard.getByRole("heading", { name: /^Triage/ })).toHaveText(triageHeadingText);
-    await expect(worklistCard).toContainText("BR-LT-0201");
+    // Phase 46: Home's Worklist card became the Overview's "Needs you" — the six most urgent rows, one action link
+    // each, with "See all" to the full worklist below, where every section and its count still is.
+    const needs = page.locator("[data-needs-you] > li");
+    await expect(needs.first()).toBeVisible();
+    expect(await needs.count()).toBeLessThanOrEqual(6);
+    await expect(page.getByRole("main").getByRole("link", { name: /^See all/ })).toHaveAttribute("href", "/inventory/work");
 
     await page.goto("/inventory/work");
     await expect(page.getByRole("heading", { name: "Worklist", level: 1 })).toBeVisible();
@@ -366,6 +357,8 @@ test.describe("worklist", () => {
       await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     }
     await expect(page.getByRole("heading", { name: /^Triage/ })).toHaveText(triageHeadingText);
+    // Case 4's replace sent BR-LT-0201 back for triage.
+    await expect(page.locator("section#triage")).toContainText("BR-LT-0201");
     // BR-MN-0910 (case 1's fresh repair, 0 days down) sorts last among the
     // section's 8 real DEFECTIVE rows and never makes Home's own 2-row cap —
     // the uncapped Worklist page is where it has to show up.

@@ -457,15 +457,18 @@ test.describe.serial("paging", () => {
     await expect(page.getByText(/page 1 of 3 · 120 entries/)).toBeVisible();
   });
 
-  test("9. Worklist cap: Home shows Repairs 50+ / See all 50+; /inventory/work shows 50 rows and the cap line to the rest", async ({ page }) => {
+  test("9. Worklist cap: Home's Needs you stays at 6 with See all; /inventory/work shows 50 rows and the cap line to the rest", async ({ page }) => {
     const defectiveCount = await db.asset.count({ where: { cls: "IT", status: "DEFECTIVE" } });
     expect(defectiveCount).toBeGreaterThan(50);
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/");
-    const repairsSection = page.locator("section", { has: page.getByRole("heading", { name: /Repairs to chase/ }) });
-    await expect(repairsSection.getByRole("heading", { name: /Repairs to chase/ })).toContainText("50+");
-    await expect(repairsSection.getByRole("link", { name: /See all 50\+/ })).toBeVisible();
+    // Phase 46: Home's worklist sections became the Overview's Needs you — at most six of the most urgent rows,
+    // however many repairs wait, and See all to the full, capped worklist.
+    const needs = page.locator("[data-needs-you] > li");
+    await expect(needs.first()).toBeVisible();
+    expect(await needs.count()).toBeLessThanOrEqual(6);
+    await expect(page.getByRole("main").getByRole("link", { name: /^See all/ })).toHaveAttribute("href", "/inventory/work");
 
     await page.goto("/inventory/work");
     const workRepairsSection = page.locator("section", { has: page.getByRole("heading", { name: /Repairs to chase/ }) });

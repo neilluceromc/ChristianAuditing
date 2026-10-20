@@ -225,9 +225,9 @@ test.describe("feature flags", () => {
     // "thebackroomop.com" — for the rest of this file. Safe for two reasons:
     // authorize() (src/server/auth/actions.ts), the credentials path every
     // login() call in this file goes through, never reads allowed_domain at
-    // all; and adminHome's "What is switched on" list (src/components/home/
-    // admin-home.tsx) reads only the flag's `enabled` boolean via
-    // flagEnabled, never its value. Nothing later in this file, or in any
+    // all; and the Admin Overview's "Flags on" tile (adminOverview in
+    // src/server/modules/home/overview.ts) reads only each flag's `enabled`
+    // boolean, never its value. Nothing later in this file, or in any
     // later spec file (each one reseeds), depends on this value.
   });
 });
@@ -329,14 +329,20 @@ test.describe("admin home", () => {
       { name: "br.dept", value: "admin", url: E2E_BASE_URL },
     ]);
     await page.goto("/");
-    await expect(page.getByText("Who can get in")).toBeVisible({ timeout: 20_000 });
+    // Phase 46 (spec §3.2): the Admin Overview — its own six tiles and panels.
+    await expect(page.locator('[data-kpi="admin.activeUsers"]')).toBeVisible({ timeout: 20_000 });
     await expectNoSeriousAxe(page);
 
-    await expect(page.getByText("What is switched on")).toBeVisible();
-    await expect(page.getByText("unavailable")).toBeVisible();
+    await expect(page.locator("[data-kpis] > [data-kpi]")).toHaveCount(6);
+    for (const heading of ["Needs you", "Direct changes per day", "Webhook deliveries · 7 days", "Accounts by role"]) {
+      await expect(page.getByRole("heading", { name: heading, level: 2 }), heading).toBeVisible();
+    }
+    // What is switched on: "x of y", and this build's unavailable flag named in the hint.
+    await expect(page.locator('[data-kpi="flags.on"] [data-kpi-value]')).toHaveText(/^\d+ of \d+$/);
+    await expect(page.locator('[data-kpi="flags.on"]')).toContainText("unavailable in this build");
     // The IT Home's sections must NOT be here — that was the bug.
-    await expect(page.getByText("Your shift")).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Fleet", level: 2 })).toHaveCount(0);
+    await expect(page.locator('[data-kpi="it.spare"]')).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fleet by status", level: 2 })).toHaveCount(0);
   });
 });
 

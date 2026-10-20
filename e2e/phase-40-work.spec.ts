@@ -85,8 +85,9 @@ test.describe.serial("phase 40 — work and approvals", () => {
     await expect(badge).toHaveText(String(waiting));
     await expect(badge).toHaveAttribute("aria-label", `${waiting} waiting for IT`);
 
-    // Home carries the same group.
-    await page.goto("/");
+    // The worklist carries the same group. (Phase 46: Home's worklist sections became the Overview's Needs you; the
+    // full worklist is where the group's heading link lives.)
+    await page.goto("/inventory/work");
     await expect(page.locator("section#purchases").getByRole("link", { name: "Purchase reviews", exact: true }))
       .toHaveAttribute("href", "/purchases?state=SUBMITTED");
   });

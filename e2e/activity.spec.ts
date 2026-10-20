@@ -19,8 +19,8 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   5 Enter on a focused /inventory row opens the record (rowOpenProps).
  *   6 /stock/receive loads with no open listbox, a click opens one, and the
  *     synthetic "No supplier" option clears a chosen supplier.
- *   7 the Purchasing Home stocktake tile turns accent when a stocktake is past
- *     its close-by date.
+ *   7 the Purchasing Home (Phase 46 Overview) counts a stocktake past its
+ *     close-by date in "Stocktakes overdue" and lists it as urgent in Needs you.
  *
  * Plan P-4: cases 1-4 write the audit rows they render straight with
  * `db.auditEntry.create` and LEAVE them — `AuditEntry` is append-only at the
@@ -257,7 +257,7 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     await expectNoSeriousAxe(page);
   });
 
-  test("7. the Purchasing Home stocktake tile turns accent when a stocktake is past its close-by date", async ({ page }) => {
+  test("7. the Purchasing Home counts a stocktake past its close-by date and lists it as urgent", async ({ page }) => {
     const cat = await db.stockCategory.findFirstOrThrow({ orderBy: { prefix: "asc" } });
     const opener = await db.user.findUniqueOrThrow({ where: { email: PURCHASING } });
     const yesterday = new Date(Date.now() - 86_400_000);
@@ -269,8 +269,14 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     try {
       await login(page, PURCHASING);
       await page.goto("/");
-      const tile = page.locator("div", { has: page.getByText("Stocktakes past close-by", { exact: true }) }).last();
-      await expect(tile.locator('[data-tone="accent"]')).toBeVisible();
+      // Phase 46 (spec §3.2): the Overview's "Stocktakes overdue" tile counts it, and Needs you lists it as urgent
+      // (the tone is said in words too, not only by the tint).
+      const tile = page.locator('[data-kpis] > [data-kpi="stock.stocktakesOverdue"]');
+      await expect(tile.locator("[data-kpi-value]")).toHaveText(/^[1-9][\d,]*$/);
+      const item = page.locator("[data-needs-you] > li").filter({ hasText: "ST-E2E27" });
+      await expect(item).toHaveAttribute("data-tone", "bad");
+      await expect(item).toContainText("Urgent");
+      await expect(item.getByRole("link")).toHaveAttribute("href", `/stock/stocktakes/${st.id}`);
     } finally {
       await db.stocktake.delete({ where: { id: st.id } });
     }

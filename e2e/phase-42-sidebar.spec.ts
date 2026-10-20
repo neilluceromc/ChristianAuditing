@@ -17,6 +17,10 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   9. (Task 4 review) a deep-scrolled page, then a client navigation from a link low in the nav: the new page opens
  *      at the top with the sidebar in view — the nav's scroll-into-view never moves the window.
  *
+ * Phase 46 (spec §4.2) adds a "{Link} views" toggle button beside every link with views (case 2 checks it sits
+ * outside the link); collapse, the rail and click-to-open are covered in e2e/phase-46-home.spec.ts. These cases run
+ * with no br.sidebar cookie, i.e. the full sidebar.
+ *
  * Views render only under the current link (spec §4.2): a view that carries a count has it in its accessible name
  * ("Spare 3 spare"), hence the anchored regexes below. The current link or view has aria-current="page".
  */
@@ -120,6 +124,11 @@ test.describe("phase 42 — the sidebar stays put, with views under the current 
     await expect(nav.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page");
     // An open link hands the current-page role to its view.
     await expect(nav.getByRole("link", { name: "Inventory", exact: true })).not.toHaveAttribute("aria-current", "page");
+    // Phase 46 (spec §4.2): the chevron is a toggle button of its own beside the link, never inside it; the current
+    // link's is expanded, every other link's collapsed with its views not drawn.
+    await expect(nav.getByRole("button", { name: "Inventory views" })).toHaveAttribute("aria-expanded", "true");
+    await expect(nav.getByRole("button", { name: "Employees views" })).toHaveAttribute("aria-expanded", "false");
+    await expect(nav.locator("a button")).toHaveCount(0);
 
     const spare = nav.getByRole("link", { name: /^Spare\b/ });
     const count = spare.locator('span[aria-label$=" spare"]');
@@ -296,7 +305,8 @@ test.describe("phase 42 — the sidebar stays put, with views under the current 
 
   test("9. a deep-scrolled page, then a link low in the nav: the new page opens at the top with the sidebar in view", async ({ page }) => {
     // Tall enough that the whole nav fits (case 7 covers the scrolling nav), so Activity is on screen untouched.
-    await page.setViewportSize({ width: 1280, height: 900 });
+    // Phase 46: 1000 px, not 900 — the "Collapse sidebar" row above the account row takes ~44 px from the nav.
+    await page.setViewportSize({ width: 1280, height: 1000 });
     await login(page, IT);
     await page.goto("/inventory");
     await expect(page.getByRole("main").getByText(ASSETS)).toBeVisible({ timeout: 30_000 });

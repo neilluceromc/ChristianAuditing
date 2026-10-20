@@ -420,21 +420,22 @@ test.describe("it-work-ux — the worklist", () => {
     await expectNoSeriousAxe(page);
   });
 
-  test("11. a viewer's Home shows the Worklist card read-only: Open links, no row menus, no Claimed by you", async ({ page }) => {
+  test("11. a viewer's Home shows Needs you read-only: Open links, no row menus, no claims", async ({ page }) => {
     test.setTimeout(90_000);
     await login(page, VIEWER);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Worklist", exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("link", { name: "Open worklist" })).toBeVisible();
-    const rows = page.locator('section[aria-labelledby^="work-"] > ol > li');
+    // Phase 46: the Worklist card is the Overview's "Needs you" — one action link per row, Open for a viewer.
+    await expect(page.getByRole("heading", { name: "Needs you", exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("main").getByRole("link", { name: /^See all/ })).toHaveAttribute("href", "/inventory/work");
+    const rows = page.locator("[data-needs-you] > li");
     await expect(rows.first()).toBeVisible();
     const n = await rows.count();
     for (let i = 0; i < n; i++) {
-      await expect(rows.nth(i).getByRole("link")).toHaveText("Open");
+      await expect(rows.nth(i).getByRole("link")).toHaveText(/^Open\b/);
       await expect(rows.nth(i).getByRole("button")).toHaveCount(0);
     }
     await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Claimed by you" })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "claimed by you" })).toHaveCount(0);
     await expectNoSeriousAxe(page);
 
     // I-1: a leaver with no completion date — IT's next step is the edit page,

@@ -466,9 +466,14 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
   test("8. Finance's home: Book value as of today, and registrations to review", async ({ page }) => {
     await login(page, FINANCE);
     await page.goto("/");
-    await expect(page.getByText("Book value", { exact: true })).toBeVisible();
-    await expect(page.getByText(/as of today/).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /\d+ (IT|Purchasing) registrations? to review/ }).first()).toHaveAttribute("href", /\/finance\/assets\?(cls=PURCHASING&)?fin=with-finance/);
+    // Phase 46 (spec §3.2): the Finance Overview's Book value tile (a plain card) and Needs you's registrations to
+    // confirm, one item per class, each linked to its class's view.
+    const book = page.locator('[data-kpis] > [data-kpi="fin.bookC"]');
+    await expect(book).toContainText("Book value");
+    await expect(book).toContainText("as of today");
+    await expect(page.locator('a[data-kpi="fin.bookC"]')).toHaveCount(0);
+    await expect(page.locator("[data-needs-you]").getByRole("link", { name: /^Review: \d+ (IT|Purchasing) registrations? to confirm$/ }).first())
+      .toHaveAttribute("href", /^\/finance\/assets\?(cls=PURCHASING&)?fin=with-finance$/);
   });
 
   test("9. the year schedule: category subtotals, a Total, projected headers, and an empty year", async ({ page }) => {
