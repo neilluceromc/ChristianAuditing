@@ -3,11 +3,15 @@
  * make-up and a ranked breakdown — and the pure helpers that fill it. The per-workspace reads live in
  * src/server/modules/home/overview.ts.
  */
+import type { Role } from "@prisma/client";
 import type { IconName } from "@/components/ui/icon";
+import { ROLE_LABELS } from "./admin-users";
 import { addDays, dayFromISO } from "./deadlines";
 import { fmtDayMonth, localDateISO } from "./format";
 import { statusLabel } from "./asset-class";
+import { manilaMonth } from "./depreciation";
 import { EMPLOYEES_LIST_CONFIG } from "./employees-list";
+import { PURCHASE_TABS } from "./purchases-list";
 import { parseListState, serializeListState, withFilter, type ListState } from "./url-state";
 import { workActionLabel, workRowHref, type WorkGroup, type WorkRow } from "./worklist";
 
@@ -292,4 +296,266 @@ export function itMove(e: MoveEntry): ItMove | null {
     case "lifecycle.triage": return e.statusTo === "DEFECTIVE" ? "toRepair" : null;
     default: return null;
   }
+}
+
+// ── Purchasing, Finance and Admin (Phase 46 Task 3) ───────────────────────
+
+/** Asia/Manila is UTC+8 all year (no daylight saving). */
+const MANILA_OFFSET_MS = 8 * 3_600_000;
+
+/** Manila midnight on the 1st of month index `m` (year·12 + month). */
+function manilaMonthStart(m: number): Date {
+  return new Date(Date.UTC(Math.floor(m / 12), ((m % 12) + 12) % 12, 1) - MANILA_OFFSET_MS);
+}
+
+/** The instant the Manila calendar quarter began (Jan/Apr/Jul/Oct 1, Manila midnight) — the spend-by-department window. */
+export function quarterStartManila(now: Date): Date {
+  const m = manilaMonth(now);
+  return manilaMonthStart(m - (((m % 3) + 3) % 3));
+}
+
+/** Per label, the summed amount, in first-seen order; a null label (no supplier, no department) takes `fallback`. */
+export function sumByLabel(rows: { label: string | null; amount: number }[], fallback: string): { label: string; value: number }[] {
+  const sums = new Map<string, number>();
+  for (const r of rows) {
+    const label = r.label ?? fallback;
+    sums.set(label, (sums.get(label) ?? 0) + r.amount);
+  }
+  return [...sums].map(([label, value]) => ({ label, value }));
+}
+
+/**
+ * A ranked breakdown's rows: the top `n` by value (ties by label), then one "Other" row summing the rest, so the rows
+ * always add up to the whole. Rows at zero are dropped (a supplier with nothing spent is not a bar).
+ */
+export function topWithOther(rows: { label: string; value: number }[], n: number, otherLabel = "Other"): { label: string; value: number }[] {
+  const sorted = rows.filter((r) => r.value !== 0).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  const top = sorted.slice(0, n).map((r) => ({ label: r.label, value: r.value }));
+  const rest = sorted.slice(n).reduce((sum, r) => sum + r.value, 0);
+  return sorted.length > n ? [...top, { label: otherLabel, value: rest }] : top;
+}
+
+/**
+ * Spec §3.1: a snapshot-backed money tile's "▲ 12%" — live against the value 7 days ago, as a whole percent. None while
+ * that value is not collected; none from a zero base too, since no percent is honest there (zero to zero is flat).
+ */
+export function pctDelta(live: number, weekAgo: number | null): Delta {
+  if (weekAgo === null) return { kind: "none" };
+  if (weekAgo === 0) return live === 0 ? { kind: "pct", value: 0 } : { kind: "none" };
+  return { kind: "pct", value: Math.round(((live - weekAgo) / Math.abs(weekAgo)) * 100) };
+}
+
+/** A centavo snapshot history (`fin.*C`) as pesos, the unit every money tile shows. */
+export function pesosHistory(history: (number | null)[]): (number | null)[] {
+  return history.map((v) => (v === null ? null : v / 100));
+}
+
+/** The first instant of the `days` Manila days ending today (Manila midnight). */
+export function dayWindowStart(now: Date, days: number): Date {
+  return new Date(`${addDays(localDateISO(now), -(days - 1))}T00:00:00+08:00`);
+}
+
+/** How many of `dates` fall on each of the `days` Manila days ending today, oldest first. */
+export function dayBuckets(dates: Date[], now: Date, days: number): number[] {
+  const today = localDateISO(now);
+  const buckets = Array<number>(days).fill(0);
+  for (const at of dates) {
+    const ago = manilaDaysAgo(at, today);
+    if (ago >= 0 && ago < days) buckets[days - 1 - ago] += 1;
+  }
+  return buckets;
+}
+
+/** Each day's label, "20 Oct". */
+export function dayLabels(now: Date, days: number): string[] {
+  const today = localDateISO(now);
+  return Array.from({ length: days }, (_, i) => fmtDayMonth(dayFromISO(addDays(today, -(days - 1 - i)))));
+}
+
+/** The first instant of the `months` Manila months ending this one (the oldest month's 1st, Manila midnight). */
+export function monthWindowStart(now: Date, months: number): Date {
+  return manilaMonthStart(manilaMonth(now) - (months - 1));
+}
+
+/** Per Manila month, the summed amounts of the `months` months ending this one, oldest first. */
+export function monthBuckets(rows: { at: Date; amount: number }[], now: Date, months: number): number[] {
+  const current = manilaMonth(now);
+  const buckets = Array<number>(months).fill(0);
+  for (const r of rows) {
+    const ago = current - manilaMonth(r.at);
+    if (ago >= 0 && ago < months) buckets[months - 1 - ago] += r.amount;
+  }
+  return buckets;
+}
+
+const SHORT_MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Each month's label, "Oct 2026". */
+export function monthLabels(now: Date, months: number): string[] {
+  const current = manilaMonth(now);
+  return Array.from({ length: months }, (_, i) => {
+    const m = current - (months - 1 - i);
+    return `${SHORT_MONTH[((m % 12) + 12) % 12]} ${Math.floor(m / 12)}`;
+  });
+}
+
+const REQUEST_TONE: Record<string, MakeUpTone> = {
+  DRAFT: "neutral", SUBMITTED: "chart-1", IT_REVIEWED: "chart-2", COMPLETED: "chart-3", CANCELLED: "bad",
+};
+
+/** Purchasing's make-up: requests by state in tab order, each linking to its /purchases tab (whose count it is). */
+export function requestStateMakeUp(counts: Record<string, number>): MakeUp {
+  return {
+    title: "Requests by state",
+    rows: PURCHASE_TABS.filter((t) => t.id !== "ALL" && (counts[t.id] ?? 0) > 0).map((t) => ({
+      label: t.label, value: counts[t.id], tone: REQUEST_TONE[t.id] ?? "neutral", href: t.href,
+    })),
+  };
+}
+
+const CHART_TONES = ["chart-1", "chart-2", "chart-3"] as const satisfies readonly MakeUpTone[];
+
+/** Finance's make-up: book value by category — the three largest in the chart colours, the rest as one Other. */
+export function bookValueMakeUp(rows: { label: string; value: number }[]): MakeUp {
+  return {
+    title: "Book value by category",
+    money: true,
+    rows: topWithOther(rows, CHART_TONES.length).map((r, i) => ({ ...r, tone: CHART_TONES[i] ?? "neutral" })),
+  };
+}
+
+const DELIVERY_ROWS = [
+  { status: "DELIVERED", label: "Delivered", tone: "chart-1" },
+  { status: "PENDING", label: "Pending", tone: "chart-2" },
+  { status: "RETRYING", label: "Retrying", tone: "warn" },
+  { status: "DEAD", label: "Dead", tone: "bad" },
+] as const satisfies ReadonlyArray<{ status: string; label: string; tone: MakeUpTone }>;
+
+/**
+ * Admin's make-up: the last 7 days' webhook deliveries by status. Not links: the deliveries page has no date window,
+ * so a 7-day segment would not equal its tab's count.
+ */
+export function deliveryMakeUp(counts: Record<string, number>): MakeUp {
+  return {
+    title: "Webhook deliveries · 7 days",
+    rows: DELIVERY_ROWS.filter((d) => (counts[d.status] ?? 0) > 0).map((d) => ({ label: d.label, value: counts[d.status], tone: d.tone })),
+  };
+}
+
+/** Admin's breakdown: every account by role, largest first (a role nobody holds stays, at 0). Not links: /admin/users has no role filter. */
+export function roleRanked(byRole: { role: Role; count: number }[]): Ranked {
+  return {
+    title: "Accounts by role",
+    sub: "Every account, enabled or disabled",
+    rows: byRole
+      .map((r) => ({ label: ROLE_LABELS[r.role], value: r.count }))
+      .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
+  };
+}
+
+/** One of Home's to-do rows (TodoRow in home/queries), as Needs you reads it. */
+export interface TodoLike {
+  refNo: string;
+  what: string;
+  meta: string;
+  href: string;
+  action: string;
+  /** the request came back to its author (purchasing only) */
+  bounced?: boolean;
+}
+
+export interface OverdueStocktake {
+  id: string;
+  refNo: string;
+  scope: string;
+  /** the close-by day, stored as that day's UTC midnight */
+  dueAt: Date;
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Order by tone (bad, warn, info), keeping the source order within a tone, and keep `max`. */
+function byTone(items: NeedItem[], max: number): NeedItem[] {
+  return items.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]).slice(0, max);
+}
+
+/**
+ * Purchasing's "Needs you" (spec §3.2): stocktakes past their close-by date (bad), stock below reorder and requests
+ * that came back (warn), then the rest of the viewer's own requests (drafts, waiting on IT).
+ */
+export function purchasingNeeds(
+  todo: TodoLike[], overdue: OverdueStocktake[], lowStock: number, lowHref: string, today: string, max = 6,
+): NeedItem[] {
+  const items: NeedItem[] = overdue.map((s) => {
+    const due = s.dueAt.toISOString().slice(0, 10);
+    const late = Math.round((dayFromISO(today).getTime() - dayFromISO(due).getTime()) / DAY_MS);
+    return {
+      tone: "bad", icon: "stock", title: `${s.refNo} · ${s.scope}`,
+      meta: `close-by ${fmtDayMonth(s.dueAt)} · ${late} d overdue`, action: "Open", href: `/stock/stocktakes/${s.id}`,
+    };
+  });
+  if (lowStock > 0) {
+    items.push({
+      tone: "warn", icon: "stock", title: `${plural(lowStock, "item", "items")} below reorder level`,
+      meta: "Reorder before they run out", action: "Review", href: lowHref,
+    });
+  }
+  for (const r of todo) {
+    items.push({ tone: r.bounced ? "warn" : "info", icon: "requests", title: `${r.refNo} · ${r.what}`, meta: r.meta, action: r.action, href: r.href });
+  }
+  return byTone(items, max);
+}
+
+/**
+ * Finance's "Needs you" (spec §3.2): registrations to confirm, one item per class linking to that class's view (so
+ * its number is the page's count), then the requests waiting on Finance, oldest review first.
+ */
+export function financeNeeds(queue: TodoLike[], toConfirm: { it: number; purchasing: number }, max = 6): NeedItem[] {
+  const items: NeedItem[] = [];
+  const reg = (n: number, cls: string, href: string) => {
+    if (n > 0) {
+      items.push({
+        tone: "warn", icon: "inventory", title: `${n} ${cls} ${n === 1 ? "registration" : "registrations"} to confirm`,
+        meta: "Registered, waiting for Finance", action: "Review", href,
+      });
+    }
+  };
+  reg(toConfirm.it, "IT", "/finance/assets?fin=with-finance");
+  reg(toConfirm.purchasing, "Purchasing", "/finance/assets?cls=PURCHASING&fin=with-finance");
+  for (const r of queue) {
+    items.push({ tone: "warn", icon: "requests", title: `${r.refNo} · ${r.what}`, meta: r.meta, action: r.action, href: r.href });
+  }
+  return byTone(items, max);
+}
+
+export interface AdminNeedsInput {
+  dead: number;
+  failing: { id: string; url: string; dead: number; active: boolean }[];
+  disabledAdmins: { id: string; name: string; email: string }[];
+  unavailableFlags: { key: string; label: string }[];
+}
+
+/** Admin's "Needs you" (spec §3.2): dead deliveries and the endpoints they died on, disabled admins, unavailable flags. */
+export function adminNeeds(d: AdminNeedsInput, max = 6): NeedItem[] {
+  const items: NeedItem[] = [];
+  if (d.dead > 0) {
+    items.push({
+      tone: "bad", icon: "webhooks", title: `${plural(d.dead, "dead webhook delivery", "dead webhook deliveries")}`,
+      meta: "Dead-lettered · replay them or fix the endpoint", action: "Review", href: "/admin/webhooks/deliveries?state=DEAD",
+    });
+  }
+  for (const e of d.failing) {
+    items.push({
+      tone: "bad", icon: "webhooks", title: e.url,
+      meta: `${plural(e.dead, "dead delivery", "dead deliveries")}${e.active ? "" : " · endpoint switched off"}`,
+      action: "Open", href: "/admin/webhooks",
+    });
+  }
+  for (const u of d.disabledAdmins) {
+    items.push({ tone: "warn", icon: "users", title: `${u.name} is a disabled admin`, meta: u.email, action: "Review", href: "/admin/users?disabled=1" });
+  }
+  for (const f of d.unavailableFlags) {
+    items.push({ tone: "info", icon: "flags", title: `${f.label} is unavailable`, meta: "Cannot be switched on in this build", action: "Open", href: "/admin/flags" });
+  }
+  return byTone(items, max);
 }

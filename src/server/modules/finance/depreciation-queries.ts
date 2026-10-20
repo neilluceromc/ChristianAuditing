@@ -5,7 +5,8 @@ import {
   type DepResult, type MonthIndex, type YearRow,
 } from "@/lib/depreciation";
 import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
-import { registrationState, type RegState } from "@/lib/registration";
+import { finWhere, registrationState, type RegState } from "@/lib/registration";
+import { monthBuckets, monthLabels, monthWindowStart } from "@/lib/overview";
 
 /** Phase 35 (spec 5.1): depreciation covers capitalised assets only. */
 export const CAPITALISED: Prisma.AssetWhereInput = { cost: { not: null }, financeNotCapitalised: false };
@@ -77,6 +78,40 @@ export async function bookValueTotals(
     bookC += r.result.bookValue;
   }
   return { costC, accumulatedC, bookC, asOf: asOfMonth(now) };
+}
+
+/**
+ * Phase 46 (spec §3.2, Finance make-up): book value as of today per category, over every capitalised asset of both
+ * classes — the same rows and fold as bookValueTotals({}), so `bookC` is that total (the snapshot's `fin.bookC`).
+ */
+export async function bookValueByCategory(now: Date = new Date()): Promise<{ bookC: number; rows: Array<{ label: string; bookC: number }> }> {
+  const rows = await depRows(CAPITALISED, now);
+  const byCategory = new Map<string, number>();
+  let bookC = 0;
+  for (const r of rows) {
+    if (!r.result) continue;
+    bookC += r.result.bookValue;
+    byCategory.set(r.category, (byCategory.get(r.category) ?? 0) + r.result.bookValue);
+  }
+  return { bookC, rows: [...byCategory].map(([label, c]) => ({ label, bookC: c })) };
+}
+
+/**
+ * Phase 46: what Finance capitalised — assets it approved as capitalised (/finance/assets' Approved chip, with a
+ * cost) — dated by `financeConfirmedAt`, from `since`. Each row's amount is its cost in pesos.
+ */
+export async function capitalizedSince(since: Date): Promise<Array<{ at: Date; amount: number }>> {
+  const rows = await prisma.asset.findMany({
+    where: { AND: [finWhere("approved"), CAPITALISED, { financeConfirmedAt: { gte: since } }] },
+    select: { financeConfirmedAt: true, cost: true },
+  });
+  return rows.map((r) => ({ at: r.financeConfirmedAt!, amount: Number(r.cost) }));
+}
+
+/** Phase 46 (spec §3.2, Finance trend): capitalised pesos per Manila month, the `months` months ending this one. */
+export async function capitalizedByMonth(now: Date = new Date(), months = 12): Promise<{ labels: string[]; values: number[] }> {
+  const rows = await capitalizedSince(monthWindowStart(now, months));
+  return { labels: monthLabels(now, months), values: monthBuckets(rows, now, months) };
 }
 
 export interface PolicyRow {

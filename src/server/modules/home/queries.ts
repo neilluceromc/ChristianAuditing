@@ -1,7 +1,9 @@
-import { Prisma, type ApprovalType, type Role } from "@prisma/client";
+import { Prisma, type ApprovalType, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
 import { regWhere } from "@/lib/registration";
+import { monthStartManila } from "@/lib/cris-limits";
+import { dayBuckets, dayLabels, dayWindowStart, quarterStartManila, sumByLabel, topWithOther } from "@/lib/overview";
 import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState, serializeListState, withFilter } from "@/lib/url-state";
@@ -461,6 +463,28 @@ export async function directChanges(now: Date = new Date(), days: number = DIREC
   return { since, total: byKind.reduce((sum, k) => sum + k.count, 0), byKind, byActor };
 }
 
+/** Phase 46: every direct change resolved since `since` — when, and the class of the asset it changed. */
+export async function directChangeRows(since: Date): Promise<Array<{ at: Date; cls: AssetClass | null }>> {
+  const rows = await prisma.approval.findMany({
+    where: { appliedDirectly: true, resolvedAt: { gte: since } },
+    select: { resolvedAt: true, asset: { select: { cls: true } } },
+  });
+  return rows.map((r) => ({ at: r.resolvedAt!, cls: r.asset?.cls ?? null }));
+}
+
+/**
+ * Phase 46 (spec §3.2, Admin trend): direct changes per Manila day for the `days` days ending today, by the class of
+ * the asset changed. Every direct change is a lifecycle change on an asset, so the two series cover them all.
+ */
+export async function directChangesByDay(
+  now: Date = new Date(),
+  days: number = 14,
+): Promise<{ labels: string[]; it: number[]; purchasing: number[] }> {
+  const rows = await directChangeRows(dayWindowStart(now, days));
+  const of = (cls: AssetClass) => dayBuckets(rows.filter((r) => r.cls === cls).map((r) => r.at), now, days);
+  return { labels: dayLabels(now, days), it: of("IT"), purchasing: of("PURCHASING") };
+}
+
 export interface FleetSlice {
   status: string;
   count: number;
@@ -623,6 +647,8 @@ export interface TodoRow {
   meta: string;
   href: string;
   action: string;
+  /** Purchasing: the request came back to its author (IT rejected it, or Finance asked for more) */
+  bounced?: boolean;
 }
 
 export interface PurchasingHome {
@@ -644,41 +670,70 @@ export interface PurchasingHome {
 export const unitsValue = (units: Array<{ qty: number; unitPrice: unknown }>) =>
   units.reduce((sum, u) => sum + u.qty * (u.unitPrice === null || u.unitPrice === undefined ? 0 : Number(u.unitPrice)), 0);
 
+export interface SpendRow {
+  /** completedAt */
+  at: Date;
+  /** pesos: qty x unit price over the request's units */
+  amount: number;
+  supplier: string | null;
+  department: string | null;
+}
+
 /**
- * Purchasing Home leads with what this person still has to do: drafts nobody
- * has sent, and anything that came back to them.
+ * Completed requests since `since`, each with its value — the one read behind "Spend this month" (Purchasing),
+ * "Approved this month" (Finance) and both spend breakdowns, so they can never disagree.
  */
-export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const [mine, counts, completed, approvalsWaiting, awaitingItCheck, stockSignals] = await Promise.all([
-    prisma.purchaseRequest.findMany({
-      where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
-      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      take: 8,
-      select: {
-        id: true, refNo: true, state: true, updatedAt: true,
-        units: { select: { qty: true, unitPrice: true } },
-        notes: {
-          where: { kind: { not: "COMMENT" } },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          take: 1,
-          select: { kind: true, author: { select: { name: true } } },
-        },
+export async function completedSpend(since: Date): Promise<SpendRow[]> {
+  const rows = await prisma.purchaseRequest.findMany({
+    where: { state: "COMPLETED", completedAt: { gte: since } },
+    select: {
+      completedAt: true,
+      units: { select: { qty: true, unitPrice: true } },
+      vendor: { select: { name: true } },
+      department: { select: { name: true } },
+    },
+  });
+  return rows.map((r) => ({
+    at: r.completedAt!, amount: unitsValue(r.units), supplier: r.vendor?.name ?? null, department: r.department?.name ?? null,
+  }));
+}
+
+/** Phase 46: the breakdowns' "top 7 + Other". */
+const SPEND_TOP = 7;
+
+/** Phase 46 (spec §3.2 ruling): this Manila month's completed spend by supplier — the top 7 and Other. */
+export async function spendBySupplier(now: Date = new Date()): Promise<Array<{ label: string; value: number }>> {
+  const rows = await completedSpend(monthStartManila(now));
+  return topWithOther(sumByLabel(rows.map((r) => ({ label: r.supplier, amount: r.amount })), "No supplier"), SPEND_TOP);
+}
+
+/** Phase 46 (spec §3.2, Finance breakdown): this Manila quarter's approved (completed) spend by department — the top 7 and Other. */
+export async function spendByDepartment(now: Date = new Date()): Promise<Array<{ label: string; value: number }>> {
+  const rows = await completedSpend(quarterStartManila(now));
+  return topWithOther(sumByLabel(rows.map((r) => ({ label: r.department, amount: r.amount })), "No department"), SPEND_TOP);
+}
+
+/**
+ * Purchasing's to-do (Home and the Overview's Needs you): the viewer's drafts and submitted requests, oldest touched
+ * first, each with the one action that moves it — and whether it came back to them.
+ */
+export async function purchasingTodo(userId: string, now: Date = new Date()): Promise<TodoRow[]> {
+  const mine = await prisma.purchaseRequest.findMany({
+    where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    take: 8,
+    select: {
+      id: true, refNo: true, state: true, updatedAt: true,
+      units: { select: { qty: true, unitPrice: true } },
+      notes: {
+        where: { kind: { not: "COMMENT" } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 1,
+        select: { kind: true, author: { select: { name: true } } },
       },
-    }),
-    prisma.purchaseRequest.groupBy({ by: ["state"], _count: { _all: true } }),
-    prisma.purchaseRequest.findMany({
-      where: { state: "COMPLETED", completedAt: { gte: monthStart } },
-      select: { units: { select: { qty: true, unitPrice: true } } },
-    }),
-    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
-    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
-    stockHomeSignals(localDateISO(now)),
-  ]);
-
-  const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
-
-  const todo: TodoRow[] = mine.map((r) => {
+    },
+  });
+  return mine.map((r) => {
     const last = r.notes[0];
     const bounced = (r.state === "DRAFT" && last?.kind === "IT_REJECT") || (r.state === "SUBMITTED" && last?.kind === "REQUEST_INFO");
     return {
@@ -688,15 +743,34 @@ export async function purchasingHome(userId: string, role: Role, now: Date = new
       meta: `${fmtMoney(unitsValue(r.units))} · ${daysSince(r.updatedAt, now)} d`,
       href: `/purchases/${r.id}`,
       action: bounced ? "Fix and resubmit" : r.state === "DRAFT" ? "Submit" : "Open",
+      bounced,
     };
   });
+}
+
+/**
+ * Purchasing Home leads with what this person still has to do: drafts nobody
+ * has sent, and anything that came back to them.
+ */
+export async function purchasingHome(userId: string, role: Role, now: Date = new Date()): Promise<PurchasingHome> {
+  // Phase 46 ruling: "this month" is the Manila calendar month.
+  const [todo, counts, completed, approvalsWaiting, awaitingItCheck, stockSignals] = await Promise.all([
+    purchasingTodo(userId, now),
+    prisma.purchaseRequest.groupBy({ by: ["state"], _count: { _all: true } }),
+    completedSpend(monthStartManila(now)),
+    prisma.approval.count({ where: { AND: [{ state: { in: ["PENDING", "CLAIMED"] } }, approvalClassWhere(role)] } }),
+    prisma.asset.count({ where: { cls: "IT", itVerifiedAt: null } }),
+    stockHomeSignals(localDateISO(now)),
+  ]);
+
+  const count = (state: string) => counts.find((c) => c.state === state)?._count._all ?? 0;
 
   return {
     todo,
     draftCount: count("DRAFT"),
     awaitingIT: count("SUBMITTED"),
     awaitingFinance: count("IT_REVIEWED"),
-    spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+    spendThisMonth: fmtMoney(completed.reduce((sum, r) => sum + r.amount, 0)),
     approvalsWaiting,
     awaitingItCheck,
     lowStock: stockSignals.low,
@@ -738,18 +812,34 @@ export function financeWaitingRows() {
   });
 }
 
+export type FinanceWaitingRow = Awaited<ReturnType<typeof financeWaitingRows>>[number];
+
+/** Days a waiting request has sat with Finance: since IT's review (or its last update, for a pre-review row). */
+export function waitingDays(r: Pick<FinanceWaitingRow, "reviewedAt" | "updatedAt">, now: Date): number {
+  return daysSince(r.reviewedAt ?? r.updatedAt, now);
+}
+
+/** Finance's queue (Home and the Overview's Needs you): the first `take` waiting requests, each opened to review. */
+export function financeQueue(rows: FinanceWaitingRow[], now: Date, take = 8): TodoRow[] {
+  return rows.slice(0, take).map((r) => ({
+    id: r.id,
+    refNo: r.refNo,
+    what: `from ${r.requestedBy.name}`,
+    meta: `${fmtMoney(unitsValue(r.units))} · waiting ${waitingDays(r, now)} d`,
+    href: `/purchases/${r.id}`,
+    action: "Review",
+  }));
+}
+
 /**
  * README 5d: Finance Home leads with MONEY AND AGE, not counts — "₱208k
  * waiting, oldest 2 days". The count is the supporting detail, not the headline.
  */
 export async function financeHome(now: Date = new Date()): Promise<FinanceHome> {
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // Phase 46 ruling: "this month" is the Manila calendar month.
   const [waiting, completed, capitalized, totals, toReviewIt, toReviewPurchasing] = await Promise.all([
     financeWaitingRows(),
-    prisma.purchaseRequest.findMany({
-      where: { state: "COMPLETED", completedAt: { gte: monthStart } },
-      select: { units: { select: { qty: true, unitPrice: true } } },
-    }),
+    completedSpend(monthStartManila(now)),
     // financeHome is the ONE prisma.asset read in this file NOT pinned to IT.
     // Spec §6 makes IT's HOME alerts IT-only; this is FINANCE's home, and spec
     // line 8 gives Finance both classes — /finance/assets shows both on its
@@ -765,21 +855,14 @@ export async function financeHome(now: Date = new Date()): Promise<FinanceHome> 
   return {
     waiting: fmtMoney(waiting.reduce((sum, r) => sum + unitsValue(r.units), 0)),
     waitingCount: waiting.length,
-    oldestDays: oldest ? daysSince(oldest.reviewedAt ?? oldest.updatedAt, now) : null,
-    approvedThisMonth: fmtMoney(completed.reduce((sum, r) => sum + unitsValue(r.units), 0)),
+    oldestDays: oldest ? waitingDays(oldest, now) : null,
+    approvedThisMonth: fmtMoney(completed.reduce((sum, r) => sum + r.amount, 0)),
     // Prisma returns Decimal | null from _sum — Number() before it ever leaves here
     capitalized: fmtMoney(capitalized._sum.cost === null ? 0 : Number(capitalized._sum.cost)),
     capitalizedCount: capitalized._count._all,
     bookValue: fmtMoneyExact(totals.bookC / 100),
     depreciation: fmtMoneyExact(totals.accumulatedC / 100),
     toReview: { it: toReviewIt, purchasing: toReviewPurchasing },
-    queue: waiting.slice(0, 8).map((r) => ({
-      id: r.id,
-      refNo: r.refNo,
-      what: `from ${r.requestedBy.name}`,
-      meta: `${fmtMoney(unitsValue(r.units))} · waiting ${daysSince(r.reviewedAt ?? r.updatedAt, now)} d`,
-      href: `/purchases/${r.id}`,
-      action: "Review",
-    })),
+    queue: financeQueue(waiting, now),
   };
 }

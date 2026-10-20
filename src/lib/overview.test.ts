@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { WorkGroup, WorkRow, WorkSectionId } from "./worklist";
 import { WORK_SECTIONS, leaverRow, loanRow } from "./worklist";
 import {
-  countDelta, deltaTone, fleetMakeUp, itMove, kitGapRanked, liveSpark, needsFromWork, sumHistories, sumWeekBuckets,
-  weekBuckets, weekLabels, weekOverWeek, weekWindowStart, type KpiTile,
+  adminNeeds, bookValueMakeUp, countDelta, dayBuckets, dayLabels, dayWindowStart, deliveryMakeUp, deltaTone, financeNeeds,
+  fleetMakeUp, itMove, kitGapRanked, liveSpark, monthBuckets, monthLabels, monthWindowStart, needsFromWork, pctDelta,
+  pesosHistory, purchasingNeeds, quarterStartManila, requestStateMakeUp, roleRanked, sumByLabel, sumHistories,
+  sumWeekBuckets, topWithOther, weekBuckets, weekLabels, weekOverWeek, weekWindowStart, type KpiTile,
 } from "./overview";
+import { monthStartManila } from "./cris-limits";
 
 // 03:00Z is 11:00 on Tue 2026-10-20 in Manila
 const NOW = new Date("2026-10-20T03:00:00Z");
@@ -216,5 +219,242 @@ describe("itMove — which IT trend series an audit entry counts in", () => {
     expect(m("lifecycle.transfer", "DEPLOYED", true)).toBeNull();
     expect(m("lifecycle.transfer executed", "DEPLOYED", true)).toBeNull();
     expect(m("update", "DEFECTIVE")).toBeNull();
+  });
+});
+
+// ── Phase 46 Task 3: Purchasing, Finance and Admin helpers ─────────────────
+
+describe("quarterStartManila — the Manila calendar quarter's first instant", () => {
+  it("mid-quarter: Oct 20 → Oct 1 00:00 Manila", () => {
+    expect(quarterStartManila(NOW).toISOString()).toBe("2026-09-30T16:00:00.000Z");
+  });
+  it("the quarter turns at Manila midnight, not UTC midnight", () => {
+    // Sep 30 23:59 Manila is still Q3; Oct 1 00:00 Manila (Sep 30 16:00Z) is Q4
+    expect(quarterStartManila(new Date("2026-09-30T15:59:59.999Z")).toISOString()).toBe("2026-06-30T16:00:00.000Z");
+    expect(quarterStartManila(new Date("2026-09-30T16:00:00.000Z")).toISOString()).toBe("2026-09-30T16:00:00.000Z");
+  });
+  it("Q1 starts on Jan 1 Manila, which is Dec 31 16:00Z of the year before", () => {
+    expect(quarterStartManila(new Date("2026-03-31T15:00:00Z")).toISOString()).toBe("2025-12-31T16:00:00.000Z");
+    expect(quarterStartManila(new Date("2025-12-31T16:30:00Z")).toISOString()).toBe("2025-12-31T16:00:00.000Z");
+  });
+  it("a quarter's first month starts the quarter (agrees with monthStartManila)", () => {
+    for (const iso of ["2026-01-15T00:00:00Z", "2026-05-01T00:00:00Z", "2026-07-31T15:00:00Z", "2026-12-01T03:00:00Z"]) {
+      const d = new Date(iso);
+      expect(quarterStartManila(d).getTime()).toBeLessThanOrEqual(monthStartManila(d).getTime());
+    }
+    expect(quarterStartManila(new Date("2026-04-01T00:00:00Z")).getTime())
+      .toBe(monthStartManila(new Date("2026-04-01T00:00:00Z")).getTime());
+  });
+});
+
+describe("sumByLabel / topWithOther — top N plus Other", () => {
+  it("groups amounts by label, a null label taking the fallback", () => {
+    expect(sumByLabel([
+      { label: "Acme", amount: 10 }, { label: null, amount: 3 }, { label: "Acme", amount: 2.5 }, { label: "Bolt", amount: 1 },
+    ], "No supplier")).toEqual([
+      { label: "Acme", value: 12.5 }, { label: "No supplier", value: 3 }, { label: "Bolt", value: 1 },
+    ]);
+  });
+  it("keeps the top N by value (ties by label) and folds the rest into one Other row", () => {
+    const rows = ["a", "b", "c", "d", "e", "f", "g", "h", "i"].map((label, i) => ({ label, value: 100 - i }));
+    rows.push({ label: "aa", value: 100 });
+    const r = topWithOther(rows, 7);
+    expect(r.map((x) => [x.label, x.value])).toEqual([
+      ["a", 100], ["aa", 100], ["b", 99], ["c", 98], ["d", 97], ["e", 96], ["f", 95], ["Other", 94 + 93 + 92],
+    ]);
+  });
+  it("no Other row when everything fits, and zero rows are dropped", () => {
+    expect(topWithOther([{ label: "x", value: 2 }, { label: "z", value: 0 }, { label: "y", value: 5 }], 7))
+      .toEqual([{ label: "y", value: 5 }, { label: "x", value: 2 }]);
+  });
+  it("the rows always sum to the input total", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ label: `s${i}`, value: i + 1 }));
+    const total = rows.reduce((s, r) => s + r.value, 0);
+    expect(topWithOther(rows, 3).reduce((s, r) => s + r.value, 0)).toBe(total);
+  });
+  it("a custom Other label", () => {
+    expect(topWithOther([{ label: "a", value: 1 }, { label: "b", value: 1 }], 1, "Everyone else").at(-1))
+      .toEqual({ label: "Everyone else", value: 1 });
+  });
+});
+
+describe("pctDelta — a money tile's change since 7 days ago, in percent", () => {
+  it("null gives none (collecting history)", () => expect(pctDelta(100, null)).toEqual({ kind: "none" }));
+  it("rounds to a whole percent", () => {
+    expect(pctDelta(112, 100)).toEqual({ kind: "pct", value: 12 });
+    expect(pctDelta(50, 150)).toEqual({ kind: "pct", value: -67 });
+    expect(pctDelta(100, 100)).toEqual({ kind: "pct", value: 0 });
+  });
+  it("from zero there is no percent: none rather than a made-up number; zero to zero is flat", () => {
+    expect(pctDelta(5, 0)).toEqual({ kind: "none" });
+    expect(pctDelta(0, 0)).toEqual({ kind: "pct", value: 0 });
+  });
+});
+
+describe("pesosHistory", () => {
+  it("centavos to pesos, nulls kept", () => expect(pesosHistory([12_345, null, 0])).toEqual([123.45, null, 0]));
+});
+
+describe("dayBuckets / dayWindowStart / dayLabels — Manila days ending today", () => {
+  it("counts each date on its Manila day, oldest first; future and older dates are out", () => {
+    const dates = [
+      new Date("2026-10-20T15:59:00Z"), // Oct 20 23:59 Manila → today
+      new Date("2026-10-19T16:00:00Z"), // Oct 20 00:00 Manila → today
+      new Date("2026-10-19T15:59:00Z"), // Oct 19 Manila → yesterday
+      new Date("2026-10-17T15:59:00Z"), // Oct 17 Manila → today−3, outside 3 days
+      new Date("2026-10-20T16:00:00Z"), // Oct 21 Manila → future
+    ];
+    expect(dayBuckets(dates, NOW, 3)).toEqual([0, 1, 2]);
+  });
+  it("starts at Manila midnight of the first day", () => {
+    expect(dayWindowStart(NOW, 14).toISOString()).toBe("2026-10-06T16:00:00.000Z");
+    expect(dayWindowStart(NOW, 7).getTime()).toBe(weekWindowStart(NOW, 1).getTime());
+  });
+  it("labels each day", () => expect(dayLabels(NOW, 3)).toEqual(["18 Oct", "19 Oct", "20 Oct"]));
+});
+
+describe("monthBuckets / monthWindowStart / monthLabels — Manila months ending this month", () => {
+  it("sums each row into its Manila month, oldest first", () => {
+    const rows = [
+      { at: new Date("2026-10-01T02:00:00Z"), amount: 5 },
+      { at: new Date("2026-09-30T16:30:00Z"), amount: 7 }, // Oct 1 00:30 Manila → October
+      { at: new Date("2026-09-30T15:30:00Z"), amount: 11 }, // Sep 30 23:30 Manila → September
+      { at: new Date("2026-08-15T02:00:00Z"), amount: 13 },
+      { at: new Date("2026-07-15T02:00:00Z"), amount: 99 }, // outside three months
+      { at: new Date("2026-11-02T02:00:00Z"), amount: 99 }, // future
+    ];
+    expect(monthBuckets(rows, NOW, 3)).toEqual([13, 11, 12]);
+  });
+  it("starts on the 1st of the oldest month, Manila midnight; crosses the year", () => {
+    expect(monthWindowStart(NOW, 1).toISOString()).toBe(monthStartManila(NOW).toISOString());
+    expect(monthWindowStart(NOW, 12).toISOString()).toBe("2025-10-31T16:00:00.000Z");
+  });
+  it("labels each month", () => {
+    expect(monthLabels(NOW, 3)).toEqual(["Aug 2026", "Sep 2026", "Oct 2026"]);
+    expect(monthLabels(new Date("2026-01-10T00:00:00Z"), 2)).toEqual(["Dec 2025", "Jan 2026"]);
+  });
+});
+
+describe("requestStateMakeUp", () => {
+  it("one row per request state in tab order, each linking to its tab; empty states are left out", () => {
+    const m = requestStateMakeUp({ ALL: 9, DRAFT: 1, SUBMITTED: 3, IT_REVIEWED: 0, COMPLETED: 4, CANCELLED: 1 });
+    expect(m.rows).toEqual([
+      { label: "Drafts", value: 1, tone: "neutral", href: "/purchases?state=DRAFT" },
+      { label: "Awaiting IT", value: 3, tone: "chart-1", href: "/purchases?state=SUBMITTED" },
+      { label: "Completed", value: 4, tone: "chart-3", href: "/purchases?state=COMPLETED" },
+      { label: "Cancelled", value: 1, tone: "bad", href: "/purchases?state=CANCELLED" },
+    ]);
+  });
+});
+
+describe("bookValueMakeUp", () => {
+  it("the top three categories in the chart colours, then Other; money", () => {
+    const m = bookValueMakeUp([
+      { label: "Laptops", value: 500 }, { label: "Monitors", value: 200 }, { label: "Phones", value: 50 },
+      { label: "Docks", value: 30 }, { label: "Chairs", value: 20 },
+    ]);
+    expect(m.money).toBe(true);
+    expect(m.rows).toEqual([
+      { label: "Laptops", value: 500, tone: "chart-1" },
+      { label: "Monitors", value: 200, tone: "chart-2" },
+      { label: "Phones", value: 50, tone: "chart-3" },
+      { label: "Other", value: 50, tone: "neutral" },
+    ]);
+  });
+});
+
+describe("deliveryMakeUp", () => {
+  it("delivered, pending, retrying, dead; status tones carry their word; empty statuses left out", () => {
+    const m = deliveryMakeUp({ DELIVERED: 40, PENDING: 2, RETRYING: 0, DEAD: 3 });
+    expect(m.rows).toEqual([
+      { label: "Delivered", value: 40, tone: "chart-1" },
+      { label: "Pending", value: 2, tone: "chart-2" },
+      { label: "Dead", value: 3, tone: "bad" },
+    ]);
+  });
+});
+
+describe("roleRanked", () => {
+  it("every role by its label, largest first, zeros kept (no admins is worth seeing)", () => {
+    const r = roleRanked([
+      { role: "admin", count: 0 }, { role: "it_staff", count: 5 }, { role: "viewer", count: 2 },
+      { role: "purchasing_staff", count: 5 }, { role: "finance_staff", count: 1 },
+    ]);
+    expect(r.rows).toEqual([
+      { label: "IT staff", value: 5 }, { label: "Purchasing staff", value: 5 }, { label: "Viewer", value: 2 },
+      { label: "Finance staff", value: 1 }, { label: "Admin", value: 0 },
+    ]);
+  });
+});
+
+describe("purchasingNeeds", () => {
+  const todo = (refNo: string, bounced: boolean) => ({
+    refNo, what: bounced ? "came back from Ina" : "still a draft", meta: "₱1,000 · 2 d", href: `/purchases/${refNo}`,
+    action: bounced ? "Fix and resubmit" : "Submit", bounced,
+  });
+  const overdue = [{ id: "s1", refNo: "STK-0003", scope: "Pantry", dueAt: new Date("2026-10-17T00:00:00Z") }];
+
+  it("overdue stocktakes (bad), then low stock and bounced requests (warn), then the rest; at most 6", () => {
+    const items = purchasingNeeds([todo("PR-1", false), todo("PR-2", true)], overdue, 4, "/stock?low=1", "2026-10-20");
+    expect(items.map((i) => [i.tone, i.title])).toEqual([
+      ["bad", "STK-0003 · Pantry"],
+      ["warn", "4 items below reorder level"],
+      ["warn", "PR-2 · came back from Ina"],
+      ["info", "PR-1 · still a draft"],
+    ]);
+    expect(items[0]).toMatchObject({ meta: "close-by 17 Oct · 3 d overdue", action: "Open", href: "/stock/stocktakes/s1", icon: "stock" });
+    expect(items[1]).toMatchObject({ href: "/stock?low=1", action: "Review" });
+    expect(items[2]).toMatchObject({ href: "/purchases/PR-2", action: "Fix and resubmit", meta: "₱1,000 · 2 d", icon: "requests" });
+    const many = Array.from({ length: 9 }, (_, i) => todo(`PR-${i}`, false));
+    expect(purchasingNeeds(many, overdue, 1, "/stock?low=1", "2026-10-20")).toHaveLength(6);
+  });
+  it("one item below reorder reads singular; none adds nothing", () => {
+    expect(purchasingNeeds([], [], 1, "/stock?low=1", "2026-10-20")[0].title).toBe("1 item below reorder level");
+    expect(purchasingNeeds([], [], 0, "/stock?low=1", "2026-10-20")).toEqual([]);
+  });
+});
+
+describe("financeNeeds", () => {
+  const q = (refNo: string) => ({ refNo, what: "from Ina", meta: "₱5,000 · waiting 2 d", href: `/purchases/${refNo}`, action: "Review" });
+  it("registrations to confirm per class (each its own class's link), then the queue; at most 6", () => {
+    const items = financeNeeds([q("PR-1"), q("PR-2")], { it: 3, purchasing: 1 });
+    expect(items.map((i) => [i.title, i.href])).toEqual([
+      ["3 IT registrations to confirm", "/finance/assets?fin=with-finance"],
+      ["1 Purchasing registration to confirm", "/finance/assets?cls=PURCHASING&fin=with-finance"],
+      ["PR-1 · from Ina", "/purchases/PR-1"],
+      ["PR-2 · from Ina", "/purchases/PR-2"],
+    ]);
+    expect(items.every((i) => i.tone === "warn")).toBe(true);
+    expect(financeNeeds(Array.from({ length: 8 }, (_, i) => q(`PR-${i}`)), { it: 1, purchasing: 1 })).toHaveLength(6);
+  });
+  it("a class with nothing to confirm adds no item", () => {
+    expect(financeNeeds([], { it: 0, purchasing: 2 }).map((i) => i.title)).toEqual(["2 Purchasing registrations to confirm"]);
+  });
+});
+
+describe("adminNeeds", () => {
+  it("dead deliveries and failing endpoints (bad), disabled admins (warn), unavailable flags (info)", () => {
+    const items = adminNeeds({
+      dead: 4,
+      failing: [
+        { id: "e1", url: "https://hooks.example/a", dead: 3, active: true },
+        { id: "e2", url: "https://hooks.example/b", dead: 1, active: false },
+      ],
+      disabledAdmins: [{ id: "u1", name: "Ana Cruz", email: "ana@example.com" }],
+      unavailableFlags: [{ key: "sso", label: "Microsoft sign-in" }],
+    });
+    expect(items.map((i) => [i.tone, i.title, i.href])).toEqual([
+      ["bad", "4 dead webhook deliveries", "/admin/webhooks/deliveries?state=DEAD"],
+      ["bad", "https://hooks.example/a", "/admin/webhooks"],
+      ["bad", "https://hooks.example/b", "/admin/webhooks"],
+      ["warn", "Ana Cruz is a disabled admin", "/admin/users?disabled=1"],
+      ["info", "Microsoft sign-in is unavailable", "/admin/flags"],
+    ]);
+    expect(items[1].meta).toBe("3 dead deliveries");
+    expect(items[2].meta).toBe("1 dead delivery · endpoint switched off");
+  });
+  it("nothing wrong, nothing listed; one dead delivery reads singular", () => {
+    expect(adminNeeds({ dead: 0, failing: [], disabledAdmins: [], unavailableFlags: [] })).toEqual([]);
+    expect(adminNeeds({ dead: 1, failing: [], disabledAdmins: [], unavailableFlags: [] })[0].title).toBe("1 dead webhook delivery");
   });
 });

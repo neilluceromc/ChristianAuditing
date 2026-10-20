@@ -703,6 +703,25 @@ export async function stockExportRows(state: ListState, today: string = localDat
  * excluding already-expired lots (those are a different block, and a
  * different worry). Four queries total, as two independent parallel pairs.
  */
+/** OPEN stocktakes whose close-by day is before today (Manila): the Home count and the Overview's Needs-you rows. */
+export function stocktakesOverdueWhere(today: string): Prisma.StocktakeWhereInput {
+  return { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } };
+}
+
+/** Phase 46: the overdue stocktakes themselves, longest overdue first — Purchasing's Needs you. */
+export async function overdueStocktakes(
+  today: string,
+  take = 6,
+): Promise<Array<{ id: string; refNo: string; scope: string; dueAt: Date }>> {
+  const rows = await prisma.stocktake.findMany({
+    where: stocktakesOverdueWhere(today),
+    orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+    take,
+    select: { id: true, refNo: true, dueAt: true, category: { select: { name: true } } },
+  });
+  return rows.map((s) => ({ id: s.id, refNo: s.refNo, scope: s.category?.name ?? "All", dueAt: s.dueAt }));
+}
+
 export async function stockHomeSignals(today: string): Promise<{ low: number; expiringLots: number; stocktakesOverdue: number }> {
   const [candidates, expiryLots, stocktakesOverdue] = await Promise.all([
     prisma.stockItem.findMany({ where: { archivedAt: null }, select: { id: true, reorderLevel: true } }),
@@ -710,7 +729,7 @@ export async function stockHomeSignals(today: string): Promise<{ low: number; ex
       where: { expiresAt: { not: null }, item: { archivedAt: null } },
       select: { id: true, expiresAt: true, quantity: true },
     }),
-    prisma.stocktake.count({ where: { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } } }),
+    prisma.stocktake.count({ where: stocktakesOverdueWhere(today) }),
   ]);
 
   const [balanceSums, allocSums] = await Promise.all([
