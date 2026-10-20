@@ -53,8 +53,9 @@ describe("ListTabs", () => {
 });
 
 describe("FloatingBulkBar", () => {
-  it("renders nothing when nothing is selected", () => {
-    expect(renderToStaticMarkup(<FloatingBulkBar count={0} onClear={() => {}}>x</FloatingBulkBar>)).toBe("");
+  it("with nothing selected renders only an empty live region", () => {
+    const html = renderToStaticMarkup(<FloatingBulkBar count={0} onClear={() => {}}>x</FloatingBulkBar>);
+    expect(html).toBe('<span class="sr-only" aria-live="polite"></span>');
   });
   it("is a Bulk actions region: N selected, the actions, then Clear", () => {
     const html = renderToStaticMarkup(
@@ -64,6 +65,7 @@ describe("FloatingBulkBar", () => {
     );
     expect(html).toContain('role="region"');
     expect(html).toContain('aria-label="Bulk actions"');
+    expect(html).toContain('<span class="sr-only" aria-live="polite">3 selected</span>');
     expect(html.indexOf("3 selected")).toBeLessThan(html.indexOf("Export"));
     expect(html.indexOf("Export")).toBeLessThan(html.indexOf("Clear"));
   });
@@ -82,11 +84,11 @@ describe("StickyList and StickyToolbar", () => {
 });
 
 describe("ListFooter", () => {
-  const footer = (pageCount: number, total: number, page = 1) =>
+  const footer = (pageCount: number, total: number, page = 1, per = 25) =>
     renderToStaticMarkup(
       <ListFooter
         page={page}
-        per={25}
+        per={per}
         total={total}
         pageCount={pageCount}
         hrefFor={(p) => `/inventory?page=${p}`}
@@ -106,11 +108,18 @@ describe("ListFooter", () => {
     expect(html).toContain('aria-label="Pagination"');
     expect(html).toContain('href="/inventory?page=3"');
   });
-  it("with one page keeps only the rows line and Row size", () => {
+  it("with one page of 25 or fewer rows keeps only the rows line and Row size", () => {
     const html = footer(1, 12);
     expect(html).toContain("1–12</span> of 12");
     expect(html).toContain('aria-label="Row size"');
     expect(html).not.toContain("Rows per page");
+    expect(html).not.toContain('aria-label="Pagination"');
+  });
+  it("with one page of more than 25 rows still offers Rows per page, but no pages", () => {
+    const html = footer(1, 60, 1, 100);
+    expect(html).toContain("1–60</span> of 60");
+    expect(html).toContain("Rows per page");
+    expect(html).toContain('<option value="100" selected="">100</option>');
     expect(html).not.toContain('aria-label="Pagination"');
   });
   it("says No rows for an empty list", () => {

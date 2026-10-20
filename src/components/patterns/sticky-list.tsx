@@ -18,7 +18,10 @@ import { NavLink, useListNavigation } from "@/components/patterns/list-navigatio
  * `stickyHeader` head pins under the toolbar through `--list-sticky-top`.
  */
 
-/** The list's wrapper: it carries `data-sticky-list` and, once its StickyToolbar has measured itself, `--list-sticky-top`. */
+/**
+ * The list's wrapper: it carries `data-sticky-list` and, once its StickyToolbar has measured itself, `--list-sticky-top`.
+ * Use one StickyToolbar per StickyList, and space the children themselves (no `gap` here: the toolbar's sentinel is a flex item).
+ */
 export function StickyList({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div data-sticky-list="" className={cn("flex flex-col", className)}>
@@ -100,7 +103,10 @@ export function RowSizeControl() {
   );
 }
 
-/** "Rows per page": 25, 50 or 100; a change goes through the list's shared transition. */
+/**
+ * "Rows per page": 25, 50 or 100; a change goes through the list's shared transition. Uncontrolled and keyed on
+ * `per`, so the picked value stays shown while the next page renders instead of snapping back to the old one.
+ */
 function PerPageSelect({ per, perHrefFor }: { per: number; perHrefFor: (per: number) => string }) {
   const id = useId();
   const { navigate } = useListNavigation();
@@ -108,8 +114,9 @@ function PerPageSelect({ per, perHrefFor }: { per: number; perHrefFor: (per: num
     <div className="flex items-center gap-2 text-[12.5px] text-fg-muted">
       <label htmlFor={id}>Rows per page</label>
       <Select
+        key={per}
         id={id}
-        value={String(per)}
+        defaultValue={String(per)}
         onChange={(e) => navigate(perHrefFor(Number(e.target.value)))}
         className="h-8 w-auto py-0 pl-2.5 text-[12.5px]"
       >
@@ -125,7 +132,8 @@ function PerPageSelect({ per, perHrefFor }: { per: number; perHrefFor: (per: num
 
 /**
  * The pagination row as a bar pinned to the bottom of the window while the list is on screen: "Rows 1–25 of
- * 900", then Row size, Rows per page and the pages. With one page it keeps only the rows line and Row size.
+ * 900", then Row size, Rows per page and the pages. With one page the pages hide; Rows per page shows whenever
+ * there are more rows than the smallest size, so a list at 100 per page with 60 rows can still go back to 25.
  */
 export function ListFooter({
   page,
@@ -144,6 +152,7 @@ export function ListFooter({
 }) {
   const { from, to } = rowsRange(page, per, total);
   const paged = pageCount > 1;
+  const perChoice = total > PER_PAGE_OPTIONS[0];
   const fmt = (n: number) => n.toLocaleString("en-US");
   return (
     <div className="sticky bottom-0 z-20 -mx-6 mt-1 flex min-h-12 flex-wrap items-center gap-x-6 gap-y-1 border-t border-border bg-canvas/95 px-6 py-2 backdrop-blur">
@@ -158,7 +167,7 @@ export function ListFooter({
       </span>
       <div className="ml-auto flex flex-wrap items-center gap-x-6 gap-y-1">
         <RowSizeControl />
-        {paged && <PerPageSelect per={per} perHrefFor={perHrefFor} />}
+        {perChoice && <PerPageSelect per={per} perHrefFor={perHrefFor} />}
         {paged && <Pagination page={page} pageCount={pageCount} hrefFor={hrefFor} linkComponent={NavLink} />}
       </div>
     </div>
