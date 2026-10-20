@@ -118,21 +118,34 @@ export function RowSizeControl() {
 }
 
 /**
- * "Rows per page": 25, 50 or 100; a change goes through the list's shared transition. Uncontrolled and keyed on
- * `per`, so the picked value stays shown while the next page renders instead of snapping back to the old one.
+ * "Rows per page": 25, 50 or 100; a change goes through the list's shared transition. Controlled, and never
+ * remounted (a `key={per}` remount dropped keyboard focus once the next page landed): while that navigation is in
+ * flight it shows the size just picked, then the URL's `per` again, so it neither snaps back to the old size
+ * mid-render nor keeps a pick whose navigation never landed.
  * `hrefs` maps each size to its URL (plain data, so a Server Component can render the footer around it).
  */
 export function PerPageSelect({ per, hrefs }: { per: number; hrefs: Record<number, string> }) {
   const id = useId();
-  const { navigate } = useListNavigation();
+  const { navigate, pending } = useListNavigation();
+  const [picked, setPicked] = useState<number | null>(null);
+  // a pick lives for its own navigation only: forget it once the list stops being busy (state adjusted in render)
+  const [wasPending, setWasPending] = useState(pending);
+  if (pending !== wasPending) {
+    setWasPending(pending);
+    if (!pending) setPicked(null);
+  }
+  const shown = pending && picked !== null ? picked : per;
   return (
     <div className="flex items-center gap-2 text-[12.5px] text-fg-muted">
       <label htmlFor={id}>Rows per page</label>
       <Select
-        key={per}
         id={id}
-        defaultValue={String(per)}
-        onChange={(e) => navigate(hrefs[Number(e.target.value)])}
+        value={String(shown)}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          setPicked(n);
+          navigate(hrefs[n]);
+        }}
         className="h-8 w-auto py-0 pl-2.5 text-[12.5px]"
       >
         {PER_PAGE_OPTIONS.map((n) => (

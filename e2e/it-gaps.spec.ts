@@ -454,10 +454,10 @@ test.describe("it gaps", () => {
       // SQL agreement is already proven above; this only re-confirms the
       // screen shows the same number repairStage() derives in JS.
       await page.goto(`/inventory?stage=${stage}`);
-      const total = page.getByText(/^\d+ assets?$/);
+      const total = page.getByText(/^[\d,]+ assets?$/);
       await expect(total).toBeVisible({ timeout: 15_000 });
       const text = await total.textContent();
-      const shown = Number(text!.match(/\d+/)![0]);
+      const shown = Number(text!.match(/[\d,]+/)![0].replace(/,/g, ""));
       expect(shown, `stage ${stage}`).toBe(byStage.get(stage) ?? 0);
     }
   });
@@ -534,9 +534,9 @@ test.describe("it gaps", () => {
       ).map((a) => a.tag);
 
       await page.goto(`/inventory?stage=${stage}&sort=defectiveSince`);
-      const total = page.getByText(/^\d+ assets?$/);
+      const total = page.getByText(/^[\d,]+ assets?$/);
       await expect(total).toBeVisible({ timeout: 15_000 });
-      expect(Number((await total.textContent())!.match(/\d+/)![0]), `stage ${stage} total`).toBe(ids.length);
+      expect(Number((await total.textContent())!.match(/[\d,]+/)![0].replace(/,/g, "")), `stage ${stage} total`).toBe(ids.length);
 
       await expect(page.locator("tbody tr"), `stage ${stage} rows on page 1`).toHaveCount(
         Math.min(ids.length, ENTITY_PAGE_SIZE),

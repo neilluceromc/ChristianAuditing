@@ -115,16 +115,17 @@ async function bar(page: Page, label: string): Promise<{ now: number; max: numbe
 async function screenCount(page: Page, unit: RegExp): Promise<number> {
   const el = page.getByText(unit);
   await expect(el).toBeVisible({ timeout: 30_000 });
-  return Number((await el.innerText()).split(" ")[0]);
+  return Number((await el.innerText()).split(" ")[0].replace(/,/g, ""));
 }
 
-const ASSETS = /^\d+ assets?$/;
+// [\d,]+: the toolbars print the number with a thousands comma ("1,025 assets").
+const ASSETS = /^[\d,]+ assets?$/;
 // Phase 29 (spec §6): the employees toolbar's count can now carry a second
 // clause — "9 people · 1 leaver hidden", the leavers it is hiding, as a link
 // into them. Anchored at the START only, so the count itself is still pinned
 // (and `screenCount`'s split(" ")[0] still reads it) without the tail being
 // treated as a different element.
-const PEOPLE = /^\d+ (?:people|person)\b/;
+const PEOPLE = /^[\d,]+ (?:people|person)\b/;
 const ENTRIES = /^\d+ (?:entries|entry)$/;
 
 async function assetTotal(page: Page): Promise<number> {

@@ -59,7 +59,12 @@ export default async function EmployeesPage({
     const qs = serializeListState(s, EMPLOYEES_LIST_CONFIG);
     return base + (gaps ? (qs ? `${qs}&gaps=1` : "?gaps=1") : qs);
   };
-  const hasFilters = state.q !== "" || Object.keys(state.filters).length > 0 || gapsOnly;
+  // The leavers scope (`leavers=1`) is not a filter (as in the toolbar): every Clear filters on the page keeps it,
+  // and a page with only that scope set and no rows is simply empty, not "filters matched nothing".
+  const showingLeavers = (state.filters.leavers ?? []).includes("1");
+  const hasFilters =
+    state.q !== "" || Object.keys(state.filters).some((f) => f !== "leavers" && (state.filters[f]?.length ?? 0) > 0) || gapsOnly;
+  const clearedHref = href({ ...clearFilters(state), filters: showingLeavers ? { leavers: ["1"] } : {} }, false);
   const sortHrefs: Record<string, string> = Object.fromEntries(
     EMPLOYEES_LIST_CONFIG.sortable.map((key) => [key, href({ ...state, sort: toggleSort(state.sort, key), page: 1 })]),
   );
@@ -100,7 +105,7 @@ export default async function EmployeesPage({
   if ((state.filters.joined ?? []).includes("month")) {
     chips.push({ label: "New this month", removeHref: href(withFilter(state, "joined", []), gapsOnly) });
   }
-  if ((state.filters.leavers ?? []).includes("1")) {
+  if (showingLeavers) {
     chips.push({ label: "Leavers shown", removeHref: href(withFilter(state, "leavers", []), gapsOnly) });
   }
   if (gapsOnly) {
@@ -164,10 +169,11 @@ export default async function EmployeesPage({
                 </>
               ) : hasFilters ? (
                 <>
-                  <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), false)} />
+                  {/* all three Clear filters here (the toolbar's, the chip row's, this one) keep the leavers scope */}
+                  <ChipFilterRow chips={chips} clearHref={clearedHref} />
                   <EmptyState
                     title="Your filters matched nothing"
-                    actions={<ButtonLink href={href(clearFilters(state), false)}>Clear filters</ButtonLink>}
+                    actions={<ButtonLink href={clearedHref}>Clear filters</ButtonLink>}
                   />
                 </>
               ) : (

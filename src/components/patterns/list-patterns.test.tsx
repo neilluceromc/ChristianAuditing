@@ -33,6 +33,13 @@ describe("CountTiles", () => {
     expect(html).toContain("Spare, ready to assign");
     expect(html).toContain("var(--st-settled-dot)");
   });
+  it("has one column per tile from 1280 px: six for IT, five for Purchasing (no empty slot)", () => {
+    const row = (n: number) =>
+      renderToStaticMarkup(<CountTiles label="t" tiles={Array.from({ length: n }, (_, i) => tile({ key: `k${i}`, href: `/i?${i}` }))} />);
+    expect(row(6)).toContain("xl:grid-cols-6");
+    expect(row(5)).toContain("xl:grid-cols-5");
+    expect(row(5)).not.toContain("xl:grid-cols-6");
+  });
 });
 
 describe("ListTabs", () => {

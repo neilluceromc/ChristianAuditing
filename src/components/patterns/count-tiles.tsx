@@ -36,12 +36,20 @@ function FamilyDot({ family }: { family: StatusFamily }) {
 
 /**
  * Phase 45 (spec §2.1): a row of clickable count tiles. Each is a link (through the list's shared transition)
- * marked `aria-current="true"` while its filter is on; the row is a `nav` named by `label`. Six columns from
- * 1280 px, three from 768 px, two below; every tile in a row is the same height.
+ * marked `aria-current="true"` while its filter is on; the row is a `nav` named by `label`. From 1280 px one
+ * column per tile (IT has six, Purchasing five, so no empty slot), three from 768 px, two below; every tile in a
+ * row is the same height.
  */
 export function CountTiles({ tiles, label }: { tiles: TileDef[]; label: string }) {
   return (
-    <nav aria-label={label} className="grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+    <nav
+      aria-label={label}
+      className={cn(
+        "grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3",
+        // whole class names, so Tailwind sees both
+        tiles.length <= 5 ? "xl:grid-cols-5" : "xl:grid-cols-6",
+      )}
+    >
       {tiles.map((t) => (
         <NavLink
           key={t.key}

@@ -306,7 +306,7 @@ test.describe("inventory list", () => {
     await page.goto("/inventory");
 
     const count = page.locator('p[aria-live="polite"]').filter({ hasText: /assets? ·/ });
-    await expect(count).toHaveText(/^\d+ assets · \d+ needs? attention$/);
+    await expect(count).toHaveText(/^[\d,]+ assets · [\d,]+ needs? attention$/);
     const link = count.getByRole("link", { name: /needs? attention$/ });
     await waitForHydration(link);
     await link.click();

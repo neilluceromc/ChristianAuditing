@@ -142,6 +142,7 @@ export function InventoryToolbar({
 }) {
   const { navigate } = useListNavigation();
   const hrefFor = useInventoryHref(cls, defaultCls, purchaseYear);
+  const fmt = (n: number) => n.toLocaleString("en-US");
 
   const stageActive = (state.filters.stage ?? []).some(isRepairStage);
 
@@ -241,8 +242,11 @@ export function InventoryToolbar({
         )}
       </MoreFilters>
       {children && <div className={LIST.tall}>{children}</div>}
-      <p className="ml-auto whitespace-nowrap text-[12px] tabular-nums text-fg-muted" aria-live="polite">
-        <span>{total} asset{total === 1 ? "" : "s"}</span>
+      {/* the count line reads like Employees': 12.5 px, the number bold and with a thousands comma */}
+      <p className="ml-auto whitespace-nowrap text-[12.5px] tabular-nums text-fg-muted" aria-live="polite">
+        <span>
+          <span className="font-semibold text-fg">{fmt(total)}</span> asset{total === 1 ? "" : "s"}
+        </span>
         {attentionCount > 0 && (
           <>
             {" · "}
@@ -250,7 +254,7 @@ export function InventoryToolbar({
               href={hrefFor({ ...state, sort: [{ key: "attention", dir: "asc" }], page: 1 })}
               className="underline underline-offset-2 hover:text-fg"
             >
-              {attentionCount} need{attentionCount === 1 ? "s" : ""} attention
+              {fmt(attentionCount)} need{attentionCount === 1 ? "s" : ""} attention
             </Link>
           </>
         )}

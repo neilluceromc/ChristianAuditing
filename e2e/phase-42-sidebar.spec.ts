@@ -27,7 +27,7 @@ const VIEWER = "viewer@thebackroomop.com";
 const PURCHASING = "purchasing@thebackroomop.com";
 
 /** The /inventory toolbar's own row count (as in import-export.spec.ts). */
-const ASSETS = /^\d+ assets?$/;
+const ASSETS = /^[\d,]+ assets?$/;
 
 test.beforeAll(() => {
   execSync("npm run db:seed", { timeout: 120_000 });
@@ -133,7 +133,7 @@ test.describe("phase 42 — the sidebar stays put, with views under the current 
     await expect(spare).toHaveAttribute("aria-current", "page");
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
     // Spec §2 anti-goal: a view's count never disagrees with the row count its own page shows.
-    await expect(page.getByRole("main").getByText(ASSETS)).toHaveText(new RegExp(`^${n} assets?$`), { timeout: 30_000 });
+    await expect(page.getByRole("main").getByText(ASSETS)).toHaveText(new RegExp(`^${n.toLocaleString("en-US")} assets?$`), { timeout: 30_000 });
   });
 
   test("3. on /employees, Inventory's views are gone and Employees' views show", async ({ page }) => {

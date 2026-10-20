@@ -131,7 +131,7 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 const num = (s: string) => Number(s.replace(/,/g, "").trim());
 
 /** The inventory toolbar's count line: "N assets · N need(s) attention". */
-const assetCountLine = (page: Page) => page.locator('p[aria-live="polite"]').filter({ hasText: /\d+ assets?\b/ });
+const assetCountLine = (page: Page) => page.locator('p[aria-live="polite"]').filter({ hasText: /\d[\d,]* assets?\b/ });
 /** The employees toolbar's count line: "N people · N leaver(s) hidden". */
 const peopleCountLine = (page: Page) => page.locator('p[aria-live="polite"]').filter({ hasText: /\d[\d,]* (people|person)\b/ });
 
@@ -196,7 +196,7 @@ test.describe("count tiles and tabs", () => {
     await expect(page).toHaveURL(/[?&]status=SPARE(&|$)/);
     await expect(inStock).toHaveAttribute("aria-current", "true");
     await expect(tiles.locator('[aria-current="true"]')).toHaveCount(1);
-    await expect(assetCountLine(page)).toHaveText(new RegExp(`^${n} assets?( ·|$)`));
+    await expect(assetCountLine(page)).toHaveText(new RegExp(`^${fmt(n)} assets?( ·|$)`));
     const statuses = await columnTexts(page, "Status");
     expect(statuses.length).toBeGreaterThan(0);
     for (const s of statuses) expect(s.trim()).toMatch(/^Spare/);
@@ -221,7 +221,7 @@ test.describe("count tiles and tabs", () => {
     await expect(page).toHaveURL((u) => u.searchParams.get("attention") === "1" && u.searchParams.get("q") === "BR-LT-01");
     await expect(attention).toHaveAttribute("aria-current", "true");
     await expect(tiles.getByRole("link", { name: /^In stock/ })).not.toHaveAttribute("aria-current", "true");
-    await expect(assetCountLine(page)).toHaveText(new RegExp(`^${n} assets? · ${n} needs? attention$`));
+    await expect(assetCountLine(page)).toHaveText(new RegExp(`^${fmt(n)} assets? · ${fmt(n)} needs? attention$`));
     // the search survives the tile, and the tile's own count did not move under its own filter
     await expect(page.getByRole("searchbox", { name: "Search assets" })).toHaveValue("BR-LT-01");
     expect(await tileCount(attention)).toBe(n);
