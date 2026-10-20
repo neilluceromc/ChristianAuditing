@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RESOLVE_TOGGLE_ATTR, focusResolveToggle, settleNoteResult, settleUploadResult } from "./form-focus";
+import { RESOLVE_TOGGLE_ATTR, focusResolveToggle, settleNoteResult, settleUploadResult, stageUploadFile } from "./form-focus";
 import type { ActionResult } from "@/server/action-result";
 
 /*
@@ -101,5 +101,44 @@ describe("after Mark resolved / Reopen", () => {
     const toggle = element("toggle", `[${RESOLVE_TOGGLE_ATTR}="a\\"b"]`);
     expect(focusResolveToggle(doc, 'a"b')).toBe(true);
     expect(doc.activeElement).toBe(toggle);
+  });
+});
+
+describe("stageUploadFile: the browser refuses what the server would, before anything is sent", () => {
+  const handles = () => ({ stage: vi.fn(), refuse: vi.fn() });
+
+  it("an oversized phone photo is refused in the server's words and never staged", () => {
+    const h = handles();
+    const photo = { name: "IMG_2041.jpg", type: "image/jpeg", size: 6_500_000 };
+    expect(stageUploadFile(photo, h)).toBe(false);
+    expect(h.refuse).toHaveBeenCalledWith("Too big — the cap is 4 MB");
+    expect(h.stage).toHaveBeenCalledWith(null);
+  });
+
+  it("the cap is the server's: 4,000,000 bytes is staged, one more is refused", () => {
+    const at = handles();
+    expect(stageUploadFile({ name: "a.pdf", type: "application/pdf", size: 4_000_000 }, at)).toBe(true);
+    const over = handles();
+    expect(stageUploadFile({ name: "a.pdf", type: "application/pdf", size: 4_000_001 }, over)).toBe(false);
+    expect(over.refuse).toHaveBeenCalledWith("Too big — the cap is 4 MB");
+  });
+
+  it("refuses an empty file and a disallowed type", () => {
+    const empty = handles();
+    stageUploadFile({ name: "a.pdf", type: "application/pdf", size: 0 }, empty);
+    expect(empty.refuse).toHaveBeenCalledWith("Pick a file first");
+    expect(empty.stage).toHaveBeenCalledWith(null);
+    const gif = handles();
+    stageUploadFile({ name: "a.gif", type: "image/gif", size: 10 }, gif);
+    expect(gif.refuse).toHaveBeenCalledWith("That type isn't allowed. Accepted: PDF, PNG, JPG.");
+    expect(gif.stage).toHaveBeenCalledWith(null);
+  });
+
+  it("an accepted file is staged and clears an earlier refusal", () => {
+    const h = handles();
+    const file = { name: "quote.png", type: "image/png", size: 1200 };
+    expect(stageUploadFile(file, h)).toBe(true);
+    expect(h.refuse).toHaveBeenCalledWith(null);
+    expect(h.stage).toHaveBeenCalledWith(file);
   });
 });

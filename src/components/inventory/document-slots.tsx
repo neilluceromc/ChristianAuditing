@@ -4,6 +4,7 @@ import { useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-field";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { checkUploadMeta, UPLOAD_TYPES } from "@/lib/upload-meta";
 
 export type SlotKind = "invoice" | "official-receipt" | "warranty-slip" | "delivery-receipt";
 
@@ -39,17 +40,13 @@ export function slotUploads(slots: SlotFiles): Array<{ kind: SlotKind | "other";
 
 export const slotCount = (slots: SlotFiles) => slotUploads(slots).length;
 
-// The same limits `src/server/uploads.ts` enforces (it imports node:fs, so it cannot be imported here).
-const ACCEPT = "application/pdf,image/png,image/jpeg";
-const MAX_BYTES = 4_000_000; // keep equal to UPLOAD_MAX_BYTES in src/server/uploads.ts
-const TYPES: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
+// The same limits and check the server enforces (src/lib/upload-meta.ts, shared with src/server/uploads.ts).
+const ACCEPT = [...new Set(Object.values(UPLOAD_TYPES))].join(",");
 export const SLOT_REFUSAL = "PDF, PNG or JPG up to 4 MB";
 
-function allowed(file: File): boolean {
-  if (file.size === 0 || file.size > MAX_BYTES) return false;
-  const ext = file.name.toLowerCase().split(".").pop() ?? "";
-  const type = TYPES[ext];
-  return !!type && (!file.type || file.type === type);
+/** Whether the server would take this file: the shared `checkUploadMeta`, so the limits cannot drift. */
+export function slotFileAllowed(file: { name: string; type: string; size: number }): boolean {
+  return checkUploadMeta(file) === null;
 }
 
 /**
@@ -82,7 +79,7 @@ export function DocumentSlots({
   function take(list: FileList | null, apply: (files: File[]) => void) {
     const files = Array.from(list ?? []);
     if (files.length === 0) return;
-    if (files.some((f) => !allowed(f))) {
+    if (files.some((f) => !slotFileAllowed(f))) {
       setRefused(SLOT_REFUSAL);
       return;
     }

@@ -1,4 +1,5 @@
 import type { ActionResult } from "@/server/action-result";
+import { checkUploadMeta } from "@/lib/upload-meta";
 
 /*
  * Phase 47 (Task 7 review, Important 1): where keyboard focus goes once a note, reply, resolve or upload settles. The
@@ -50,6 +51,21 @@ export function settleUploadResult(
   }
   if (state.kind === "rate_limited") h.rateLimited(state.retryAfterSec ?? 60);
   h.upload?.focus();
+}
+
+/**
+ * A file was chosen or dropped for upload. The browser checks it with the server's own rules first: refused (empty,
+ * over the 4 MB cap, or not a PDF, PNG or JPG), nothing is staged and the server's words show inline; accepted, it is
+ * staged and any earlier refusal clears. Returns whether it was staged.
+ */
+export function stageUploadFile<F extends { name: string; type: string; size: number }>(
+  file: F,
+  h: { stage(file: F | null): void; refuse(text: string | null): void },
+): boolean {
+  const refusal = checkUploadMeta(file);
+  h.refuse(refusal);
+  h.stage(refusal ? null : file);
+  return refusal === null;
 }
 
 /** The data attribute that marks a thread's Mark resolved / Reopen button, so it can be found again after a refresh. */

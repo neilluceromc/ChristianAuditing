@@ -1,22 +1,11 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { checkUploadMeta, UPLOAD_TYPES } from "@/lib/upload-meta";
 import { writeObject } from "./storage";
 
-// Decimal 4 MB, just under the 4 MiB server-action body limit (next.config.ts), so the multipart
-// boundaries and form fields around a maximum-size file still fit.
-export const UPLOAD_MAX_BYTES = 4_000_000;
-export const UPLOAD_TYPES: Record<string, string> = {
-  ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-};
-
-/** Pure: the same three refusals uploadDocument has always made, in one place. */
-export function checkUploadMeta(meta: { name: string; type: string; size: number }): string | null {
-  if (meta.size === 0) return "Pick a file first";
-  if (meta.size > UPLOAD_MAX_BYTES) return "Too big — the cap is 4 MB";
-  const ext = path.extname(meta.name).toLowerCase();
-  if (!UPLOAD_TYPES[ext] || (meta.type && meta.type !== UPLOAD_TYPES[ext])) return "That type isn't allowed. Accepted: PDF, PNG, JPG.";
-  return null;
-}
+// The limits and the pure meta check live in src/lib (client-safe, so the browser pre-checks with the same rules);
+// re-exported here so server callers are unchanged.
+export { checkUploadMeta, UPLOAD_MAX_BYTES, UPLOAD_TYPES } from "@/lib/upload-meta";
 
 export function validateUpload(value: unknown): { ok: true; file: File } | { ok: false; error: string } {
   if (!(value instanceof File)) return { ok: false, error: "Pick a file first" };
