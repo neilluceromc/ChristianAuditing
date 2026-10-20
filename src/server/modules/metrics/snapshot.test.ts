@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   transactions: 0,
   approvalWheres: [] as unknown[],
   assetWheres: [] as unknown[],
+  stockToday: null as string | null,
+  stockFails: false,
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -49,7 +51,11 @@ vi.mock("@/server/modules/purchases/queries", () => ({
   stateCounts: async () => ({ ALL: 50, DRAFT: 1, SUBMITTED: 21, IT_REVIEWED: 22, COMPLETED: 3, CANCELLED: 3 }),
 }));
 vi.mock("@/server/modules/stock/queries", () => ({
-  stockHomeSignals: async (today: string) => (today === "2026-10-21" ? { low: 31, expiringLots: 32, stocktakesOverdue: 33 } : null),
+  stockHomeSignals: async (today: string) => {
+    h.stockToday = today;
+    if (h.stockFails) throw new Error("stock read failed");
+    return { low: 31, expiringLots: 32, stocktakesOverdue: 33 };
+  },
 }));
 vi.mock("@/server/modules/finance/depreciation-queries", async (orig) => ({
   ...(await orig<object>()),
@@ -76,6 +82,8 @@ beforeEach(() => {
   h.transactions = 0;
   h.approvalWheres = [];
   h.assetWheres = [];
+  h.stockToday = null;
+  h.stockFails = false;
 });
 
 describe("collectSnapshot", () => {
@@ -94,6 +102,7 @@ describe("collectSnapshot", () => {
       "fin.toConfirm.it": 5n, "fin.toConfirm.purchasing": 6n, "fin.bookC": 123_456_789n,
       "admin.activeUsers": 36n, "admin.disabled": 4n, "admin.deadDeliveries": 7n,
     });
+    expect(h.stockToday).toBe("2026-10-21"); // the Manila day of NOW
   });
 
   it("counts approvals on the Open tab per class, past SLA as slaAt < now", async () => {
@@ -121,8 +130,16 @@ describe("collectSnapshot", () => {
     expect(it.AND[1]).toMatchObject({ financeConfirmedAt: null, financeReturnedAt: null });
   });
 
-  it("a failed read throws (no made-up 0)", async () => {
-    await expect(collectSnapshot(new Date("2026-10-20T03:00:00Z"))).rejects.toThrow();
+  it("a failed read rejects the whole snapshot (no made-up 0)", async () => {
+    h.stockFails = true;
+    await expect(collectSnapshot(NOW)).rejects.toThrow("stock read failed");
+  });
+
+  it("writeSnapshot writes nothing when a read fails", async () => {
+    h.stockFails = true;
+    await expect(writeSnapshot(NOW)).rejects.toThrow("stock read failed");
+    expect(h.transactions).toBe(0);
+    expect(h.upserts).toHaveLength(0);
   });
 });
 

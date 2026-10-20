@@ -33,6 +33,18 @@ export function snapshotDue(lastDay: string | null, now: Date): boolean {
   return lastDay !== manilaDay(now);
 }
 
+/** Review ruling (overrides spec §2.3's "next loop"): a failing snapshot is retried at most this often. */
+export const SNAPSHOT_RETRY_MS = 10 * 60_000;
+
+/**
+ * The worker loop's gate: today has no snapshot yet, and the last attempt (success or failure) was at least
+ * SNAPSHOT_RETRY_MS ago, so a persistent failure costs one try per 10 minutes, not one per loop pass.
+ */
+export function snapshotAttemptDue(lastDay: string | null, lastAttemptAt: Date | null, now: Date): boolean {
+  if (!snapshotDue(lastDay, now)) return false;
+  return lastAttemptAt === null || now.getTime() - lastAttemptAt.getTime() >= SNAPSHOT_RETRY_MS;
+}
+
 /**
  * Spec §2.4: the values at today-7·k for k = 7…0, oldest first. A sample day with no row takes the nearest earlier
  * row within HISTORY_FILL_DAYS; otherwise it is null (never a made-up 0). `day`s are `YYYY-MM-DD`, so they compare

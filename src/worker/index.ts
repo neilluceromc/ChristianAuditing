@@ -7,7 +7,7 @@ import { METRIC_SNAPSHOT_DAYS, RETENTION_DAYS, pruneDue } from "../lib/retention
 import { expireHolds } from "./holds";
 import { expireDue } from "../lib/holds";
 import { writeSnapshot } from "../server/modules/metrics/snapshot";
-import { manilaDay, snapshotDue } from "../lib/snapshot";
+import { manilaDay, snapshotAttemptDue } from "../lib/snapshot";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 3_000;
@@ -19,6 +19,8 @@ let lastPruneAt: Date | null = null;
 let lastExpireAt: Date | null = null;
 /** The Manila day of the last snapshot written; null until one succeeds, so a failure retries on the next loop. */
 let lastSnapshotDay: string | null = null;
+/** When safeSnapshot last ran, success or failure: a failing snapshot retries at most every 10 minutes. */
+let lastSnapshotAttemptAt: Date | null = null;
 
 interface LeasedJob {
   id: string;
@@ -140,7 +142,8 @@ async function safeExpire(): Promise<void> {
 
 /**
  * Phase 46 (spec §2.3): today's MetricSnapshot, at start and on the first loop of each Manila day. A failure is
- * logged and leaves lastSnapshotDay alone, so the next loop retries; it never stops job processing.
+ * logged and leaves lastSnapshotDay alone, so it is retried, at most every 10 minutes (snapshotAttemptDue); it
+ * never stops job processing.
  */
 async function safeSnapshot(): Promise<void> {
   const now = new Date();
@@ -150,6 +153,8 @@ async function safeSnapshot(): Promise<void> {
     console.log(`[worker] metric snapshot written for ${lastSnapshotDay}`);
   } catch (err) {
     console.error(`[worker] metric snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    lastSnapshotAttemptAt = new Date();
   }
 }
 
@@ -164,7 +169,7 @@ async function main(): Promise<void> {
     if (draining) break;
     if (pruneDue(lastPruneAt, new Date())) await safePrune();
     if (expireDue(lastExpireAt, new Date())) await safeExpire();
-    if (snapshotDue(lastSnapshotDay, new Date())) await safeSnapshot();
+    if (snapshotAttemptDue(lastSnapshotDay, lastSnapshotAttemptAt, new Date())) await safeSnapshot();
     const worked = await tick();
     if (!worked) {
       if (ONCE) break;

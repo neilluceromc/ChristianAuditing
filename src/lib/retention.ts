@@ -1,5 +1,5 @@
 import { addDays, dayFromISO } from "./deadlines";
-import { manilaDay } from "./snapshot";
+import { localDateISO } from "./format";
 
 /** Phase 24 (spec §4.2, decision 2): one retention rule for the worker's two tables. */
 export const RETENTION_DAYS = 90;
@@ -25,7 +25,7 @@ export const METRIC_SNAPSHOT_DAYS = 400;
 
 /** The oldest `day` kept: today's Manila day minus 400 days, as the UTC-midnight Date a `@db.Date` column compares with. */
 export function metricSnapshotCutoff(now: Date): Date {
-  return dayFromISO(addDays(manilaDay(now), -METRIC_SNAPSHOT_DAYS));
+  return dayFromISO(addDays(localDateISO(now), -METRIC_SNAPSHOT_DAYS));
 }
 export function pruneDue(lastPruneAt: Date | null, now: Date): boolean {
   return lastPruneAt === null || now.getTime() - lastPruneAt.getTime() >= PRUNE_INTERVAL_MS;

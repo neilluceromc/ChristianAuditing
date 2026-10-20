@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SNAPSHOT_KEYS, historyFromRows, manilaDay, snapshotDue } from "./snapshot";
+import { SNAPSHOT_KEYS, SNAPSHOT_RETRY_MS, historyFromRows, manilaDay, snapshotAttemptDue, snapshotDue } from "./snapshot";
 
 describe("manilaDay (spec §2.1: the Manila calendar day)", () => {
   it("15:59Z is still the same Manila day; 16:00Z is the next one", () => {
@@ -29,6 +29,29 @@ describe("snapshotDue (spec §2.3)", () => {
   it("the gate opens exactly at Manila midnight", () => {
     expect(snapshotDue("2026-10-20", new Date("2026-10-20T15:59:59Z"))).toBe(false);
     expect(snapshotDue("2026-10-20", new Date("2026-10-20T16:00:00Z"))).toBe(true);
+  });
+});
+
+describe("snapshotAttemptDue (review ruling: a failing snapshot retries at most every 10 minutes)", () => {
+  const now = new Date("2026-10-20T03:00:00Z"); // 11:00 Manila, 2026-10-20
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  it("the retry window is 10 minutes", () => {
+    expect(SNAPSHOT_RETRY_MS).toBe(600_000);
+  });
+  it("never attempted and not taken today → due", () => {
+    expect(snapshotAttemptDue(null, null, now)).toBe(true);
+    expect(snapshotAttemptDue("2026-10-19", null, now)).toBe(true);
+  });
+  it("a failure 3 s ago waits; 9 min 59 s waits; 10 min retries", () => {
+    expect(snapshotAttemptDue(null, ago(3_000), now)).toBe(false);
+    expect(snapshotAttemptDue("2026-10-19", ago(599_999), now)).toBe(false);
+    expect(snapshotAttemptDue("2026-10-19", ago(600_000), now)).toBe(true);
+  });
+  it("taken today → not due, however long ago the attempt", () => {
+    expect(snapshotAttemptDue("2026-10-20", ago(5 * 3_600_000), now)).toBe(false);
+  });
+  it("a new Manila day after a long-ago success → due", () => {
+    expect(snapshotAttemptDue("2026-10-20", new Date("2026-10-20T03:00:00Z"), new Date("2026-10-20T16:00:00Z"))).toBe(true);
   });
 });
 
