@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { checkUploadMeta, contentDisposition, UPLOAD_MAX_BYTES } from "./uploads";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { checkUploadMeta, contentDisposition, storeUpload, UPLOAD_MAX_BYTES } from "./uploads";
+import { writeObject } from "./storage";
+
+vi.mock("./storage", () => ({ writeObject: vi.fn(async () => undefined) }));
 
 describe("checkUploadMeta", () => {
   it("accepts pdf, png, jpg, jpeg with matching MIME", () => {
@@ -29,5 +32,24 @@ describe("contentDisposition (ruling R11)", () => {
   it("never lets CR/LF into the header value", () => {
     const header = contentDisposition("evil\r\nX-Injected: yes.pdf");
     expect(header).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe("storeUpload", () => {
+  beforeEach(() => vi.mocked(writeObject).mockClear());
+
+  it.each([
+    ["scan.pdf", "application/pdf"],
+    ["scan.png", "image/png"],
+    ["scan.jpg", "image/jpeg"],
+    ["scan.JPEG", "image/jpeg"],
+  ])("hands %s to writeObject as %s", async (name, type) => {
+    const out = await storeUpload("lots/1", new File([new Uint8Array([1, 2, 3])], name));
+    expect(writeObject).toHaveBeenCalledTimes(1);
+    const [relPath, bytes, contentType] = vi.mocked(writeObject).mock.calls[0];
+    expect(relPath).toBe(out.relPath);
+    expect(relPath).toMatch(/^lots\/1\/\d+-scan\./);
+    expect(Buffer.from(bytes).equals(Buffer.from([1, 2, 3]))).toBe(true);
+    expect(contentType).toBe(type);
   });
 });

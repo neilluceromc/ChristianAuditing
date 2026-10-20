@@ -84,6 +84,50 @@ describe("supabase driver", () => {
     await expect(readUpload("lots/1/a.pdf")).rejects.toThrow();
   });
 
+  it("reads 400 with statusCode \"404\" in the body -> null", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ statusCode: "404", error: "not_found", message: "Object not found" }), { status: 400 }));
+    expect(await readUpload("lots/1/a.pdf")).toBeNull();
+  });
+
+  it("reads 400 with error not_found in the body -> null", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "not_found" }), { status: 400 }));
+    expect(await readUpload("lots/1/a.pdf")).toBeNull();
+  });
+
+  it("reads 400 with any other body -> throws", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ statusCode: "400", error: "InvalidKey" }), { status: 400 }));
+    await expect(readUpload("lots/1/a.pdf")).rejects.toThrow(/400/);
+    fetchMock.mockResolvedValue(new Response("not json", { status: 400 }));
+    await expect(readUpload("lots/1/a.pdf")).rejects.toThrow(/400/);
+  });
+
+  it("encodes unicode, # and ? per segment and keeps the slashes", async () => {
+    fetchMock.mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 }));
+    await readUpload("emp/1/résumé 收据#1?.pdf");
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://proj.supabase.co/storage/v1/object/authenticated/documents/emp/1/r%C3%A9sum%C3%A9%20%E6%94%B6%E6%8D%AE%231%3F.pdf",
+    );
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+    await writeObject("a#b/c?d.pdf", Buffer.from("x"), "application/pdf");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://proj.supabase.co/storage/v1/object/documents/a%23b/c%3Fd.pdf");
+  });
+
+  it("puts up to 200 characters of the response body in read and write errors, never the key", async () => {
+    const long = "x".repeat(500);
+    fetchMock.mockImplementation(async () => new Response(`bad bucket ${long}`, { status: 403 }));
+    const readErr = await readUpload("a/b.pdf").catch((e: Error) => e);
+    const writeErr = await writeObject("a/b.pdf", Buffer.from("x"), "application/pdf").catch((e: Error) => e);
+    for (const err of [readErr, writeErr]) {
+      expect(err).toBeInstanceOf(Error);
+      const msg = (err as Error).message;
+      expect(msg).toContain("403");
+      expect(msg).toContain("bad bucket");
+      expect(msg.length).toBeLessThan(260);
+      expect(msg).not.toContain("service-key");
+    }
+  });
+
   it.each(BAD_PATHS)("read of %j -> null without calling fetch", async (p) => {
     expect(await readUpload(p)).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();

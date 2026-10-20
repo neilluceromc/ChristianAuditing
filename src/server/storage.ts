@@ -24,6 +24,29 @@ function localAbs(relPath: string): string | null {
   return abs.startsWith(root + path.sep) ? abs : null;
 }
 
+/** Up to 200 characters of a failed response's body, for diagnosis. Never headers, never the key. */
+async function bodySnippet(res: Response): Promise<string> {
+  try {
+    return (await res.text()).slice(0, 200);
+  } catch {
+    return "";
+  }
+}
+
+function failure(what: string, status: number, body: string): Error {
+  return new Error(`Supabase storage ${what} failed: ${status}${body ? ` ${body}` : ""}`);
+}
+
+/** Supabase sometimes reports a missing object as 400 with a body whose statusCode is "404" (or error "not_found"). */
+function isMissingBody(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { statusCode?: unknown; error?: unknown } | null;
+    return String(parsed?.statusCode) === "404" || parsed?.error === "not_found";
+  } catch {
+    return false;
+  }
+}
+
 function objectUrl(kind: "object" | "object/authenticated", relPath: string): string {
   const base = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
   const encoded = relPath.split("/").map(encodeURIComponent).join("/");
@@ -42,7 +65,7 @@ export async function writeObject(relPath: string, bytes: Buffer, contentType: s
       },
       body: new Uint8Array(bytes),
     });
-    if (!res.ok) throw new Error(`Supabase storage write failed: ${res.status}`);
+    if (!res.ok) throw failure("write", res.status, await bodySnippet(res));
     return;
   }
   const abs = localAbs(relPath);
@@ -59,7 +82,11 @@ export async function readUpload(relPath: string): Promise<Buffer | null> {
       headers: { authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
     });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Supabase storage read failed: ${res.status}`);
+    if (!res.ok) {
+      const body = await bodySnippet(res);
+      if (res.status === 400 && isMissingBody(body)) return null;
+      throw failure("read", res.status, body);
+    }
     return Buffer.from(await res.arrayBuffer());
   }
   const abs = localAbs(relPath);
