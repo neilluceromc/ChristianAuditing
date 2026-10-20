@@ -121,9 +121,13 @@ Two callers use them:
 
 The secret lives in Supabase Vault, never in the SQL file.
 
-**Effect:** an approved change now executes within about a minute, instead of the laptop's 3 seconds.
-- *My call:* acceptable for staging.
-- *Follow-up:* kick a tick with `after()` right after an approval enqueues a job.
+**Immediate kick (owner asked why a minute; 2026-10-20).** A server action that enqueues a job calls `kickWorker()` right after its transaction commits. Today that is the approval actions in `approvals/actions.ts`, the webhook emit in `webhooks/emit.ts` and the webhook redelivery in `admin/webhook-actions.ts`.
+- **On Vercel** (`process.env.VERCEL` set), `kickWorker()` uses Next's `after()` to run the same budgeted tick once the response has been sent.
+- **Elsewhere** it does nothing, because the long-running worker picks the job up within 3 seconds.
+
+**Effect:**
+- An approved change applies within a few seconds, about like the laptop.
+- The every-minute `pg_cron` call is the safety net for anything an interrupted request left `PENDING`. `recoverStale` already re-leases stuck jobs, and `SKIP LOCKED` keeps a kick and the cron from working the same job twice.
 
 ### 4.4 Files in Supabase Storage
 `src/server/uploads.ts` gains a storage driver chosen by environment:
