@@ -79,6 +79,8 @@ describe("InventoryTable", () => {
     expect(html).toContain("--inventory-table-min:954px");
     expect(cardClass(html)).toContain("xl:overflow-visible");
     expect(cardClass(html)).not.toContain("xl:overflow-auto");
+    // the head pins under the window's toolbar (globals.css keys the window offset on this attribute's absence)
+    expect(html).not.toContain("data-scrolls-in-card");
   });
 
   it("keeps a wider view (Repairs, Registration shown) scrolling inside its card, so it never runs past it", () => {
@@ -88,6 +90,8 @@ describe("InventoryTable", () => {
     ]) {
       expect(cardClass(html)).toContain("xl:overflow-auto");
       expect(cardClass(html)).not.toContain("xl:overflow-visible");
+      // marked, so its head sticks at the card's top (top: 0), not the toolbar's height down inside it
+      expect(html).toMatch(/<div class="[^"]*list-sticky-head[^"]*" data-scrolls-in-card="">/);
     }
   });
 

@@ -11,8 +11,8 @@ export const CONTENT_W_AT_XL = 970;
 /**
  * Phase 45 (spec §4.3): whether a table of `minWidth` fits inside the card around it (`box`, the card's own
  * wrapper; its 1 px borders excluded). A `stickyHeader` table's card stops clipping from 1280 px (so the head can
- * stick to the window), which would let a wider table run past the card; a caller adds `xl:overflow-auto` when
- * this is false, so the card keeps scrolling sideways instead.
+ * stick to the window), which would let a wider table run past the card; a caller passes this to Table's
+ * `fitsCard`, which keeps the card scrolling sideways when it is false (and the head at the card's top).
  *
  * Before the first measurement it assumes the narrowest `xl` content width (`CONTENT_W_AT_XL`), so a table that
  * might not fit starts out scrolling inside its card rather than spilling past it, and the server and the

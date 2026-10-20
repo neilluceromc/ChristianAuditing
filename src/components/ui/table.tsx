@@ -4,28 +4,39 @@ import { cn } from "@/lib/cn";
  * `striped` (Phase 45): zebra rows, no dividers, row hover; styled by `.list-striped` in globals.css.
  * `stickyHeader`: from 1280 px (`xl`) the wrapper stops being a horizontal scroller, because any overflow other
  * than visible would make it the header's scroll container and the window-level `position: sticky` would never
- * engage; below that it keeps scrolling sideways and the header scrolls away with the rows. The head pins at
- * `--list-sticky-top` (default 0px). Neither prop changes the default output.
+ * engage; below that it keeps scrolling sideways and the header scrolls away with the rows. There the head pins
+ * at `--list-sticky-top` (default 0px). `fitsCard={false}` (a table wider than its card, `useFitsCard`) keeps the
+ * card scrolling from 1280 px too (`xl:overflow-auto`) and marks it `data-scrolls-in-card`.
+ *
+ * Whenever the card is a scroll container (below 1280 px, or marked), the head's sticky `top` is measured from
+ * the card, not the window: globals.css then sets it to 0, so the head stays at the top of the card instead of
+ * sitting the toolbar's height down inside it, over the rows. Neither prop changes the default output.
  */
 export function Table({
   className,
   children,
   striped,
   stickyHeader,
+  fitsCard = true,
 }: {
   className?: string;
   children: React.ReactNode;
   striped?: boolean;
   stickyHeader?: boolean;
+  /** with `stickyHeader`: false when the table's minimum width does not fit the card (see `useFitsCard`) */
+  fitsCard?: boolean;
 }) {
+  const scrollsInCard = stickyHeader && !fitsCard;
   return (
     <div
       className={cn(
         "overflow-x-auto rounded-(--radius-card) border border-border bg-surface shadow-card",
         striped && "list-striped",
-        stickyHeader && "list-sticky-head xl:overflow-visible",
+        stickyHeader && "list-sticky-head",
+        stickyHeader && (scrollsInCard ? "xl:overflow-auto" : "xl:overflow-visible"),
         className,
       )}
+      data-scrolls-in-card={scrollsInCard ? "" : undefined}
     >
       <table className="w-full border-collapse text-[12.5px]">{children}</table>
     </div>
