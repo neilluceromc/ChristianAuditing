@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { WorkGroup, WorkRow, WorkSectionId } from "./worklist";
 import { WORK_SECTIONS, leaverRow, loanRow } from "./worklist";
 import {
-  adminNeeds, bookValueMakeUp, countDelta, dayBuckets, dayLabels, dayWindowStart, deliveryMakeUp, deltaTone, financeNeeds,
-  fleetMakeUp, itMove, kitGapRanked, liveSpark, monthBuckets, monthLabels, monthWindowStart, needsFromWork, pctDelta,
-  pesosHistory, purchasingNeeds, quarterStartManila, requestStateMakeUp, roleRanked, sumByLabel, sumHistories,
-  sumWeekBuckets, topWithOther, weekBuckets, weekLabels, weekOverWeek, weekWindowStart, type KpiTile,
+  adminNeeds, bookValueMakeUp, countDelta, dayBuckets, dayLabels, dayWindowStart, deliveryMakeUp, deltaTone,
+  directChangesPerDay, financeNeeds, fleetMakeUp, itMove, kitGapRanked, liveSpark, monthBuckets, monthLabels,
+  monthWindowStart, needsFromWork, pctDelta, pesosHistory, plural, purchasingNeeds, quarterStartManila, rankByLabel,
+  requestStateMakeUp, roleRanked, sumByLabel, sumHistories, sumWeekBuckets, topWithOther, weekBuckets, weekLabels,
+  weekOverWeek, weekWindowStart, type KpiTile,
 } from "./overview";
 import { monthStartManila } from "./cris-limits";
 
@@ -26,7 +27,14 @@ describe("deltaTone", () => {
   it("no comparison is flat", () => expect(deltaTone(tile({ kind: "none" }, "bad"))).toBe("flat"));
   it("money percent and week deltas follow the same sign rule", () => {
     expect(deltaTone(tile({ kind: "pct", value: 12 }, "good"))).toBe("good");
-    expect(deltaTone(tile({ kind: "week", value: -3 }, "good"))).toBe("bad");
+    expect(deltaTone(tile({ kind: "week", value: -3, unit: "count" }, "good"))).toBe("bad");
+    expect(deltaTone(tile({ kind: "week", value: 25, unit: "pct" }, "bad"))).toBe("bad");
+    expect(deltaTone(tile({ kind: "week", value: 0, unit: "pct" }, "bad"))).toBe("flat");
+  });
+  it("new (up from zero) is up: good when up is good, bad when up is bad, flat when neutral", () => {
+    expect(deltaTone(tile({ kind: "new" }, "good"))).toBe("good");
+    expect(deltaTone(tile({ kind: "new" }, "bad"))).toBe("bad");
+    expect(deltaTone(tile({ kind: "new" }, "neutral"))).toBe("flat");
   });
 });
 
@@ -71,8 +79,21 @@ describe("sumWeekBuckets", () => {
 });
 
 describe("weekOverWeek", () => {
-  it("[…, 10, 15] gives { week, 5 }", () => expect(weekOverWeek([3, 10, 15])).toEqual({ kind: "week", value: 5 }));
-  it("a single week has nothing to compare", () => expect(weekOverWeek([4])).toEqual({ kind: "none" }));
+  it("counts: […, 10, 15] gives { week, 5, count }", () =>
+    expect(weekOverWeek([3, 10, 15], "count")).toEqual({ kind: "week", value: 5, unit: "count" }));
+  it("money: the percent change, rounded", () => {
+    expect(weekOverWeek([0, 200, 250], "pct")).toEqual({ kind: "week", value: 25, unit: "pct" });
+    expect(weekOverWeek([0, 300, 100], "pct")).toEqual({ kind: "week", value: -67, unit: "pct" });
+  });
+  it("from a zero week to a non-zero one is new, in either unit", () => {
+    expect(weekOverWeek([5, 0, 950.1], "pct")).toEqual({ kind: "new" });
+    expect(weekOverWeek([5, 0, 2], "count")).toEqual({ kind: "new" });
+  });
+  it("two zero weeks are no change", () => {
+    expect(weekOverWeek([5, 0, 0], "pct")).toEqual({ kind: "week", value: 0, unit: "pct" });
+    expect(weekOverWeek([5, 0, 0], "count")).toEqual({ kind: "week", value: 0, unit: "count" });
+  });
+  it("a single week has nothing to compare", () => expect(weekOverWeek([4], "count")).toEqual({ kind: "none" }));
 });
 
 describe("weekWindowStart / weekLabels", () => {
@@ -285,8 +306,8 @@ describe("pctDelta — a money tile's change since 7 days ago, in percent", () =
     expect(pctDelta(50, 150)).toEqual({ kind: "pct", value: -67 });
     expect(pctDelta(100, 100)).toEqual({ kind: "pct", value: 0 });
   });
-  it("from zero there is no percent: none rather than a made-up number; zero to zero is flat", () => {
-    expect(pctDelta(5, 0)).toEqual({ kind: "none" });
+  it("up from zero is new (never none, never a made-up percent); zero to zero is no change", () => {
+    expect(pctDelta(5, 0)).toEqual({ kind: "new" });
     expect(pctDelta(0, 0)).toEqual({ kind: "pct", value: 0 });
   });
 });
@@ -348,10 +369,10 @@ describe("requestStateMakeUp", () => {
 });
 
 describe("bookValueMakeUp", () => {
-  it("the top three categories in the chart colours, then Other; money", () => {
+  it("the top three categories in the chart colours, then Other; money, in pesos", () => {
     const m = bookValueMakeUp([
-      { label: "Laptops", value: 500 }, { label: "Monitors", value: 200 }, { label: "Phones", value: 50 },
-      { label: "Docks", value: 30 }, { label: "Chairs", value: 20 },
+      { label: "Laptops", bookC: 50_000 }, { label: "Monitors", bookC: 20_000 }, { label: "Phones", bookC: 5_000 },
+      { label: "Docks", bookC: 3_000 }, { label: "Chairs", bookC: 2_000 },
     ]);
     expect(m.money).toBe(true);
     expect(m.rows).toEqual([
@@ -360,6 +381,49 @@ describe("bookValueMakeUp", () => {
       { label: "Phones", value: 50, tone: "chart-3" },
       { label: "Other", value: 50, tone: "neutral" },
     ]);
+  });
+  it("folds on whole centavos, so Other carries no float noise", () => {
+    const m = bookValueMakeUp([
+      { label: "A", bookC: 30_003 }, { label: "B", bookC: 20_002 }, { label: "C", bookC: 10_001 },
+      { label: "D", bookC: 10 }, { label: "E", bookC: 20 },
+    ]);
+    expect(m.rows.at(-1)).toEqual({ label: "Other", value: 0.3, tone: "neutral" });
+    expect(m.rows.map((r) => r.value)).toEqual([300.03, 200.02, 100.01, 0.3]);
+  });
+});
+
+describe("rankByLabel — one read, ranked from a later bound in memory", () => {
+  it("keeps rows at or after `since`, groups by label (null → fallback), top N plus Other", () => {
+    const since = new Date("2026-09-30T16:00:00Z");
+    const rows = [
+      { at: new Date("2026-10-19T02:00:00Z"), amount: 10, label: "Acme" },
+      { at: new Date("2026-10-01T02:00:00Z"), amount: 5, label: "Acme" },
+      { at: new Date("2026-09-30T15:59:00Z"), amount: 999, label: "Acme" }, // before the bound
+      { at: new Date("2026-10-05T02:00:00Z"), amount: 7, label: null },
+      { at: new Date("2026-10-06T02:00:00Z"), amount: 1, label: "Bolt" },
+      { at: new Date("2026-10-07T02:00:00Z"), amount: 2, label: "Cog" },
+    ];
+    expect(rankByLabel(rows, since, "No supplier", 2)).toEqual([
+      { label: "Acme", value: 15 }, { label: "No supplier", value: 7 }, { label: "Other", value: 3 },
+    ]);
+  });
+});
+
+describe("directChangesPerDay", () => {
+  it("per Manila day, IT and Purchasing, the days ending today", () => {
+    const r = directChangesPerDay([
+      { at: new Date("2026-10-19T17:00:00Z"), cls: "IT" }, // Oct 20 01:00 Manila → today
+      { at: new Date("2026-10-19T15:00:00Z"), cls: "PURCHASING" }, // Oct 19 Manila
+      { at: new Date("2026-09-01T02:00:00Z"), cls: "IT" }, // outside the window
+    ], NOW, 3);
+    expect(r).toEqual({ labels: ["18 Oct", "19 Oct", "20 Oct"], it: [0, 0, 1], purchasing: [0, 1, 0] });
+  });
+});
+
+describe("plural", () => {
+  it("one and many", () => {
+    expect(plural(1, "asset", "assets")).toBe("1 asset");
+    expect(plural(0, "asset", "assets")).toBe("0 assets");
   });
 });
 

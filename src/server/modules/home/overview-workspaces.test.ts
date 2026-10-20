@@ -61,7 +61,6 @@ vi.mock("@/server/modules/finance/depreciation-queries", () => ({
       { at: new Date("2026-09-20T02:00:00Z"), amount: 10_000 }, // last month: in the sparkline, not the value
     ];
   },
-  capitalizedByMonth: async () => ({ labels: Array(12).fill("m"), values: [...Array(11).fill(0), 65_000.004] }),
 }));
 vi.mock("@/server/modules/admin/queries", () => ({
   adminHome: async () => ({
@@ -94,8 +93,6 @@ vi.mock("./queries", async (orig) => ({
       { at: new Date("2026-09-30T15:30:00Z"), amount: 200, supplier: "Bolt", department: "HR" }, // Sep 30 23:30 Manila
     ];
   },
-  spendBySupplier: async () => [{ label: "Acme", value: 1050.1 }, { label: "No supplier", value: 500 }],
-  spendByDepartment: async () => [{ label: "Ops", value: 9000.123 }, { label: "Other", value: 10 }],
   purchasingTodo: async () => [
     { id: "p1", refNo: "PR-1", what: "still a draft", meta: "₱100 · 1 d", href: "/purchases/p1", action: "Submit", bounced: false },
     { id: "p2", refNo: "PR-2", what: "came back from Ina", meta: "₱200 · 3 d", href: "/purchases/p2", action: "Fix and resubmit", bounced: true },
@@ -118,7 +115,6 @@ vi.mock("./queries", async (orig) => ({
       { at: new Date("2026-10-12T02:00:00Z"), cls: "IT" },
     ];
   },
-  directChangesByDay: async () => ({ labels: Array(14).fill("d"), it: [...Array(13).fill(0), 1], purchasing: Array(14).fill(0) }),
 }));
 
 import { adminOverview, financeOverview, purchasingOverview } from "./overview";
@@ -128,6 +124,8 @@ const NOW = new Date("2026-10-20T03:00:00Z");
 const user = (role: Role) => ({ id: "u1", role });
 /** The month-to-date reads reach back to the sparkline's first week (Manila Aug 26), which is before Oct 1. */
 const SPARK_START = "2026-08-25T16:00:00.000Z";
+/** The Finance trend's 12 months start on Nov 1 2025, Manila. */
+const TREND_START = "2025-10-31T16:00:00.000Z";
 
 beforeEach(() => {
   h.historyKeys = [];
@@ -152,13 +150,13 @@ describe("purchasingOverview", () => {
     expect(h.historyKeys).toEqual(["pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
   });
 
-  it("Spend this month: Manila month to date, weekly sparkline, this week vs last week", async () => {
+  it("Spend this month: Manila month to date, weekly sparkline, this week vs last week in percent", async () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(h.spendSince.map((d) => d.toISOString())).toEqual([SPARK_START]);
     // Sep 30 23:30 Manila is September: in the sparkline's week (today−20), not in the month's value
     expect(o.kpis[2]).toMatchObject({
       money: true, display: "₱1,550", hint: "3 requests completed",
-      spark: [0, 0, 0, 0, 0, 700, 50, 1000.1], delta: { kind: "week", value: 950.1 }, upIs: "neutral",
+      spark: [0, 0, 0, 0, 0, 700, 50, 1000.1], delta: { kind: "week", value: 1900, unit: "pct" }, upIs: "neutral",
     });
   });
 
@@ -186,22 +184,25 @@ describe("purchasingOverview", () => {
       ["Awaiting finance", 22, "/purchases?state=IT_REVIEWED"],
       ["Completed", 6, "/purchases?state=COMPLETED"],
     ]);
+    // from the one spend read, this Manila month only: Bolt's Sep 30 23:30 (Manila) completion is September's
     expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Acme", value: 1050.1 }, { label: "No supplier", value: 500 }] });
+    expect(o.breakdown.rows).toHaveLength(2);
     expect(o.breakdown.rows.every((r) => r.href === undefined)).toBe(true); // ruling: supplier rows are not links
   });
 });
 
 describe("financeOverview", () => {
-  it("six tiles; To confirm sums both classes and links to the IT view (ruling)", async () => {
+  it("six tiles; To confirm sums both classes and links to the IT view; Book value is a plain card (rulings)", async () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
       ["Waiting on you", 2001.1, undefined],
       ["Requests waiting", 2, "/purchases?state=IT_REVIEWED"],
-      ["Approved this month", 1550.1, undefined],
+      ["Approved this month", 3, undefined],
       ["Capitalized this month", 55_000, undefined],
-      ["Book value", 48_442_000, "/finance/depreciation"],
+      ["Book value", 48_442_000, undefined],
       ["To confirm", 11, "/finance/assets?fin=with-finance"],
     ]);
+    expect("href" in o.kpis[4]).toBe(false);
     expect(o.kpis[0]).toMatchObject({ money: true, display: "₱2,001", hint: "oldest 3 days", upIs: "bad" });
     expect(o.kpis[5].hint).toBe("5 IT · 6 Purchasing");
     expect(h.historyKeys).toEqual(["fin.waitingC", "fin.waitingCount", "fin.toConfirm.it", "fin.toConfirm.purchasing", "fin.bookC"]);
@@ -223,11 +224,21 @@ describe("financeOverview", () => {
     expect(o.kpis[4]).toMatchObject({ display: "₱48,442,000", delta: { kind: "pct", value: 0 } });
   });
 
-  it("month-to-date tiles read back to the sparkline's first week; Capitalized counts only this month in its value", async () => {
-    const o = await financeOverview(user("finance_staff"), NOW);
+  it("one read per source over its widest window: spend back to the sparkline (before the quarter), capitalised back 12 months", async () => {
+    await financeOverview(user("finance_staff"), NOW);
     expect(h.spendSince.map((d) => d.toISOString())).toEqual([SPARK_START]);
-    expect(h.capitalizedSince.map((d) => d.toISOString())).toEqual([SPARK_START]);
-    expect(o.kpis[3]).toMatchObject({ hint: "1 asset", spark: [0, 0, 0, 10_000, 0, 0, 0, 55_000], delta: { kind: "week", value: 55_000 } });
+    expect(h.capitalizedSince.map((d) => d.toISOString())).toEqual([TREND_START]);
+  });
+
+  it("Approved this month is a count: requests completed this Manila month, weekly counts, the difference", async () => {
+    const o = await financeOverview(user("finance_staff"), NOW);
+    expect(o.kpis[2]).toMatchObject({ hint: "₱1,550 completed", spark: [0, 0, 0, 0, 0, 2, 1, 1], delta: { kind: "week", value: 0, unit: "count" } });
+    expect(o.kpis[2].money).toBeUndefined();
+  });
+
+  it("Capitalized this month: only this month in its value; up from a zero week is new", async () => {
+    const o = await financeOverview(user("finance_staff"), NOW);
+    expect(o.kpis[3]).toMatchObject({ money: true, hint: "1 asset", spark: [0, 0, 0, 10_000, 0, 0, 0, 55_000], delta: { kind: "new" } });
   });
 
   it("To confirm history sums both classes; one class missing a point gives no delta", async () => {
@@ -250,13 +261,16 @@ describe("financeOverview", () => {
     ]);
     expect(o.needsYouHref).toBe("/purchases?state=IT_REVIEWED");
     expect(o.trend).toMatchObject({ title: "Capitalized per month", unit: "₱" });
+    expect(o.trend.labels).toEqual(expect.arrayContaining(["Nov 2025", "Oct 2026"]));
     expect(o.trend.series).toHaveLength(1);
-    expect(o.trend.series[0].values.at(-1)).toBe(65_000);
+    expect(o.trend.series[0].values.slice(-2)).toEqual([10_000, 55_000]);
     expect(o.makeUp).toMatchObject({
       money: true,
       rows: [{ label: "Laptops", value: 40_000_000, tone: "chart-1" }, { label: "Monitors", value: 8_442_000, tone: "chart-2" }],
     });
-    expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Ops", value: 9000.12 }, { label: "Other", value: 10 }] });
+    // this Manila quarter (from Oct 1) from the same spend read: HR's Sep 30 23:30 completion is Q3's
+    expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Ops", value: 1050.1 }, { label: "No department", value: 500 }] });
+    expect(o.breakdown.rows).toHaveLength(2);
   });
 });
 
@@ -299,6 +313,9 @@ describe("adminOverview", () => {
     ]);
     expect(o.trend.series.map((s) => s.name)).toEqual(["IT", "Purchasing"]);
     expect(o.trend.labels).toHaveLength(14);
+    // from the one direct-change read: Oct 19 and Oct 12 (IT), Oct 18 (Purchasing)
+    expect(o.trend.series[0].values).toEqual([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0]);
+    expect(o.trend.series[1].values).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]);
     expect(o.makeUp.rows.map((r) => [r.label, r.value])).toEqual([["Delivered", 10], ["Retrying", 1], ["Dead", 2]]);
     expect(o.breakdown.rows[0]).toEqual({ label: "IT staff", value: 20 });
   });
@@ -314,7 +331,7 @@ describe("a fresh database (no snapshot rows yet)", () => {
     for (const k of o.kpis) {
       expect(Number.isFinite(k.value)).toBe(true);
       expect(k.spark.every((v) => v === null || Number.isFinite(v))).toBe(true);
-      if (k.delta.kind !== "none") expect(Number.isFinite(k.delta.value)).toBe(true);
+      if ("value" in k.delta) expect(Number.isFinite(k.delta.value)).toBe(true);
     }
     const snapshotBacked = o.kpis.filter((k) => !/\.(month|week|on)$/.test(k.key));
     expect(snapshotBacked.length).toBeGreaterThan(0);

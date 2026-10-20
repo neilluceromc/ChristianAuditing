@@ -8,10 +8,11 @@ import { fmtMoney, localDateISO } from "@/lib/format";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { TILE_SPECS, tileState } from "@/lib/inventory-tiles";
 import {
-  adminNeeds, bookValueMakeUp, countDelta, deliveryMakeUp, financeNeeds, fleetMakeUp, itMove, IT_MOVE_ACTIONS,
-  kitGapRanked, liveSpark, needsFromWork, pctDelta, pesosHistory, purchasingNeeds, requestStateMakeUp, roleRanked,
-  sumHistories, sumWeekBuckets, weekBuckets, weekLabels, weekOverWeek, weekWindowStart,
-  type Delta, type ItMove, type KpiTile, type MoveEntry, type Overview, type TrendSeries,
+  adminNeeds, bookValueMakeUp, countDelta, deliveryMakeUp, directChangesPerDay, financeNeeds, fleetMakeUp, itMove,
+  IT_MOVE_ACTIONS, kitGapRanked, liveSpark, monthBuckets, monthLabels, monthWindowStart, needsFromWork, pctDelta,
+  pesosHistory, plural, purchasingNeeds, quarterStartManila, rankByLabel, requestStateMakeUp, roleRanked, sumHistories,
+  sumWeekBuckets, weekBuckets, weekLabels, weekOverWeek, weekWindowStart,
+  type ItMove, type KpiTile, type MoveEntry, type Overview, type TrendSeries,
 } from "@/lib/overview";
 import { PURCHASE_TABS, type PurchaseTabId } from "@/lib/purchases-list";
 import { finWhere } from "@/lib/registration";
@@ -26,11 +27,11 @@ import { kitGapsByGroup } from "@/server/modules/employees/queries";
 import { stateCounts } from "@/server/modules/purchases/queries";
 import { overdueStocktakes, stockHomeSignals } from "@/server/modules/stock/queries";
 import { financeListWhere } from "@/server/modules/finance/queries";
-import { bookValueByCategory, capitalizedByMonth, capitalizedSince } from "@/server/modules/finance/depreciation-queries";
+import { bookValueByCategory, capitalizedSince } from "@/server/modules/finance/depreciation-queries";
 import { adminHome, deliveriesByStatus, disabledAdmins, failingEndpoints } from "@/server/modules/admin/queries";
 import {
-  claimedByYou, completedSpend, directChangeRows, directChangesByDay, financeQueue, financeWaitingRows, fleet,
-  purchasingTodo, spendByDepartment, spendBySupplier, unitsValue, waitingDays, worklist,
+  claimedByYou, completedSpend, directChangeRows, financeQueue, financeWaitingRows, fleet, purchasingTodo, SPEND_TOP,
+  unitsValue, waitingDays, worklist,
 } from "./queries";
 
 /** Spec §3.1: the trend chart's 12 points. */
@@ -51,9 +52,6 @@ interface TileSpec {
 }
 
 const cents = (n: number) => Math.round(n * 100) / 100;
-/** A money delta to the centavo (the difference of two rounded totals can carry float noise). */
-const centsDelta = (d: Delta): Delta => (d.kind === "none" ? d : { ...d, value: cents(d.value) });
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * A count tile with a snapshot history: the sparkline is the 8 weekly snapshots with today's point replaced by the
@@ -79,32 +77,38 @@ function moneyHistoryTile(t: TileSpec, pesos: number, historyC: (number | null)[
   };
 }
 
-/** The first instant a month-to-date tile reads: this Manila month's start, or the sparkline's first week if earlier. */
-function monthToDateSince(now: Date): Date {
-  const month = monthStartManila(now);
-  const weeks = weekWindowStart(now, HISTORY_POINTS);
-  return month < weeks ? month : weeks;
+/**
+ * The first instant every month-to-date tile reads: the sparkline's first week. This Manila month always starts inside
+ * it (a month is at most 31 days, the 8 weekly points span 56), so one read covers the value and the sparkline.
+ */
+function sparkSince(now: Date): Date {
+  return weekWindowStart(now, HISTORY_POINTS);
 }
 
+const earliest = (a: Date, b: Date) => (a < b ? a : b);
+
 /**
- * Builder-check ruling, month-to-date money tiles: the value is the Manila month to date, the sparkline the last 8
- * weekly totals, and the delta this week's total against last week's ("this week vs last week"). `rows` must reach
- * back to monthToDateSince(now).
+ * Builder-check ruling, month-to-date tiles: the value is the Manila month to date, the sparkline the last 8 weekly
+ * totals, and the delta this week against last week. Review ruling: a money tile's delta is a percent, a count tile's
+ * the difference; up from a zero week is "new". `rows` must reach back to sparkSince(now).
  */
 function monthToDateTile(
-  t: Omit<TileSpec, "hint">, rows: { at: Date; amount: number }[], now: Date, hint: (count: number) => string,
+  t: Omit<TileSpec, "hint">, rows: { at: Date; amount: number }[], now: Date,
+  opts: { money: boolean; hint: (inMonth: { at: Date; amount: number }[]) => string },
 ): KpiTile {
   const monthStart = monthStartManila(now);
   const inMonth = rows.filter((r) => r.at >= monthStart);
+  const base = { key: t.key, label: t.label, hint: opts.hint(inMonth), upIs: t.upIs, ...(t.href ? { href: t.href } : {}) };
+  if (!opts.money) {
+    const spark = weekBuckets(rows.map((r) => r.at), now, HISTORY_POINTS);
+    return { ...base, value: inMonth.length, spark, delta: weekOverWeek(spark, "count") };
+  }
   const value = cents(inMonth.reduce((sum, r) => sum + r.amount, 0));
   const spark = sumWeekBuckets(rows, now, HISTORY_POINTS).map(cents);
-  return {
-    key: t.key, label: t.label, value, money: true, display: fmtMoney(value), hint: hint(inMonth.length), upIs: t.upIs,
-    ...(t.href ? { href: t.href } : {}),
-    spark,
-    delta: centsDelta(weekOverWeek(spark)),
-  };
+  return { ...base, value, money: true, display: fmtMoney(value), spark, delta: weekOverWeek(spark, "pct") };
 }
+
+const pesosOf = (rows: { amount: number }[]) => rows.reduce((sum, r) => sum + r.amount, 0);
 
 /** The snapshot keys whose sum is this role's Approvals count (approvalClassKeys mirrors approvalClassWhere). */
 function approvalsOpenKeys(role: Role): SnapshotKey[] {
@@ -287,17 +291,20 @@ const PURCHASING_KEYS = [
  */
 export async function purchasingOverview(user: Viewer, now: Date = new Date()): Promise<Overview> {
   const today = localDateISO(now);
-  const [states, stock, spend, suppliers, todo, overdue, history, trend] = await Promise.all([
+  // One completed-spend read: the sparkline's 8 weeks, which hold this Manila month (the value and the supplier breakdown).
+  const [states, stock, spend, todo, overdue, history, trend] = await Promise.all([
     stateCounts(),
     stockHomeSignals(today),
-    completedSpend(monthToDateSince(now)),
-    spendBySupplier(now),
+    completedSpend(sparkSince(now)),
     purchasingTodo(user.id, now),
     overdueStocktakes(today),
     metricHistory<SnapshotKey>([...PURCHASING_KEYS], now),
     purchaseFlowTrend(now),
   ]);
   const lowHref = stockLowHref();
+  const suppliers = rankByLabel(
+    spend.map((r) => ({ at: r.at, amount: r.amount, label: r.supplier })), monthStartManila(now), "No supplier", SPEND_TOP,
+  );
 
   const kpis: KpiTile[] = [
     historyTile(
@@ -308,10 +315,9 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
       { key: "pr.itReviewed", label: "Awaiting finance", hint: "Reviewed by IT, waiting for Finance", upIs: "bad", href: purchaseTabHref("IT_REVIEWED") },
       states.IT_REVIEWED ?? 0, history["pr.itReviewed"],
     ),
-    monthToDateTile(
-      { key: "spend.month", label: "Spend this month", upIs: "neutral" }, spend, now,
-      (n) => `${plural(n, "request", "requests")} completed`,
-    ),
+    monthToDateTile({ key: "spend.month", label: "Spend this month", upIs: "neutral" }, spend, now, {
+      money: true, hint: (m) => `${plural(m.length, "request", "requests")} completed`,
+    }),
     historyTile(
       { key: "stock.low", label: "Below reorder", hint: "Stock items at or below reorder level", upIs: "bad", href: lowHref },
       stock.low, history["stock.low"],
@@ -359,22 +365,25 @@ const FINANCE_KEYS = [
  * Spec §3.2, the Finance row, with the builder-check rulings:
  * - Requests waiting is the /purchases "Awaiting finance" tab's count (financeWaitingRows reads exactly that state);
  * - To confirm sums the two classes' "To review" chips (hint "N IT · N Purchasing") and links to the IT view;
- * - Book value links to /finance/depreciation;
- * - Waiting on you (₱), Approved this month and Capitalized this month are plain cards (no page shows those sums).
+ * - Waiting on you (₱), Approved this month (a count, its ₱ in the hint), Capitalized this month and Book value are
+ *   plain cards: no page shows those numbers (review ruling for Book value).
  */
 export async function financeOverview(user: Viewer, now: Date = new Date()): Promise<Overview> {
-  const since = monthToDateSince(now);
-  const [waiting, approved, capitalized, book, toConfirmIt, toConfirmPurchasing, history, perMonth, departments] = await Promise.all([
+  const quarterStart = quarterStartManila(now);
+  // One read per source over the widest window it serves: completed spend for the sparkline's 8 weeks and this Manila
+  // quarter (the department breakdown); capitalised assets for the 12-month trend, which holds the 8 weeks.
+  const [waiting, approved, capitalized, book, toConfirmIt, toConfirmPurchasing, history] = await Promise.all([
     financeWaitingRows(),
-    completedSpend(since),
-    capitalizedSince(since),
+    completedSpend(earliest(sparkSince(now), quarterStart)),
+    capitalizedSince(earliest(sparkSince(now), monthWindowStart(now, TREND_MONTHS))),
     bookValueByCategory(now),
     toConfirmCount("IT"),
     toConfirmCount("PURCHASING"),
     metricHistory<SnapshotKey>([...FINANCE_KEYS], now),
-    capitalizedByMonth(now, TREND_MONTHS),
-    spendByDepartment(now),
   ]);
+  const departments = rankByLabel(
+    approved.map((r) => ({ at: r.at, amount: r.amount, label: r.department })), quarterStart, "No department", SPEND_TOP,
+  );
   const oldest = waiting[0];
   const toConfirm = toConfirmIt + toConfirmPurchasing;
   const waitingHref = purchaseTabHref("IT_REVIEWED");
@@ -391,16 +400,15 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
       { key: "fin.waitingCount", label: "Requests waiting", hint: "Reviewed by IT, waiting for you", upIs: "bad", href: waitingHref },
       waiting.length, history["fin.waitingCount"],
     ),
-    monthToDateTile(
-      { key: "approved.month", label: "Approved this month", upIs: "neutral" }, approved, now,
-      (n) => `${plural(n, "request", "requests")} completed`,
-    ),
-    monthToDateTile(
-      { key: "capitalized.month", label: "Capitalized this month", upIs: "neutral" }, capitalized, now,
-      (n) => plural(n, "asset", "assets"),
-    ),
+    monthToDateTile({ key: "approved.month", label: "Approved this month", upIs: "neutral" }, approved, now, {
+      money: false, hint: (m) => `${fmtMoney(cents(pesosOf(m)))} completed`,
+    }),
+    monthToDateTile({ key: "capitalized.month", label: "Capitalized this month", upIs: "neutral" }, capitalized, now, {
+      money: true, hint: (m) => plural(m.length, "asset", "assets"),
+    }),
+    // Review ruling: a plain card — no page shows the all-class book value total.
     moneyHistoryTile(
-      { key: "fin.bookC", label: "Book value", hint: "After depreciation · as of today", upIs: "neutral", href: "/finance/depreciation" },
+      { key: "fin.bookC", label: "Book value", hint: "After depreciation · as of today", upIs: "neutral" },
       book.bookC / 100, history["fin.bookC"],
     ),
     historyTile(
@@ -419,10 +427,10 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
     trend: {
       title: "Capitalized per month",
       unit: "₱",
-      labels: perMonth.labels,
-      series: [{ name: "Capitalized", values: perMonth.values.map(cents) }],
+      labels: monthLabels(now, TREND_MONTHS),
+      series: [{ name: "Capitalized", values: monthBuckets(capitalized, now, TREND_MONTHS).map(cents) }],
     },
-    makeUp: bookValueMakeUp(book.rows.map((r) => ({ label: r.label, value: r.bookC / 100 }))),
+    makeUp: bookValueMakeUp(book.rows),
     breakdown: {
       title: "Approved spend by department",
       sub: "Completed requests this quarter · top 7 and Other",
@@ -449,12 +457,12 @@ const ADMIN_KEYS = ["admin.activeUsers", "admin.deadDeliveries", "admin.disabled
  */
 export async function adminOverview(user: Viewer, now: Date = new Date()): Promise<Overview> {
   const openKeys = approvalsOpenKeys(user.role);
-  const [admin, approvals, history, direct, perDay, deliveries, failing, lockedOut] = await Promise.all([
+  // One direct-change read: the sparkline's 8 weeks hold the trend's 14 days.
+  const [admin, approvals, history, direct, deliveries, failing, lockedOut] = await Promise.all([
     adminHome(),
     approvalsOpenCounts(user, now),
     metricHistory<SnapshotKey>([...ADMIN_KEYS, ...openKeys], now),
-    directChangeRows(weekWindowStart(now, HISTORY_POINTS)),
-    directChangesByDay(now, DIRECT_DAYS),
+    directChangeRows(sparkSince(now)),
     deliveriesByStatus(now, DELIVERY_DAYS),
     failingEndpoints(),
     disabledAdmins(),
@@ -463,6 +471,7 @@ export async function adminOverview(user: Viewer, now: Date = new Date()): Promi
   // being the tile's value (this Manila week), so "vs last week" is this week's count minus last week's.
   const directWeeks = weekBuckets(direct.map((r) => r.at), now, HISTORY_POINTS);
   const directNow = directWeeks[HISTORY_POINTS - 1];
+  const perDay = directChangesPerDay(direct, now, DIRECT_DAYS);
   const flagsOn = admin.flags.filter((f) => f.enabled).length;
   const unavailable = admin.flags.filter((f) => f.unavailable);
 

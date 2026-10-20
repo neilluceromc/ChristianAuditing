@@ -694,15 +694,6 @@ export async function stockExportRows(state: ListState, today: string = localDat
   };
 }
 
-/**
- * Spec §0 decision 7 / §6.5: Purchasing Home's two tiles. `low` mirrors
- * `listStockItems`'s own `lowCount` over every active item (one candidate
- * pass, one balances groupBy); `expiringLots` counts LOTS (not items) still
- * open and expiring within `DEFAULT_EXPIRY_WINDOW` — the same population
- * `expiryReport(DEFAULT_EXPIRY_WINDOW)`'s "Expiring" block would show,
- * excluding already-expired lots (those are a different block, and a
- * different worry). Four queries total, as two independent parallel pairs.
- */
 /** OPEN stocktakes whose close-by day is before today (Manila): the Home count and the Overview's Needs-you rows. */
 export function stocktakesOverdueWhere(today: string): Prisma.StocktakeWhereInput {
   return { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } };
@@ -722,6 +713,15 @@ export async function overdueStocktakes(
   return rows.map((s) => ({ id: s.id, refNo: s.refNo, scope: s.category?.name ?? "All", dueAt: s.dueAt }));
 }
 
+/**
+ * Spec §0 decision 7 / §6.5: Purchasing Home's two tiles. `low` mirrors
+ * `listStockItems`'s own `lowCount` over every active item (one candidate
+ * pass, one balances groupBy); `expiringLots` counts LOTS (not items) still
+ * open and expiring within `DEFAULT_EXPIRY_WINDOW` — the same population
+ * `expiryReport(DEFAULT_EXPIRY_WINDOW)`'s "Expiring" block would show,
+ * excluding already-expired lots (those are a different block, and a
+ * different worry). Four queries total, as two independent parallel pairs.
+ */
 export async function stockHomeSignals(today: string): Promise<{ low: number; expiringLots: number; stocktakesOverdue: number }> {
   const [candidates, expiryLots, stocktakesOverdue] = await Promise.all([
     prisma.stockItem.findMany({ where: { archivedAt: null }, select: { id: true, reorderLevel: true } }),

@@ -3,7 +3,7 @@ import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney, fmtMoneyExact, localDateISO } from "@/lib/format";
 import { regWhere } from "@/lib/registration";
 import { monthStartManila } from "@/lib/cris-limits";
-import { dayBuckets, dayLabels, dayWindowStart, quarterStartManila, sumByLabel, topWithOther } from "@/lib/overview";
+import { dayWindowStart, directChangesPerDay, quarterStartManila, rankByLabel } from "@/lib/overview";
 import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState, serializeListState, withFilter } from "@/lib/url-state";
@@ -480,9 +480,7 @@ export async function directChangesByDay(
   now: Date = new Date(),
   days: number = 14,
 ): Promise<{ labels: string[]; it: number[]; purchasing: number[] }> {
-  const rows = await directChangeRows(dayWindowStart(now, days));
-  const of = (cls: AssetClass) => dayBuckets(rows.filter((r) => r.cls === cls).map((r) => r.at), now, days);
-  return { labels: dayLabels(now, days), it: of("IT"), purchasing: of("PURCHASING") };
+  return directChangesPerDay(await directChangeRows(dayWindowStart(now, days)), now, days);
 }
 
 export interface FleetSlice {
@@ -699,18 +697,20 @@ export async function completedSpend(since: Date): Promise<SpendRow[]> {
 }
 
 /** Phase 46: the breakdowns' "top 7 + Other". */
-const SPEND_TOP = 7;
+export const SPEND_TOP = 7;
 
 /** Phase 46 (spec §3.2 ruling): this Manila month's completed spend by supplier — the top 7 and Other. */
 export async function spendBySupplier(now: Date = new Date()): Promise<Array<{ label: string; value: number }>> {
-  const rows = await completedSpend(monthStartManila(now));
-  return topWithOther(sumByLabel(rows.map((r) => ({ label: r.supplier, amount: r.amount })), "No supplier"), SPEND_TOP);
+  const since = monthStartManila(now);
+  const rows = await completedSpend(since);
+  return rankByLabel(rows.map((r) => ({ at: r.at, amount: r.amount, label: r.supplier })), since, "No supplier", SPEND_TOP);
 }
 
 /** Phase 46 (spec §3.2, Finance breakdown): this Manila quarter's approved (completed) spend by department — the top 7 and Other. */
 export async function spendByDepartment(now: Date = new Date()): Promise<Array<{ label: string; value: number }>> {
-  const rows = await completedSpend(quarterStartManila(now));
-  return topWithOther(sumByLabel(rows.map((r) => ({ label: r.department, amount: r.amount })), "No department"), SPEND_TOP);
+  const since = quarterStartManila(now);
+  const rows = await completedSpend(since);
+  return rankByLabel(rows.map((r) => ({ at: r.at, amount: r.amount, label: r.department })), since, "No department", SPEND_TOP);
 }
 
 /**

@@ -3,20 +3,32 @@
  * make-up and a ranked breakdown — and the pure helpers that fill it. The per-workspace reads live in
  * src/server/modules/home/overview.ts.
  */
-import type { Role } from "@prisma/client";
+import type { AssetClass, Role } from "@prisma/client";
 import type { IconName } from "@/components/ui/icon";
 import { ROLE_LABELS } from "./admin-users";
 import { addDays, dayFromISO } from "./deadlines";
 import { fmtDayMonth, localDateISO } from "./format";
 import { statusLabel } from "./asset-class";
+import { monthStartManila } from "./cris-limits";
 import { manilaMonth } from "./depreciation";
 import { EMPLOYEES_LIST_CONFIG } from "./employees-list";
 import { PURCHASE_TABS } from "./purchases-list";
 import { parseListState, serializeListState, withFilter, type ListState } from "./url-state";
 import { workActionLabel, workRowHref, type WorkGroup, type WorkRow } from "./worklist";
 
-/** "vs last week": a count's change (live − 7 days ago), a money percent, this week's total vs last week's, or none yet. */
-export type Delta = { kind: "count" | "pct" | "week"; value: number } | { kind: "none" };
+/**
+ * "vs last week":
+ * - `count`: a count's change, live − the value 7 days ago;
+ * - `pct`: a snapshot money tile's change, in percent;
+ * - `week`: this week's total against last week's — a percent for money, a difference for counts (`unit` says which);
+ * - `new`: the comparison base is 0 and the value is not ("new this week");
+ * - `none`: no comparison collected yet ("collecting history").
+ */
+export type Delta =
+  | { kind: "count" | "pct"; value: number }
+  | { kind: "week"; value: number; unit: "pct" | "count" }
+  | { kind: "new" }
+  | { kind: "none" };
 
 export interface KpiTile {
   key: string;
@@ -79,8 +91,11 @@ const DAY_MS = 86_400_000;
 
 /** The delta's colour word: up is good, bad or neither for this tile; no change or no comparison is flat. */
 export function deltaTone(t: Pick<KpiTile, "delta" | "upIs">): "good" | "bad" | "flat" {
-  if (t.delta.kind === "none" || t.delta.value === 0 || t.upIs === "neutral") return "flat";
-  return (t.delta.value > 0) === (t.upIs === "good") ? "good" : "bad";
+  if (t.delta.kind === "none" || t.upIs === "neutral") return "flat";
+  // "new" is up from zero
+  const up = t.delta.kind === "new" ? true : t.delta.value === 0 ? null : t.delta.value > 0;
+  if (up === null) return "flat";
+  return up === (t.upIs === "good") ? "good" : "bad";
 }
 
 /** Spec §2.4: the live value minus the value 7 days ago; none while that value is not collected yet. */
@@ -124,10 +139,17 @@ export function weekLabels(now: Date, weeks: number): string[] {
   return Array.from({ length: weeks }, (_, i) => fmtDayMonth(dayFromISO(addDays(today, -7 * (weeks - 1 - i)))));
 }
 
-/** This week's total against last week's (spec: "this week vs last week"). */
-export function weekOverWeek(buckets: number[]): Delta {
+/**
+ * This week's total against last week's (spec: "this week vs last week"). Review ruling: money tiles compare in
+ * percent (`unit: "pct"`, rounded), count tiles by the difference; from a zero week it is `new`, and two zero weeks are
+ * no change.
+ */
+export function weekOverWeek(buckets: number[], unit: "pct" | "count"): Delta {
   if (buckets.length < 2) return { kind: "none" };
-  return { kind: "week", value: buckets[buckets.length - 1] - buckets[buckets.length - 2] };
+  const last = buckets[buckets.length - 1];
+  const prev = buckets[buckets.length - 2];
+  if (prev === 0) return last === 0 ? { kind: "week", value: 0, unit } : { kind: "new" };
+  return { kind: "week", unit, value: unit === "pct" ? Math.round(((last - prev) / Math.abs(prev)) * 100) : last - prev };
 }
 
 /** The sparkline ends at what the tile shows: today's point is the live value, not the morning's snapshot. */
@@ -300,18 +322,28 @@ export function itMove(e: MoveEntry): ItMove | null {
 
 // ── Purchasing, Finance and Admin (Phase 46 Task 3) ───────────────────────
 
-/** Asia/Manila is UTC+8 all year (no daylight saving). */
-const MANILA_OFFSET_MS = 8 * 3_600_000;
-
-/** Manila midnight on the 1st of month index `m` (year·12 + month). */
-function manilaMonthStart(m: number): Date {
-  return new Date(Date.UTC(Math.floor(m / 12), ((m % 12) + 12) % 12, 1) - MANILA_OFFSET_MS);
+/** The Manila month start `back` months before the month `now` is in: monthStartManila, stepped back a month at a time. */
+function monthStartBack(now: Date, back: number): Date {
+  let start = monthStartManila(now);
+  for (let i = 0; i < back; i++) start = monthStartManila(new Date(start.getTime() - 1));
+  return start;
 }
 
 /** The instant the Manila calendar quarter began (Jan/Apr/Jul/Oct 1, Manila midnight) — the spend-by-department window. */
 export function quarterStartManila(now: Date): Date {
-  const m = manilaMonth(now);
-  return manilaMonthStart(m - (((m % 3) + 3) % 3));
+  return monthStartBack(now, manilaMonth(now) % 3);
+}
+
+/** "1 asset", "3 assets". */
+export function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** A spend breakdown from rows read once over a wider window: the rows at or after `since`, by label, top N and Other. */
+export function rankByLabel(
+  rows: { at: Date; amount: number; label: string | null }[], since: Date, fallback: string, top: number,
+): { label: string; value: number }[] {
+  return topWithOther(sumByLabel(rows.filter((r) => r.at >= since), fallback), top);
 }
 
 /** Per label, the summed amount, in first-seen order; a null label (no supplier, no department) takes `fallback`. */
@@ -337,11 +369,12 @@ export function topWithOther(rows: { label: string; value: number }[], n: number
 
 /**
  * Spec §3.1: a snapshot-backed money tile's "▲ 12%" — live against the value 7 days ago, as a whole percent. None while
- * that value is not collected; none from a zero base too, since no percent is honest there (zero to zero is flat).
+ * that value is not collected; from a zero base it is `new` (review ruling: no percent is honest there), and zero to
+ * zero is no change.
  */
 export function pctDelta(live: number, weekAgo: number | null): Delta {
   if (weekAgo === null) return { kind: "none" };
-  if (weekAgo === 0) return live === 0 ? { kind: "pct", value: 0 } : { kind: "none" };
+  if (weekAgo === 0) return live === 0 ? { kind: "pct", value: 0 } : { kind: "new" };
   return { kind: "pct", value: Math.round(((live - weekAgo) / Math.abs(weekAgo)) * 100) };
 }
 
@@ -372,9 +405,17 @@ export function dayLabels(now: Date, days: number): string[] {
   return Array.from({ length: days }, (_, i) => fmtDayMonth(dayFromISO(addDays(today, -(days - 1 - i)))));
 }
 
+/** Admin's trend: direct changes per Manila day for the `days` days ending today, by the class of the asset changed. */
+export function directChangesPerDay(
+  rows: { at: Date; cls: AssetClass | null }[], now: Date, days: number,
+): { labels: string[]; it: number[]; purchasing: number[] } {
+  const of = (cls: AssetClass) => dayBuckets(rows.filter((r) => r.cls === cls).map((r) => r.at), now, days);
+  return { labels: dayLabels(now, days), it: of("IT"), purchasing: of("PURCHASING") };
+}
+
 /** The first instant of the `months` Manila months ending this one (the oldest month's 1st, Manila midnight). */
 export function monthWindowStart(now: Date, months: number): Date {
-  return manilaMonthStart(manilaMonth(now) - (months - 1));
+  return monthStartBack(now, months - 1);
 }
 
 /** Per Manila month, the summed amounts of the `months` months ending this one, oldest first. */
@@ -415,12 +456,16 @@ export function requestStateMakeUp(counts: Record<string, number>): MakeUp {
 
 const CHART_TONES = ["chart-1", "chart-2", "chart-3"] as const satisfies readonly MakeUpTone[];
 
-/** Finance's make-up: book value by category — the three largest in the chart colours, the rest as one Other. */
-export function bookValueMakeUp(rows: { label: string; value: number }[]): MakeUp {
+/**
+ * Finance's make-up: book value by category — the three largest in the chart colours, the rest as one Other. Folded
+ * on whole centavos and only then shown in pesos, so Other carries no float noise.
+ */
+export function bookValueMakeUp(rows: { label: string; bookC: number }[]): MakeUp {
+  const folded = topWithOther(rows.map((r) => ({ label: r.label, value: r.bookC })), CHART_TONES.length);
   return {
     title: "Book value by category",
     money: true,
-    rows: topWithOther(rows, CHART_TONES.length).map((r, i) => ({ ...r, tone: CHART_TONES[i] ?? "neutral" })),
+    rows: folded.map((r, i) => ({ label: r.label, value: r.value / 100, tone: CHART_TONES[i] ?? "neutral" })),
   };
 }
 
@@ -471,8 +516,6 @@ export interface OverdueStocktake {
   /** the close-by day, stored as that day's UTC midnight */
   dueAt: Date;
 }
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Order by tone (bad, warn, info), keeping the source order within a tone, and keep `max`. */
 function byTone(items: NeedItem[], max: number): NeedItem[] {
