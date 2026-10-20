@@ -12,7 +12,7 @@ import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
-import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
@@ -275,7 +275,7 @@ export async function listAssets(
   const attentionSort = primarySortOf(state.sort, "attention");
   if (attentionSort) {
     const ordered = await attentionOrdered(where, orderBy, attentionSort.dir, now);
-    const pg = pageOf(ordered.length, state.page, ENTITY_PAGE_SIZE);
+    const pg = pageOf(ordered.length, state.page, state.per);
     return {
       rows: ordered.slice(pg.skip, pg.skip + pg.take),
       total: pg.total,
@@ -286,7 +286,7 @@ export async function listAssets(
   }
 
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
-    ENTITY_PAGE_SIZE,
+    state.per,
     state.page,
     (tx) => tx.asset.count({ where }),
     (tx, pg) =>

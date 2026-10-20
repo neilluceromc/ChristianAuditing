@@ -3,7 +3,7 @@ import { prisma } from "@/server/db/client";
 import { buildEmployeeOrderBy, buildEmployeeWhere, orderByLoadout } from "@/lib/employees-list";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
-import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
 import { sameNameKey } from "@/lib/same-name";
@@ -92,7 +92,7 @@ async function pageEmployees(state: ListState, gapsOnly: boolean) {
   const loadoutSort = primarySortOf(state.sort, "loadout");
   if (!gapsOnly && !loadoutSort) {
     const { rows: employees, ...pg } = await pagedSnapshot(
-      ENTITY_PAGE_SIZE,
+      state.per,
       state.page,
       (tx) => tx.employee.count({ where }),
       (tx, pg) => tx.employee.findMany({ where, orderBy, skip: pg.skip, take: pg.take, include: rowInclude }),
@@ -104,7 +104,7 @@ async function pageEmployees(state: ListState, gapsOnly: boolean) {
   const candidates = await prisma.employee.findMany({ where, orderBy, include: rowInclude });
   const missingAll = await resolveMissing(candidates);
   const kept = derivedCut(candidates, missingAll, gapsOnly, loadoutSort);
-  const pg = pageOf(kept.length, state.page, ENTITY_PAGE_SIZE);
+  const pg = pageOf(kept.length, state.page, state.per);
   const employees = kept.slice(pg.skip, pg.skip + pg.take);
   return { pg, employees, missing: missingAll };
 }

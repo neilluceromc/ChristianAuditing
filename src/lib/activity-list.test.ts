@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ACTIVITY_FEEDS, ACTIVITY_LIST_CONFIG, buildActivityWhere, feedWhere } from "./activity-list";
 import { NO_HIDDEN_REFS } from "./audit-list";
 
-const empty = { q: "", page: 1, sort: [], filters: {} };
+const empty = { q: "", page: 1, per: 25, sort: [], filters: {} };
 
 describe("the activity feeds' list rules (spec §3.4)", () => {
   it("names the four feeds and one facet, no sort, no search", () => {
@@ -33,7 +33,7 @@ describe("the activity feeds' list rules (spec §3.4)", () => {
 });
 
 describe("buildActivityWhere — search (spec §6.1)", () => {
-  const st = (q: string) => ({ q, page: 1, sort: [], filters: {} });
+  const st = (q: string) => ({ q, page: 1, per: 25, sort: [], filters: {} });
   it("no q, no search branch", () => {
     expect(JSON.stringify(buildActivityWhere("inventory", st(""), NO_HIDDEN_REFS))).not.toContain("actorLabel");
   });

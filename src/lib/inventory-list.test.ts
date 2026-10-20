@@ -44,7 +44,7 @@ describe("buildAssetWhere", () => {
     expect(buildAssetWhere(parse("status=HACKED")).status).toBeUndefined();
   });
   it("provenance facet ORs the derived shapes inside AND, displacing nothing", () => {
-    const w = buildAssetWhere({ q: "", page: 1, sort: [], filters: { provenance: ["DIRECT", "HISTORICAL"], status: ["SPARE"] } });
+    const w = buildAssetWhere({ q: "", page: 1, per: 25, sort: [], filters: { provenance: ["DIRECT", "HISTORICAL"], status: ["SPARE"] } });
     expect(w.status).toEqual({ in: ["SPARE"] });
     expect(w.AND).toEqual([{ OR: [
       { purchaseRequestId: null, importedAt: null },
@@ -52,7 +52,7 @@ describe("buildAssetWhere", () => {
     ] }]);
   });
   it("ignores an unknown provenance value", () => {
-    expect(buildAssetWhere({ q: "", page: 1, sort: [], filters: { provenance: ["nope"] } }).AND).toBeUndefined();
+    expect(buildAssetWhere({ q: "", page: 1, per: 25, sort: [], filters: { provenance: ["nope"] } }).AND).toBeUndefined();
   });
 });
 
@@ -192,7 +192,7 @@ describe("purchaseYearChips", () => {
 });
 
 describe("buildAssetWhere — class (Phase 13)", () => {
-  const empty = { q: "", page: 1, sort: [], filters: {} };
+  const empty = { q: "", page: 1, per: 25, sort: [], filters: {} };
   it("defaults to IT, so every pre-Phase-13 URL means what it used to", () => {
     expect(buildAssetWhere(empty).cls).toBe("IT");
     expect(buildAssetWhere(empty, null).cls).toBe("IT");

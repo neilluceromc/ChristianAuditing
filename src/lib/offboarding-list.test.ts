@@ -106,11 +106,11 @@ describe("dueOf (spec §4.6)", () => {
 
 describe("derivedFilters (Phase 25)", () => {
   it("keeps only the known progress and due values", () => {
-    const state = { q: "", page: 1, sort: [], filters: { progress: ["open", "bogus"], due: ["overdue"] } };
+    const state = { q: "", page: 1, per: 25, sort: [], filters: { progress: ["open", "bogus"], due: ["overdue"] } };
     expect(derivedFilters(state)).toEqual({ progressFilter: ["open"], dueFilter: ["overdue"] });
   });
   it("is empty when neither facet is active", () => {
-    expect(derivedFilters({ q: "", page: 1, sort: [], filters: {} })).toEqual({ progressFilter: [], dueFilter: [] });
+    expect(derivedFilters({ q: "", page: 1, per: 25, sort: [], filters: {} })).toEqual({ progressFilter: [], dueFilter: [] });
   });
 });
 

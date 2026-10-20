@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseListState, primarySortOf, serializeListState, toggleSort, withFilter, withSearch,
-  clearFilters, toSearchParams, type ListConfig,
+  clearFilters, toSearchParams, withPer, type ListConfig,
 } from "./url-state";
 
 const config: ListConfig = {
@@ -14,12 +14,13 @@ const parse = (qs: string) => parseListState(new URLSearchParams(qs), config);
 
 describe("parseListState", () => {
   it("returns defaults for an empty query", () => {
-    expect(parse("")).toEqual({ q: "", page: 1, sort: [{ key: "tag", dir: "asc" }], filters: {} });
+    expect(parse("")).toEqual({ q: "", page: 1, per: 25, sort: [{ key: "tag", dir: "asc" }], filters: {} });
   });
   it("parses q, page, comma-joined facets and the sort param", () => {
     expect(parse("q=latitude&page=3&status=DEPLOYED,SPARE&sort=-purchasedAt,model")).toEqual({
       q: "latitude",
       page: 3,
+      per: 25,
       sort: [{ key: "purchasedAt", dir: "desc" }, { key: "model", dir: "asc" }],
       filters: { status: ["DEPLOYED", "SPARE"] },
     });
@@ -33,6 +34,16 @@ describe("parseListState", () => {
   it("caps sort at two keys", () => {
     expect(parse("sort=tag,model,purchasedAt").sort).toHaveLength(2);
   });
+  it("reads per when it is one of 25, 50, 100", () => {
+    expect(parse("per=50").per).toBe(50);
+    expect(parse("per=100").per).toBe(100);
+    expect(parse("per=25").per).toBe(25);
+  });
+  it("falls back to 25 for a missing, unlisted or garbage per", () => {
+    for (const qs of ["", "per=7", "per=abc", "per=100000", "per=-25", "per="]) {
+      expect(parse(qs).per).toBe(25);
+    }
+  });
 });
 
 describe("serializeListState", () => {
@@ -42,6 +53,11 @@ describe("serializeListState", () => {
   it("round-trips a full state", () => {
     const qs = "?q=latitude&status=DEPLOYED,SPARE&sort=-purchasedAt,model&page=3";
     expect(serializeListState(parse(qs.slice(1)), config)).toBe(qs);
+  });
+  it("omits per when 25 and writes it otherwise", () => {
+    expect(serializeListState(parse("per=25"), config)).toBe("");
+    expect(serializeListState(parse("per=100"), config)).toBe("?per=100");
+    expect(serializeListState(parse("q=x&per=50&page=2"), config)).toBe("?q=x&page=2&per=50");
   });
 });
 
@@ -92,6 +108,11 @@ describe("state updates reset the page", () => {
   it("withSearch sets q and resets page", () => {
     const s = withSearch(parse("page=4"), "dell");
     expect(s.q).toBe("dell");
+    expect(s.page).toBe(1);
+  });
+  it("withPer sets per and resets page", () => {
+    const s = withPer(parse("page=4&per=25"), 50);
+    expect(s.per).toBe(50);
     expect(s.page).toBe(1);
   });
   it("clearFilters drops filters and q but keeps sort", () => {
