@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPausableTimer, firstUsable, toastLifetime, type PausableTimer, type ToastTone } from "@/lib/toast-timing";
 import { StatusDot } from "./status";
 
@@ -12,14 +12,36 @@ export interface ToastAction {
   onAction: () => void;
 }
 
-interface ToastItem {
+/**
+ * Finance follow-up (spec §4): a detail line under the message and up to two buttons (Undo, Open <tag>). The detail's
+ * line breaks ("
+") show as lines.
+ */
+export interface ToastOptions {
+  detail?: string;
+  actions?: ToastAction[];
+}
+
+/** At most two buttons per toast, besides Dismiss. */
+export const MAX_TOAST_ACTIONS = 2;
+
+export interface ToastItem {
   id: number;
   message: string;
   tone: Tone;
-  action?: ToastAction;
+  detail?: string;
+  actions: ToastAction[];
 }
 
-type Push = (message: string, tone?: Tone, action?: ToastAction) => void;
+/** The third argument of push: one button (the original call, unchanged for every caller), or a detail and buttons. */
+type Push = (message: string, tone?: Tone, extra?: ToastAction | ToastOptions) => void;
+
+/** push's third argument, read the same way whichever form it takes. */
+export function toastExtras(extra: ToastAction | ToastOptions | undefined): { detail: string | undefined; actions: ToastAction[] } {
+  if (!extra) return { detail: undefined, actions: [] };
+  if ("onAction" in extra) return { detail: undefined, actions: [extra] };
+  return { detail: extra.detail || undefined, actions: (extra.actions ?? []).slice(0, MAX_TOAST_ACTIONS) };
+}
 
 const ToastContext = createContext<Push | null>(null);
 
@@ -38,13 +60,13 @@ const TONE_STATUS: Record<Tone, string> = { settled: "EXECUTED", fault: "REJECTE
  * One toast. The countdown (src/lib/toast-timing.ts) pauses while the pointer is over it or focus is inside it,
  * so a button (Undo, Dismiss) is never taken away mid-reach; an error has no countdown and stays until dismissed.
  */
-function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: number) => void }) {
+export function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: number) => void }) {
   const timer = useRef<PausableTimer | null>(null);
   const hovered = useRef(false);
   const focused = useRef(false);
 
   useEffect(() => {
-    const ms = toastLifetime(t.tone, Boolean(t.action));
+    const ms = toastLifetime(t.tone, t.actions.length > 0);
     if (ms === null) return;
     const timerNow = createPausableTimer(ms, () => onDismiss(t.id));
     timer.current = timerNow;
@@ -52,15 +74,31 @@ function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: 
       timerNow.cancel();
       timer.current = null;
     };
-  }, [t.id, t.tone, t.action, onDismiss]);
+  }, [t.id, t.tone, t.actions.length, onDismiss]);
 
   const sync = () => (hovered.current || focused.current ? timer.current?.pause() : timer.current?.resume());
+
+  const buttons = t.actions.map((a) => (
+    <Fragment key={a.label}>
+      <span aria-hidden="true">·</span>
+      <button
+        type="button"
+        className="font-medium text-accent hover:underline"
+        onClick={() => {
+          onDismiss(t.id);
+          a.onAction();
+        }}
+      >
+        {a.label}
+      </button>
+    </Fragment>
+  ));
 
   return (
     <div
       data-toast-id={t.id}
       role={t.tone === "fault" ? "alert" : undefined}
-      className="pointer-events-auto flex items-center gap-2 rounded-(--radius-card) border border-border bg-surface-raised px-3.5 py-2.5 text-xs text-fg shadow-toast"
+      className={`pointer-events-auto flex max-w-[min(28rem,calc(100vw-2rem))] ${t.detail ? "items-start" : "items-center"} gap-2 rounded-(--radius-card) border border-border bg-surface-raised px-3.5 py-2.5 text-xs text-fg shadow-toast`}
       style={{ animation: "toastIn var(--dur-3) var(--ease-std)" }}
       onMouseEnter={() => { hovered.current = true; sync(); }}
       onMouseLeave={() => { hovered.current = false; sync(); }}
@@ -74,20 +112,18 @@ function ToastCard({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: (id: 
     >
       <StatusDot value={TONE_STATUS[t.tone]} />
       <span className="sr-only">{TONE_LABEL[t.tone]}</span>
-      {t.message}
-      {t.action && (
+      {t.detail ? (
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="flex flex-wrap items-center gap-x-2">
+            {t.message}
+            {buttons}
+          </span>
+          <span className="whitespace-pre-line text-fg-muted">{t.detail}</span>
+        </span>
+      ) : (
         <>
-          <span aria-hidden="true">·</span>
-          <button
-            type="button"
-            className="font-medium text-accent hover:underline"
-            onClick={() => {
-              onDismiss(t.id);
-              t.action!.onAction();
-            }}
-          >
-            {t.action.label}
-          </button>
+          {t.message}
+          {buttons}
         </>
       )}
       <button
@@ -134,9 +170,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
-  const push = useCallback<Push>((message, tone = "neutral", action) => {
+  const push = useCallback<Push>((message, tone = "neutral", extra) => {
     const id = nextId++;
-    setToasts((t) => [...t, { id, message, tone, action }]);
+    const { detail, actions } = toastExtras(extra);
+    setToasts((t) => [...t, { id, message, tone, detail, actions }]);
   }, []);
 
   return (

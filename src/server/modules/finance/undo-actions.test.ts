@@ -29,6 +29,7 @@ vi.mock("@/server/auth/guards", () => ({
 vi.mock("@/server/rate-limit", () => ({ checkRate: async () => h.rate }));
 vi.mock("@/server/webhooks/emit", () => ({ emitWebhook: async () => {} }));
 vi.mock("@/server/modules/finance/queries", () => ({ nextToReview: async () => null }));
+vi.mock("@/server/modules/finance/review-queue", () => ({ toReviewCount: async () => 0 }));
 vi.mock("@/server/db/client", () => {
   const same = (a: unknown, b: unknown) =>
     a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b || (a == null && b == null);

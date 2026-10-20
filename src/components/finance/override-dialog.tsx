@@ -11,8 +11,10 @@ import { ReasonField } from "@/components/patterns/reason-field";
 import { asOfMonth, depreciate, monthLabel, resolvePolicy } from "@/lib/depreciation";
 import { lifeFromYearsMonths } from "@/lib/depreciation-input";
 import { fmtMoneyExact } from "@/lib/format";
+import { settingsToast } from "@/lib/finance-review-ui";
 import { clearAssetOverride, setAssetOverride } from "@/server/modules/finance/depreciation-actions";
 import { useFinanceRunner } from "./use-finance-runner";
+import { useFinanceUndo } from "./use-finance-undo";
 
 export interface OverrideAsset {
   id: string;
@@ -37,6 +39,7 @@ export interface OverrideAsset {
 export function OverrideDialog({ open, onClose, asset }: { open: boolean; onClose: () => void; asset: OverrideAsset }) {
   const runner = useFinanceRunner(["lifeMonths", "salvage", "note"]);
   const { pending, error, setError, fieldErrors, retryAfter, setRetryAfter, reset, run } = runner;
+  const undo = useFinanceUndo();
   const [years, setYears] = useState("");
   const [months, setMonths] = useState("");
   const [salvage, setSalvage] = useState("");
@@ -88,15 +91,20 @@ export function OverrideDialog({ open, onClose, asset }: { open: boolean; onClos
       runner.setFieldErrors({ salvage: "Enter an amount in pesos, for example 2500" });
       return;
     }
+    // finance follow-up (spec §4): "Saved BR-LT-0201's depreciation settings", "48 months, ₱0.00 salvage", and Undo
     run(
       () => setAssetOverride({ assetId: asset.id, lifeMonths: life, salvage: salvagePesos, note }),
-      `Custom depreciation saved — ${asset.tag}`,
+      () => settingsToast({ assetId: asset.id, tag: asset.tag, saved: { lifeMonths: life, salvagePesos } }, undo),
       { onOk: onClose },
     );
   }
 
   function clear() {
-    run(() => clearAssetOverride({ assetId: asset.id }), `Custom depreciation cleared — ${asset.tag}`, { onOk: onClose });
+    run(
+      () => clearAssetOverride({ assetId: asset.id }),
+      () => settingsToast({ assetId: asset.id, tag: asset.tag, saved: null }, undo),
+      { onOk: onClose },
+    );
   }
 
   return (

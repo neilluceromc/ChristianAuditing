@@ -4,11 +4,15 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/toast";
 import type { ActionResult } from "@/server/action-result";
+import type { ToastSpec } from "@/lib/finance-review-ui";
 
 /**
  * Phase 35: one runner for the Finance depreciation screens (same shape as use-employee-runner.ts).
  * rate_limited -> countdown, validation -> field errors (an unclaimed key falls back into the banner),
  * anything else -> banner.
+ *
+ * Finance follow-up (spec §4): the success toast is a message, or a message with a detail line and buttons (Undo,
+ * Open <tag>) built by finance-review-ui.ts.
  */
 export function useFinanceRunner(claimedFieldKeys: string[] = []) {
   const router = useRouter();
@@ -20,7 +24,7 @@ export function useFinanceRunner(claimedFieldKeys: string[] = []) {
 
   function run<T>(
     fn: () => Promise<ActionResult<T>>,
-    okMsg: string | ((data: T) => string),
+    okMsg: string | ((data: T) => string | ToastSpec),
     opts?: { onOk?: (data: T) => void; refresh?: boolean },
   ) {
     setError(null);
@@ -28,7 +32,9 @@ export function useFinanceRunner(claimedFieldKeys: string[] = []) {
     startTransition(async () => {
       const res = await fn();
       if (res.ok) {
-        toast(typeof okMsg === "function" ? okMsg(res.data) : okMsg, "settled");
+        const msg = typeof okMsg === "function" ? okMsg(res.data) : okMsg;
+        if (typeof msg === "string") toast(msg, "settled");
+        else toast(msg.message, "settled", { detail: msg.detail, actions: msg.actions });
         opts?.onOk?.(res.data);
         if (opts?.refresh ?? true) router.refresh();
       } else if (res.kind === "rate_limited") {

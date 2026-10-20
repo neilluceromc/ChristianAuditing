@@ -55,6 +55,11 @@ export function actionDot(action: string): string {
     return "COMPLETED"; // settled
   if (action === "submit" || action === "it-review" || action === "finance.resubmit")
     return "SUBMITTED"; // inflight
+  // Finance follow-up: an undone approval or send-back, and an admin's reopen, put the asset back in Finance's review
+  // (in flight again); an undone settings change is an edit, neutral like the change it takes back.
+  if (action === "finance.confirm.undone" || action === "asset.return.undone" || action === "finance.confirm.reopened")
+    return "SUBMITTED"; // inflight
+  if (action === "depreciation.override.undone") return "SPARE"; // neutral
   // "disable" (entityType "user") is unreachable today: every actionDot caller
   // scopes to employee/asset/purchase-request, and /audit — the one page that
   // renders "user" entries — never calls this. Pre-wired for a user-scoped

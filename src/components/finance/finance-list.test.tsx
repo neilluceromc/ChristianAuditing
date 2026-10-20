@@ -13,6 +13,8 @@ import type { FinanceRow } from "@/server/modules/finance/queries";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
 // The row menu's override dialog calls server actions (auth, db); markup tests never submit.
 vi.mock("@/server/modules/finance/depreciation-actions", () => ({ setAssetOverride: vi.fn(), clearAssetOverride: vi.fn() }));
+// ...and its toast's Undo (finance follow-up) calls the undo action.
+vi.mock("@/server/modules/finance/undo-actions", () => ({ undoFinanceAction: vi.fn(), reopenFinanceReview: vi.fn() }));
 vi.mock("@/components/ui/toast", () => ({ useToast: () => vi.fn() }));
 
 /*

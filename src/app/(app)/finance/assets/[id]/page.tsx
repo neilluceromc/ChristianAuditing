@@ -8,7 +8,7 @@ import { prisma } from "@/server/db/client";
 import { financeAssetDetail } from "@/server/modules/finance/asset-detail";
 import { assetAttachments, assetNotes } from "@/server/modules/assets/queries";
 import { CLASS_LABEL, STATUS_LABEL } from "@/lib/asset-class";
-import { asOfMonth } from "@/lib/depreciation";
+import { asOfMonth, depStartMonth } from "@/lib/depreciation";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { coveredByLabel } from "@/lib/purchase-summary";
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
@@ -17,9 +17,12 @@ import { pathAllowedForRole } from "@/lib/workspaces";
 import { canPostOnAsset } from "@/lib/asset-notes";
 import { defaultLedgerYear, ledgerMonths, ledgerYears } from "@/lib/finance-ledger";
 import { assetHistory, assetPageHref, lifeSummary, noScheduleReason, parseAssetPageState } from "@/lib/finance-asset-page";
+import { approveDetail, canReopenReview, undoBanner } from "@/lib/finance-review-ui";
 import { PageHeader } from "@/components/ui/page-header";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ReviewBox } from "@/components/finance/review-box";
+import { ReopenReview } from "@/components/finance/reopen-review";
+import { UndoBanner } from "@/components/finance/undo-banner";
 import { ListNavigationProvider, ListPendingRegion } from "@/components/patterns/list-navigation";
 import { AssetPanel } from "@/components/finance/asset/asset-panel";
 import { AssetTabs } from "@/components/finance/asset/asset-tabs";
@@ -99,6 +102,20 @@ export default async function FinanceAssetPage({
   const openDoc = state.doc ? d.docs.find((x) => x.file?.id === state.doc) ?? null : null;
   const holderId = extra?.assignee?.id ?? null;
 
+  // Finance follow-up (spec §3, §4): the Undo banner for the person who acted, within 15 minutes and while nothing has
+  // changed since (the same rules the server re-checks); Reopen review for an admin on an approved asset; and what
+  // approving would start, for the approve toast.
+  const banner = undoBanner({ financeConfirmedAt: d.approvedAt, financeReturnedAt: d.returnedAt }, d.audit, user.id, now);
+  const reopen = canReopenReview(user.role, d.approvedAt);
+  const approveText = d.reg === "with-finance"
+    ? approveDetail({
+        costC: d.result ? d.costC : null,
+        policy: d.result?.policy ?? null,
+        startMonth: depStartMonth({ purchasedAt: d.purchase.purchasedAt, financeConfirmedAt: now }),
+        category: d.category,
+      })
+    : null;
+
   // history (spec §4.5): an unknown `?hw=` reads as Everyone, so the select and the list agree
   const history = state.tab === "history"
     ? assetHistory(d.audit, d.depLines, state, { assetTag: d.tag, categoryName: d.category, purchaseUnits: d.purchaseUnits, names: d.historyNames })
@@ -122,15 +139,18 @@ export default async function FinanceAssetPage({
                 }}
               />
             )}
+            {reopen && <ReopenReview id={d.id} tag={d.tag} />}
             <ButtonLink native href={`/finance/assets/${d.id}/export`}>Export</ButtonLink>
           </>
         }
       />
 
+      {banner && <UndoBanner key={`${banner.kind}:${banner.endsAt}`} assetId={d.id} tag={d.tag} state={banner} />}
+
       {(d.reg === "with-finance" || d.reg === "needs-correction") && (
         <div className="mb-4">
           {d.reg === "with-finance" ? (
-            <ReviewBox id={d.id} tag={d.tag} hasCost={hasCost} reply={d.resubmitNote} deptLabel={dept} />
+            <ReviewBox id={d.id} tag={d.tag} hasCost={hasCost} reply={d.resubmitNote} deptLabel={dept} approveDetail={approveText} />
           ) : (
             <p className="text-[13px] text-fg-secondary">
               Sent back to {dept}

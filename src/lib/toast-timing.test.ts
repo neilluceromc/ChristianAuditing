@@ -6,9 +6,9 @@ describe("toastLifetime", () => {
     expect(toastLifetime("settled")).toBe(4000);
     expect(toastLifetime("neutral")).toBe(TOAST_MS);
   });
-  it("a toast with a button stays 8 s so the button can be reached", () => {
+  it("a toast with a button stays 10 s so the button can be reached", () => {
     expect(toastLifetime("settled", true)).toBe(ACTION_TOAST_MS);
-    expect(toastLifetime("neutral", true)).toBe(8000);
+    expect(toastLifetime("neutral", true)).toBe(10_000);
   });
   it("an error stays until dismissed, button or not", () => {
     expect(toastLifetime("fault")).toBeNull();

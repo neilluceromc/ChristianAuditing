@@ -8,9 +8,11 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { REGISTRATION_FIELDS, REG_FIELD_GROUPS, type RegFieldKey } from "@/lib/registration";
+import { sendBackToast } from "@/lib/finance-review-ui";
+import { fieldLabels, REGISTRATION_FIELDS, REG_FIELD_GROUPS, type RegFieldKey } from "@/lib/registration";
 import { returnAssetToIt } from "@/server/modules/inventory/actions";
 import { useFinanceRunner } from "./use-finance-runner";
+import { useFinanceUndo } from "./use-finance-undo";
 
 /** Phase 35 (spec 3.3): Finance's send-back checklist and note. */
 export function SendBackDialog({
@@ -18,6 +20,7 @@ export function SendBackDialog({
 }: { open: boolean; onClose: () => void; id: string; tag: string; deptLabel: string; hasCost: boolean }) {
   const runner = useFinanceRunner(["note"]);
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } = runner;
+  const undo = useFinanceUndo();
   const [ticked, setTicked] = useState<Set<RegFieldKey>>(new Set());
   const [note, setNote] = useState("");
 
@@ -39,9 +42,11 @@ export function SendBackDialog({
   }
 
   function send() {
+    const fields = REGISTRATION_FIELDS.filter((f) => ticked.has(f.key)).map((f) => f.key);
     run(
-      () => returnAssetToIt({ id, fields: REGISTRATION_FIELDS.filter((f) => ticked.has(f.key)).map((f) => f.key), note }),
-      `${tag} sent back to ${deptLabel}`,
+      () => returnAssetToIt({ id, fields, note }),
+      // finance follow-up (spec §4): "Sent BR-LT-0201 back to IT", what was flagged, and Undo
+      (d) => sendBackToast({ assetId: id, tag: d.tag, deptLabel, flagged: fieldLabels(fields), note }, undo),
       { onOk: onClose },
     );
   }

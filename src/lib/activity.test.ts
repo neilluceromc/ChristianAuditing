@@ -267,6 +267,17 @@ describe("stock module audit sentences (M-3) — the fourteen actions no longer 
   });
 });
 
+describe("actionDot — the finance follow-up's undo and reopen", () => {
+  it("an undone approval or send-back, and an admin's reopen, put the asset back in review: in flight", () => {
+    expect(actionDot("finance.confirm.undone")).toBe("SUBMITTED");
+    expect(actionDot("asset.return.undone")).toBe("SUBMITTED");
+    expect(actionDot("finance.confirm.reopened")).toBe("SUBMITTED");
+  });
+  it("an undone settings change is an edit: neutral, like the change it takes back", () => {
+    expect(actionDot("depreciation.override.undone")).toBe("SPARE");
+  });
+});
+
 describe("actionDot — import actions get a deliberate, explicit colour", () => {
   it("import-create settles the same way a manual create does", () => {
     expect(actionDot("import-create")).toBe("DEPLOYED");
