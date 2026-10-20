@@ -97,6 +97,14 @@ describe("DocumentsPanel groups attachments (Phase 47 Task 8)", () => {
     expect(odd).not.toContain("Mark signed");
   });
 
+  it("the Attachments heading is an h2 under the page's h1, and each list is labelled", () => {
+    const out = panel(docs);
+    expect(out).toMatch(/<h2[^>]*>Attachments<\/h2>/);
+    expect(out).not.toMatch(/<h3/);
+    expect(out).toContain('<ul aria-label="Documents"');
+    expect(out).toContain('<ul aria-label="Attachments"');
+  });
+
   it("no Attachments heading when there are none", () => {
     expect(panel([row({})])).not.toContain(">Attachments<");
   });

@@ -133,16 +133,16 @@ export function DocumentsPanel({
         </p>
       ) : (
         <>
-          {documents.length > 0 && <DocList rows={documents} canSign={canSign} onSign={sign} />}
+          {documents.length > 0 && <DocList rows={documents} canSign={canSign} onSign={sign} label="Documents" />}
           {attachments.length > 0 && (
             <section aria-labelledby="record-attachments-heading" className="flex flex-col gap-2">
               <div className="flex items-baseline justify-between gap-3">
-                <h3 id="record-attachments-heading" className="text-[13px] font-semibold text-fg">Attachments</h3>
+                <h2 id="record-attachments-heading" className="text-[13px] font-semibold text-fg">Attachments</h2>
                 <Link href={`/inventory/${encodeURIComponent(assetId)}/attachments`} className="text-xs text-accent hover:underline">
                   Open the Attachments tab
                 </Link>
               </div>
-              <DocList rows={attachments} canSign={false} onSign={sign} />
+              <DocList rows={attachments} canSign={false} onSign={sign} label="Attachments" />
             </section>
           )}
         </>

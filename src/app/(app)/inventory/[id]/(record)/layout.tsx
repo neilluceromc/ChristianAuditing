@@ -66,9 +66,12 @@ export default async function AssetRecordLayout({
   // showing "Last change" from before that queued change would read as
   // stale/misleading next to it, so the line is withheld until nothing is
   // pending.
-  const last = pending ? null : await lastLifecycleChange(asset.id);
-  // Phase 47 (spec §4.2a): the Notes and Attachments tab badges (counts only — the record never shows money here)
-  const counts = await recordTabCounts(asset.id);
+  // Phase 47 (spec §4.2a): the Notes and Attachments tab badges (counts only — the record never shows money here),
+  // read in parallel with the last change
+  const [last, counts] = await Promise.all([
+    pending ? Promise.resolve(null) : lastLifecycleChange(asset.id),
+    recordTabCounts(asset.id),
+  ]);
 
   return (
     <>

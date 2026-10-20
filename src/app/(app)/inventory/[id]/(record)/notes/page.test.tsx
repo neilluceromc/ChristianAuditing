@@ -73,6 +73,16 @@ describe("Inventory record › Notes (Phase 47 Task 8)", () => {
     expect(html).not.toContain("<textarea");
   });
 
+  it("purchasing_staff can post, reply and resolve on a Purchasing asset", async () => {
+    h.user = { id: "u5", role: "purchasing_staff" };
+    h.asset = { id: "a1", cls: "PURCHASING" };
+    const html = await render();
+    expect(html).toContain("Add a note");
+    expect(html).toContain("Mark resolved");
+    expect(html).toContain("<textarea");
+    expect(html).not.toContain("You can read these notes.");
+  });
+
   it("an asset the role cannot see is not found, and no notes are read", async () => {
     h.asset = null;
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
