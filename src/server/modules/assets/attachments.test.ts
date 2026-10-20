@@ -62,7 +62,7 @@ vi.mock("@/server/db/client", () => {
   };
 });
 
-import { assetAttachments, uploadAttachment } from "./attachments";
+import { uploadAttachment, uploadAttachmentFormAction } from "./attachments";
 
 const FIN = { id: "u-fin", name: "Ana Cruz", role: "finance_staff" };
 const IT = { id: "u-it", name: "Ivan Tan", role: "it_staff" };
@@ -177,27 +177,37 @@ describe("uploadAttachment: the write", () => {
   });
 });
 
-describe("assetAttachments (read on canSeeClass)", () => {
-  it("a viewer reads an IT asset's attachments, newest first, with kind and uploader", async () => {
-    h.user = VIEW;
-    const created = new Date("2026-10-20T02:00:00Z");
-    h.docs = [
-      { id: "d2", kind: "attachment:quotation", fileName: "q.pdf", size: 900, createdAt: created, uploadedBy: { name: "Ana Cruz" } },
-      { id: "d1", kind: "attachment:photo", fileName: "p.jpg", size: null, createdAt: created, uploadedBy: null },
-    ];
-    expect(await assetAttachments("a-it")).toEqual([
-      { id: "d2", kind: "quotation", fileName: "q.pdf", size: 900, createdAt: created, uploadedBy: "Ana Cruz" },
-      { id: "d1", kind: "photo", fileName: "p.jpg", size: null, createdAt: created, uploadedBy: null },
-    ]);
-    expect(h.docQuery).toMatchObject({
-      where: { assetId: "a-it", kind: { startsWith: "attachment:" } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+describe("ids are normalised once (fix round 1)", () => {
+  it("refuses a file as the asset id, before any read", async () => {
+    expect(await uploadAttachment(form({ assetId: new File(["a-it"], "a.txt"), kind: "photo", file: pdf() }))).toMatchObject({
+      ok: false, kind: "conflict",
     });
+    expect(h.reads).toBe(0);
+    nothingWritten();
   });
 
-  it("it_staff reads nothing on a Purchasing asset; a missing asset reads nothing", async () => {
-    h.user = IT;
-    expect(await assetAttachments("a-pur")).toEqual([]);
-    expect(await assetAttachments("nope")).toEqual([]);
-    expect(h.docQuery).toBeNull();
+  it("trims the asset id and uses the trimmed value for the row, the storage folder, the audit and the paths", async () => {
+    expect(await uploadAttachment(form({ assetId: " a-it ", kind: "photo", file: pdf("p.pdf") }))).toMatchObject({ ok: true });
+    expect(h.stored).toEqual([{ dir: "assets/a-it", name: "p.pdf" }]);
+    expect(h.creates[0].data).toMatchObject({ assetId: "a-it" });
+    expect(h.audits[0]).toMatchObject({ entityId: "a-it" });
+    expect(h.revalidated).toContain("/inventory/a-it/attachments");
+  });
+});
+
+describe("uploadAttachmentFormAction (useActionState, fix round 1)", () => {
+  it("uploads from the form, ignoring the previous state", async () => {
+    const prev = { ok: false as const, kind: "validation" as const, message: "Fix the highlighted fields." };
+    expect(await uploadAttachmentFormAction(prev, form({ assetId: "a-it", kind: "quotation", file: pdf() }))).toEqual({ ok: true, data: { id: "d1" } });
+    expect(h.creates[0].data).toMatchObject({ kind: "attachment:quotation" });
+  });
+
+  it("returns the same refusals as uploadAttachment", async () => {
+    expect(await uploadAttachmentFormAction(null, form({ assetId: "a-it", kind: "invoice", file: pdf() }))).toMatchObject({
+      ok: false, kind: "validation", fieldErrors: { kind: "Pick an attachment kind" },
+    });
+    h.user = VIEW;
+    expect(await uploadAttachmentFormAction(null, form({ assetId: "a-it", kind: "photo", file: pdf() }))).toMatchObject(FORBIDDEN);
+    nothingWritten();
   });
 });

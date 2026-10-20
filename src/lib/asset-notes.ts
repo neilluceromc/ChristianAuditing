@@ -32,12 +32,30 @@ export function canPostAnywhere(role: Role): boolean {
 
 export const NOTE_MAX_CHARS = 2000;
 
-/** The compose box's rule: trimmed, 1 to 2,000 characters. */
+/** C0 control characters other than tab (U+0009) and newline (U+000A). Postgres `text` refuses NUL outright. */
+const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F]/;
+
+/**
+ * The compose box's rule: 1 to 2,000 characters after trimming, no control characters but newline and tab. A
+ * browser sends a textarea's line breaks as CRLF, so CRLF (and a lone CR) become a newline first — the stored body
+ * and its length are the text a person typed.
+ */
 export function checkNoteBody(raw: unknown): { ok: true; body: string } | { ok: false; error: string } {
-  const body = typeof raw === "string" ? raw.trim() : "";
+  const body = typeof raw === "string" ? raw.replace(/\r\n?/g, "\n").trim() : "";
   if (!body) return { ok: false, error: "Write a note first" };
+  if (CONTROL_CHARS.test(body)) return { ok: false, error: "A note can't contain control characters" };
   if (body.length > NOTE_MAX_CHARS) return { ok: false, error: "A note is at most 2,000 characters" };
   return { ok: true, body };
+}
+
+/**
+ * An id sent by a client (an action argument or a form field): a string, trimmed, non-empty — else null. Normalise
+ * once and use the result everywhere, so an array or a File never reaches a query (`String(["x"])` is "x").
+ */
+export function normId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  return id === "" ? null : id;
 }
 
 /** One note or reply as the Notes tab shows it. */

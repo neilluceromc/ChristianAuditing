@@ -271,6 +271,19 @@ describe("change chips never show raw ids or codes", () => {
     const signed = row({ id: "cmsig00000000sig1", action: "document.signed", diff: { "form.pdf": { from: "unsigned", to: "SIGNED" } } });
     expect(one(signed)).toMatchObject({ verb: "signed form.pdf", changes: [], kind: "docs" });
   });
+
+  it("the notes' body and thread id stay hidden: no chips and no reason (Task 6 fix round 1)", () => {
+    const names = { cmthread000000t01: "Should never show" };
+    const noteId = { from: null, to: "cmthread000000t01" };
+    const posted = row({ id: "cmnp000000000np1", action: "note.posted", diff: { note: { from: null, to: "Paid by cheque" }, noteId } });
+    const replied = row({ id: "cmnr000000000nr1", action: "note.replied", diff: { note: { from: null, to: "Checked" }, noteId } });
+    const resolved = row({ id: "cmns000000000ns1", action: "note.resolved", diff: { note: { from: "open", to: "resolved" }, noteId } });
+    const reopened = row({ id: "cmno000000000no1", action: "note.reopened", diff: { note: { from: "resolved", to: "open" }, noteId } });
+    expect(one(posted, names)).toMatchObject({ verb: "added a note", changes: [], reason: null, kind: "notes" });
+    expect(one(replied, names)).toMatchObject({ verb: "replied to a note", changes: [], reason: null });
+    expect(one(resolved, names)).toMatchObject({ verb: "marked a note resolved", changes: [], reason: null });
+    expect(one(reopened, names)).toMatchObject({ verb: "reopened a note", changes: [], reason: null });
+  });
 });
 
 describe("isFinanceRelevant / historyVerb", () => {

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /*
  * Phase 47 (Task 6, spec §4.2a, §4.3; Review Focus 3): the shared asset notes, against a mocked Prisma. Every write
  * is recorded, so "a role that can see the asset but not post is refused ON THE SERVER, and nothing was written" is an
- * assertion. Reads work for those same roles.
+ * assertion. That reads work for those same roles is queries.test.ts.
  */
 
 type Note = {
@@ -80,7 +80,7 @@ vi.mock("@/server/db/client", () => {
   };
 });
 
-import { assetNotes, postNote, setNoteResolved } from "./notes";
+import { postNote, postNoteFormAction, setNoteResolved } from "./notes";
 
 const FIN = { id: "u-fin", name: "Ana Cruz", role: "finance_staff" };
 const IT = { id: "u-it", name: "Ivan Tan", role: "it_staff" };
@@ -205,7 +205,7 @@ describe("postNote: threads and replies", () => {
     });
     expect(h.audits).toEqual([{
       actorId: FIN.id, actorLabel: FIN.name, entityType: "asset", entityId: "a-it", action: "note.posted",
-      diff: { note: { from: null, to: "Paid by cheque 0042." } }, source: "web", reason: null,
+      diff: { note: { from: null, to: "Paid by cheque 0042." }, noteId: { from: null, to: "n1" } }, source: "web", reason: null,
     }]);
     expect(h.revalidated).toEqual(expect.arrayContaining([
       "/finance/assets/a-it", "/inventory/a-it", "/inventory/a-it/notes",
@@ -217,6 +217,8 @@ describe("postNote: threads and replies", () => {
     expect(await postNote({ assetId: "a-it", body: "Checked.", parentId: "t-it" })).toMatchObject({ ok: true });
     expect(h.creates[0].data).toMatchObject({ parentId: "t-it", authorId: IT.id });
     expect(h.audits[0]).toMatchObject({ action: "note.replied", source: "web", reason: null, entityId: "a-it" });
+    // fix round 1: the trail says which thread was replied to
+    expect(h.audits[0].diff).toEqual({ note: { from: null, to: "Checked." }, noteId: { from: null, to: "t-it" } });
   });
 
   it("refuses a reply to a reply (one level only)", async () => {
@@ -252,6 +254,7 @@ describe("setNoteResolved", () => {
     expect(Object.keys(h.updates[0].data).sort()).toEqual(["resolvedAt", "resolvedById"]);
     expect(h.audits).toEqual([expect.objectContaining({
       actorId: IT.id, entityType: "asset", entityId: "a-it", action: "note.resolved", source: "web", reason: null,
+      diff: { note: { from: "open", to: "resolved" }, noteId: { from: null, to: "t-it" } },
     })]);
     expect(h.revalidated).toEqual(expect.arrayContaining(["/finance/assets/a-it", "/inventory/a-it/notes"]));
   });
@@ -259,7 +262,10 @@ describe("setNoteResolved", () => {
   it("reopens a resolved thread: clears both stamps, audits note.reopened", async () => {
     expect(await setNoteResolved({ noteId: "t-done", resolved: false })).toEqual({ ok: true, data: null });
     expect(h.updates[0].data).toEqual({ resolvedAt: null, resolvedById: null });
-    expect(h.audits[0]).toMatchObject({ action: "note.reopened", source: "web" });
+    expect(h.audits[0]).toMatchObject({
+      action: "note.reopened", source: "web",
+      diff: { note: { from: "resolved", to: "open" }, noteId: { from: null, to: "t-done" } },
+    });
   });
 
   it("is a no-op (no audit) when the thread is already in that state", async () => {
@@ -275,23 +281,68 @@ describe("setNoteResolved", () => {
   });
 });
 
-describe("assetNotes (read on canSeeClass)", () => {
-  it("a viewer reads an IT asset's threads with replies", async () => {
+describe("ids are normalised once (fix round 1)", () => {
+  const asString = (v: unknown) => v as string;
+
+  it("refuses an array or a number as the asset id, before any read", async () => {
+    expect(await postNote({ assetId: asString(["a-it"]), body: "Hello" })).toMatchObject({ ok: false, kind: "conflict" });
+    expect(await postNote({ assetId: asString(42), body: "Hello" })).toMatchObject({ ok: false, kind: "conflict" });
+    expect(h.reads).toBe(0);
+    nothingWritten();
+  });
+
+  it("refuses an array as the parent id, before any read", async () => {
+    expect(await postNote({ assetId: "a-it", body: "Hi", parentId: asString(["t-it"]) })).toMatchObject({ ok: false, kind: "conflict" });
+    expect(h.reads).toBe(0);
+    nothingWritten();
+  });
+
+  it("refuses an array as the note id, before any read", async () => {
+    expect(await setNoteResolved({ noteId: asString(["t-it"]), resolved: true })).toMatchObject({ ok: false, kind: "conflict" });
+    expect(h.reads).toBe(0);
+    nothingWritten();
+  });
+
+  it("trims the ids and uses the trimmed value in every query, write and path", async () => {
+    expect(await postNote({ assetId: " a-it ", body: "Hi", parentId: " t-it " })).toMatchObject({ ok: true });
+    expect(h.creates[0].data).toMatchObject({ assetId: "a-it", parentId: "t-it" });
+    expect(h.audits[0]).toMatchObject({ entityId: "a-it" });
+    expect(h.revalidated).toContain("/finance/assets/a-it");
+    expect(await setNoteResolved({ noteId: " t-it ", resolved: true })).toMatchObject({ ok: true });
+    expect(h.updates[0].where).toMatchObject({ id: "t-it" });
+  });
+
+  it("an empty parent id posts a thread", async () => {
+    expect(await postNote({ assetId: "a-it", body: "Hi", parentId: "  " })).toMatchObject({ ok: true });
+    expect(h.creates[0].data.parentId).toBeNull();
+    expect(h.audits[0]).toMatchObject({ action: "note.posted" });
+  });
+});
+
+describe("postNoteFormAction (useActionState, fix round 1)", () => {
+  const fd = (fields: Record<string, string | Blob>) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.append(k, v);
+    return f;
+  };
+
+  it("posts a thread from the form, ignoring the previous state", async () => {
+    const prev = { ok: false as const, kind: "validation" as const, message: "Fix the highlighted fields." };
+    expect(await postNoteFormAction(prev, fd({ assetId: "a-it", body: "From the form" }))).toEqual({ ok: true, data: { id: "n1" } });
+    expect(h.creates[0].data).toMatchObject({ assetId: "a-it", parentId: null, body: "From the form" });
+  });
+
+  it("posts a reply when the form carries parentId", async () => {
+    expect(await postNoteFormAction(null, fd({ assetId: "a-it", body: "Reply", parentId: "t-it" }))).toMatchObject({ ok: true });
+    expect(h.audits[0]).toMatchObject({ action: "note.replied" });
+  });
+
+  it("returns the same refusals as postNote", async () => {
     h.user = VIEW;
-    const threads = await assetNotes("a-it");
-    expect(threads.map((t) => t.id)).toEqual(["t-done", "t-it"]);
-    expect(threads[1].replies).toEqual([expect.objectContaining({ id: "r-it", authorLabel: IT.name, authorRole: "it_staff" })]);
-    expect(threads[0]).toMatchObject({ resolvedByLabel: FIN.name });
-  });
-
-  it("purchasing_staff reads an IT asset it cannot post on", async () => {
-    h.user = PUR;
-    expect((await assetNotes("a-it")).length).toBe(2);
-  });
-
-  it("it_staff reads nothing on a Purchasing asset, and a missing asset reads nothing", async () => {
-    h.user = IT;
-    expect(await assetNotes("a-pur")).toEqual([]);
-    expect(await assetNotes("nope")).toEqual([]);
+    expect(await postNoteFormAction(null, fd({ assetId: "a-it", body: "Hi" }))).toMatchObject(FORBIDDEN);
+    h.user = FIN;
+    expect(await postNoteFormAction(null, fd({ assetId: "a-it", body: " " }))).toMatchObject({ ok: false, kind: "validation" });
+    expect(await postNoteFormAction(null, fd({ assetId: new Blob(["a-it"]), body: "Hi" }))).toMatchObject({ ok: false, kind: "conflict" });
+    nothingWritten();
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AssetClass, Role } from "@prisma/client";
 import {
   ATTACHMENT_KINDS, ATTACHMENT_KIND_LABELS, NOTE_MAX_CHARS, attachmentDocKind, attachmentKindOf, canPostOnAsset,
-  checkNoteBody, isAttachmentKind, threadNotes,
+  checkNoteBody, isAttachmentKind, normId, threadNotes,
 } from "./asset-notes";
 import { canSeeClass } from "./asset-class";
 
@@ -53,6 +53,33 @@ describe("checkNoteBody", () => {
   it("refuses more than 2,000 characters after trimming", () => {
     expect(NOTE_MAX_CHARS).toBe(2000);
     expect(checkNoteBody("z".repeat(2001))).toEqual({ ok: false, error: "A note is at most 2,000 characters" });
+  });
+});
+
+describe("checkNoteBody: control characters (fix round 1)", () => {
+  const ERR = { ok: false, error: "A note can't contain control characters" };
+  it("refuses NUL and the other C0 controls", () => {
+    for (const c of ["\u0000", "\u0001", "\u0007", "\u0008", "\u000B", "\u000C", "\u001B", "\u001F"]) {
+      expect(checkNoteBody(`Paid${c} in full`)).toEqual(ERR);
+    }
+  });
+  it("keeps newlines and tabs, and turns a browser's CRLF (and a lone CR) into newlines", () => {
+    expect(checkNoteBody("Line one\n\tindented")).toEqual({ ok: true, body: "Line one\n\tindented" });
+    expect(checkNoteBody("One\r\nTwo\rThree\r\n")).toEqual({ ok: true, body: "One\nTwo\nThree" });
+  });
+  it("measures the length after CRLF becomes LF", () => {
+    const body = `${"a".repeat(999)}\r\n${"b".repeat(1000)}`; // 2,001 sent, 2,000 stored
+    expect(checkNoteBody(body)).toEqual({ ok: true, body: `${"a".repeat(999)}\n${"b".repeat(1000)}` });
+  });
+});
+
+describe("normId (fix round 1)", () => {
+  it("is a trimmed, non-empty string", () => {
+    expect(normId(" cmabc123 ")).toBe("cmabc123");
+    expect(normId("cmabc123")).toBe("cmabc123");
+  });
+  it("refuses anything else", () => {
+    for (const bad of ["", "   ", ["cmabc123"], 42, null, undefined, { id: "x" }, new Blob(["x"])]) expect(normId(bad)).toBeNull();
   });
 });
 

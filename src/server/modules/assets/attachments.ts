@@ -2,22 +2,20 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
-import { actionUser, requireUser } from "@/server/auth/guards";
+import { actionUser } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { conflict, forbidden, ok, rateLimited, validationError, type ActionResult } from "@/server/action-result";
 import { canSeeClass } from "@/lib/asset-class";
-import {
-  ATTACHMENT_DOC_PREFIX, attachmentDocKind, attachmentKindOf, canPostAnywhere, canPostOnAsset, isAttachmentKind,
-  type AssetAttachmentView,
-} from "@/lib/asset-notes";
+import { attachmentDocKind, canPostAnywhere, canPostOnAsset, isAttachmentKind, normId } from "@/lib/asset-notes";
 import { storeUpload, validateUpload } from "@/server/uploads";
 
 /*
  * Phase 47 (Task 6, spec §4.2a, §4.4): asset attachments — AssetDocument rows with kind `attachment:<kind>`, shared
  * with everyone who can see the asset. The upload mirrors uploadDocument (inventory/document-actions.ts): the same
  * validateUpload / storeUpload (4 MB cap, PDF/PNG/JPG, the storage driver), rate limit and audit — but the guard is
- * canSeeClass AND canPostOnAsset. Nothing deletes an attachment; replacing one uploads a new one.
+ * canSeeClass AND canPostOnAsset. Nothing deletes an attachment; replacing one uploads a new one, and
+ * markDocumentSigned refuses one. The read (assetAttachments) is in ./queries.ts, off the server-action surface.
  */
 
 function revalidateAsset(assetId: string) {
@@ -34,7 +32,7 @@ export async function uploadAttachment(formData: FormData): Promise<ActionResult
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const assetId = String(formData.get("assetId") ?? "");
+  const assetId = normId(formData.get("assetId"));
   const kind = formData.get("kind");
   if (!assetId) return conflict("Missing asset.");
   if (!isAttachmentKind(kind)) return validationError({ kind: "Pick an attachment kind" });
@@ -69,23 +67,13 @@ export async function uploadAttachment(formData: FormData): Promise<ActionResult
   return ok({ id: doc.id });
 }
 
-/** The asset's attachments, newest first, for anyone who can see the asset's class; [] otherwise. */
-export async function assetAttachments(assetId: string): Promise<AssetAttachmentView[]> {
-  const user = await requireUser();
-  const asset = await prisma.asset.findUnique({ where: { id: String(assetId ?? "") }, select: { cls: true } });
-  if (!asset || !canSeeClass(user.role, asset.cls)) return [];
-  const rows = await prisma.assetDocument.findMany({
-    where: { assetId, kind: { startsWith: ATTACHMENT_DOC_PREFIX } },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true, kind: true, fileName: true, size: true, createdAt: true, uploadedBy: { select: { name: true } } },
-  });
-  return rows.map((r) => ({
-    id: r.id,
-    // an attachment:<kind> this build does not know reads as Other rather than vanishing
-    kind: attachmentKindOf(r.kind) ?? "other",
-    fileName: r.fileName,
-    size: r.size,
-    createdAt: r.createdAt,
-    uploadedBy: r.uploadedBy?.name ?? null,
-  }));
+/**
+ * The same as uploadAttachment for `useActionState(uploadAttachmentFormAction, null)`: the form's `assetId`, `kind`
+ * and `file` fields. The previous state is ignored.
+ */
+export async function uploadAttachmentFormAction(
+  _prev: ActionResult<{ id: string }> | null,
+  formData: FormData,
+): Promise<ActionResult<{ id: string }>> {
+  return uploadAttachment(formData);
 }

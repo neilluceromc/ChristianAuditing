@@ -255,8 +255,11 @@ export function isFinanceRelevant(e: { entityType: string; action: string; diff:
 
 // ---- change chips ---------------------------------------------------------------------------------------------------
 
-/** Diff keys that are not changes to show: the actor's own name, Cris's marker, the reason-bearing notes, objects. */
-const HIDDEN_FIELDS = new Set(["via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "document", "attachment"]);
+/**
+ * Diff keys that are not changes to show: the actor's own name, Cris's marker, the reason-bearing notes, objects,
+ * and the asset notes' thread id (`noteId`, Task 6: it says which thread, never a change).
+ */
+const HIDDEN_FIELDS = new Set(["via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "noteId", "document", "attachment"]);
 const MONEY_FIELDS = new Set(["cost", "total", "fees", "salvage", "unitCost", "price", "repairQuote"]);
 const CHIP_LABELS: Record<string, string> = {
   lifeMonths: "useful life", quantity: "units", fees: "delivery and fees", unitCost: "unit cost",
