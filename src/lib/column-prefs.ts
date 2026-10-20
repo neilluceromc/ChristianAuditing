@@ -18,8 +18,12 @@ export const COLUMN_LABELS: { [K in ColumnPrefKey]: Record<(typeof COLUMN_PREF_K
 /** Phase 45 (spec §2.3): what a user who never chose columns sees; Registration, Purchased and Warranty are off. */
 export const DEFAULT_INVENTORY_COLUMNS: readonly string[] = ["serial", "category", "assigned"];
 
-/** The UserPreference key holding the allowed column keys at the time the user last saved their columns. */
-export const INVENTORY_COLUMNS_SEEN_KEY = "columns:inventory:seen";
+/** The UserPreference key holding the allowed column keys at the time the user last saved that table's columns. */
+export function seenKeyOf(key: ColumnPrefKey): `${ColumnPrefKey}:seen` {
+  return `${key}:seen`;
+}
+
+export const INVENTORY_COLUMNS_SEEN_KEY = seenKeyOf("columns:inventory");
 
 /**
  * Phase 45 (spec §2.3): the visible columns from the saved set and the seen marker. Nothing saved gives the

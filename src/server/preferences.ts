@@ -7,7 +7,7 @@ import { checkRate } from "./rate-limit";
 import {
   forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "./action-result";
-import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
+import { COLUMN_PREF_KEYS, seenKeyOf } from "@/lib/column-prefs";
 
 const schema = z.object({
   key: z.literal("columns:inventory"), // extend to a union as more tables gain choosers
@@ -39,9 +39,9 @@ export async function saveColumns(input: unknown): Promise<ActionResult<null>> {
       create: { userId: user.id, key: parsed.data.key, value: visible },
     }),
     prisma.userPreference.upsert({
-      where: { userId_key: { userId: user.id, key: INVENTORY_COLUMNS_SEEN_KEY } },
+      where: { userId_key: { userId: user.id, key: seenKeyOf(parsed.data.key) } },
       update: { value: [...allowed] },
-      create: { userId: user.id, key: INVENTORY_COLUMNS_SEEN_KEY, value: [...allowed] },
+      create: { userId: user.id, key: seenKeyOf(parsed.data.key), value: [...allowed] },
     }),
   ]);
   return ok(null);

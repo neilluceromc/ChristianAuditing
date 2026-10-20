@@ -22,6 +22,8 @@ export interface ListState {
 
 export interface ListConfig {
   facets: string[];
+  /** facets whose values are a closed set (e.g. a flag `attention=1`): any other value parses as absent */
+  facetValues?: Record<string, readonly string[]>;
   sortable: string[];
   defaultSort: SortKey[];
 }
@@ -33,7 +35,9 @@ export function parseListState(params: URLSearchParams, config: ListConfig): Lis
   for (const facet of config.facets) {
     const raw = params.get(facet);
     if (!raw) continue;
-    const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
+    const allowedValues = config.facetValues?.[facet];
+    const values = raw.split(",").map((v) => v.trim()).filter(Boolean)
+      .filter((v) => !allowedValues || allowedValues.includes(v));
     if (values.length) filters[facet] = values;
   }
 

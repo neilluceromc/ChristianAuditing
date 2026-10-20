@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_STATUSES, assigneeWhere, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
+  ASSET_STATUSES, assigneeWhere, attentionFacetOption, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
   parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
@@ -268,6 +268,14 @@ describe("buildAssetWhere attention facet (Phase 45 §2.1)", () => {
   it("coexists with the other derived facets without dropping either", () => {
     const where = buildAssetWhere(parse("attention=1&assignee=none"), null, "IT", now);
     expect(where.AND).toEqual([{ assigneeId: null }, attentionWhere(now)]);
+  });
+  it("attention=0 or any value but 1 parses as absent", () => {
+    expect(parse("attention=0").filters.attention).toBeUndefined();
+    expect(parse("attention=yes").filters.attention).toBeUndefined();
+    expect(parse("attention=1").filters.attention).toEqual(["1"]);
+  });
+  it("the facet option reads Need attention, not 1", () => {
+    expect(attentionFacetOption(7)).toEqual({ value: "1", label: "Need attention", count: 7 });
   });
   it("is absent unless the value is 1", () => {
     expect(buildAssetWhere(parse("attention=0"), null, "IT", now).AND).toBeUndefined();

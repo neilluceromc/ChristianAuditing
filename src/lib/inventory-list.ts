@@ -30,6 +30,7 @@ export const INVENTORY_LIST_CONFIG: ListConfig = {
   facets: ["status", "category", "type", "assignee", "stage", "provenance", "reg",
     // Phase 45 (spec §2.1): the Need attention tile, `?attention=1` - a filter, where `sort=attention` is only an order
     "attention"],
+  facetValues: { attention: ["1"] },
   sortable: [
     "tag", "model", "category", "status", "purchasedAt", "warrantyUntil",
     // the repairs view's Down column
@@ -39,6 +40,14 @@ export const INVENTORY_LIST_CONFIG: ListConfig = {
   ],
   defaultSort: [{ key: "tag", dir: "asc" }],
 };
+
+/** The Need attention filter's chip and facet label (`?attention=1`). */
+export const ATTENTION_FACET_LABEL = "Need attention";
+
+/** The `attention` entry of `facetOptions`: one option, so the generic chip loop reads "Need attention", not "1". */
+export function attentionFacetOption(count: number): { value: string; label: string; count: number } {
+  return { value: "1", label: ATTENTION_FACET_LABEL, count };
+}
 
 /** A single year, or the literal bucket for assets with no `purchasedAt` at all. */
 export type PurchaseYearValue = number | "none";

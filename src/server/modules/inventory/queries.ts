@@ -3,7 +3,7 @@ import { Prisma, type AssetClass, type AssetStatus, type Role } from "@prisma/cl
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
-  buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
+  attentionFacetOption, buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, STATUS_LABEL, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
@@ -205,6 +205,7 @@ export async function repairStageIds(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
   cls: AssetClass,
+  now: Date = new Date(),
 ): Promise<string[] | null> {
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
   if (stages.length === 0) return null;
@@ -225,7 +226,7 @@ export async function repairStageIds(
     Object.entries(state.filters).some(([key, values]) => key !== "stage" && (values?.length ?? 0) > 0);
   if (!hasOtherFilters) return kept;
 
-  const where = buildAssetWhere(state, purchaseYear, cls);
+  const where = buildAssetWhere(state, purchaseYear, cls, now);
   const candidates = await prisma.asset.findMany({ where, select: { id: true } });
   const candidateIds = new Set(candidates.map((c) => c.id));
   return kept.filter((id) => candidateIds.has(id));
@@ -266,8 +267,8 @@ export async function listAssets(
   // pages that id set through the same count/skip/take snapshot as every other view. Until this
   // phase it loaded every candidate row with its includes and paged the array in memory.
   const where: Prisma.AssetWhereInput = stages.length > 0
-    ? { id: { in: (await repairStageIds(state, purchaseYear, cls)) ?? [] } }
-    : buildAssetWhere(state, purchaseYear, cls);
+    ? { id: { in: (await repairStageIds(state, purchaseYear, cls, now)) ?? [] } }
+    : buildAssetWhere(state, purchaseYear, cls, now);
 
   // Phase 30 (plan P-10): attentionWhere agrees with attentionOf boundary for boundary, so this
   // count and the markers on the rows cannot disagree.
@@ -373,6 +374,7 @@ export async function facetOptions(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
   cls: AssetClass,
+  now: Date = new Date(),
 ): Promise<Record<string, FacetOption[]>> {
   const without = (facet: string): ListState => ({
     ...state,
@@ -397,7 +399,7 @@ export async function facetOptions(
   // Phase 36 (spec sec. 4.3): the Assigned facet no longer lists every holder - only the CHOSEN people
   // (names + counts) and Unassigned; the rest is found by searching (`searchAssignees`).
   const chosenIds = (state.filters.assignee ?? []).filter((v) => v !== UNASSIGNED);
-  const [statusG, categoryG, typeG, assigneeG, categories, types, chosen, provenanceCounts, regCounts] = await Promise.all([
+  const [statusG, categoryG, typeG, assigneeG, categories, types, chosen, provenanceCounts, regCounts, attentionCount] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear, cls), _count: true }),
@@ -422,6 +424,8 @@ export async function facetOptions(
         prisma.asset.count({ where: { AND: [buildAssetWhere(without("reg"), purchaseYear, cls), regWhere(r)] } }),
       ),
     ),
+    // the Need attention filter is derived too: the count is what turning it on would show
+    prisma.asset.count({ where: { AND: [buildAssetWhere(without("attention"), purchaseYear, cls, now), attentionWhere(now)] } }),
   ]);
 
   return {
@@ -443,6 +447,7 @@ export async function facetOptions(
     ],
     provenance: PROVENANCES.map((p, i) => ({ value: p, label: PROVENANCE_LABEL[p], count: provenanceCounts[i] })),
     reg: REG_STATES.map((r, i) => ({ value: r, label: REG_LABEL[r], count: regCounts[i] })),
+    attention: [attentionFacetOption(attentionCount)],
   };
 }
 

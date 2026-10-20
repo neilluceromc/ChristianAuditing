@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  COLUMN_LABELS, COLUMN_PREF_KEYS, DEFAULT_INVENTORY_COLUMNS, resolveInventoryColumns, type ColumnPrefKey,
+  COLUMN_LABELS, COLUMN_PREF_KEYS, DEFAULT_INVENTORY_COLUMNS, resolveInventoryColumns, seenKeyOf, type ColumnPrefKey,
 } from "./column-prefs";
 
 describe("COLUMN_LABELS (Phase 40 §2.5)", () => {
@@ -26,6 +26,12 @@ describe("serial column (Phase 45 §2.3)", () => {
   it("is hideable and labelled Serial number", () => {
     expect(COLUMN_PREF_KEYS["columns:inventory"]).toContain("serial");
     expect(COLUMN_LABELS["columns:inventory"].serial).toBe("Serial number");
+  });
+});
+
+describe("seenKeyOf", () => {
+  it("derives the marker key from the saved key", () => {
+    expect(seenKeyOf("columns:inventory")).toBe("columns:inventory:seen");
   });
 });
 
