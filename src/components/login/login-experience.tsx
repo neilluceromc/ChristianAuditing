@@ -19,7 +19,8 @@ import { FORWARD_MS_PER_CHAR, ForwardCris } from "./forward-cris";
 import { RoomScene } from "./room-scene";
 import { SignInCard, type CrisCue, type SignInCardProps } from "./sign-in-card";
 import { crisLine, errorLine, type Step } from "./login-steps";
-import { useReducedMotion, useRoomLoop } from "./use-room-loop";
+import { useReducedMotion } from "@/components/ui/use-reduced-motion";
+import { useRoomLoop } from "./use-room-loop";
 import "./login.css";
 
 export type LoginExperienceProps = {

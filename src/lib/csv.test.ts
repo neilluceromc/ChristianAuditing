@@ -12,4 +12,11 @@ describe("csv cells", () => {
     expect(csvText("ok")).toBe("ok");
     expect(csvTextCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
   });
+  it("also guards a leading tab or carriage return (the OWASP set), and only when it leads", () => {
+    expect(csvText("\t=1+1")).toBe("'\t=1+1");
+    expect(csvText("\r=1+1")).toBe("'\r=1+1");
+    expect(csvTextCell("\r=1+1")).toBe(`"'\r=1+1"`);
+    expect(csvText("a\tb")).toBe("a\tb");
+    expect(csvText("note\r")).toBe("note\r");
+  });
 });

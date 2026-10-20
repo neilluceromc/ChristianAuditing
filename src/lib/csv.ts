@@ -8,9 +8,12 @@ export function csvCell(v: string): string {
   return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
-/** A cell a spreadsheet would read as a formula (it starts with = + - @) gets a leading apostrophe, so it stays text. */
+/**
+ * A cell a spreadsheet would read as a formula (it starts with = + - @, or a tab or carriage return, the OWASP set)
+ * gets a leading apostrophe, so it stays text.
+ */
 export function csvText(v: string): string {
-  return /^[=+\-@]/.test(v) ? `'${v}` : v;
+  return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
 }
 
 /** Free text into a cell: the formula guard, then the quoting. */

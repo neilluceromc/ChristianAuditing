@@ -12,7 +12,7 @@
 //   - it scales down with the screen (the svg fills its box; the bubble is sized in container units).
 // The changing "Cris is …" line is deliberately plain text, not a live region: it changes every few seconds.
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
-import { useReducedMotion } from "@/components/login/use-room-loop";
+import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import { CAW_MOODS, blobAt, cawShown, createPhaseCycle, moodAt, ringOf, type CawMood, type MoodFrame } from "./cris-at-work-logic";
 import "./cris-at-work.css";
 

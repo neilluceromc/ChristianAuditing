@@ -1,6 +1,5 @@
 import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { isStatusOf } from "@/lib/asset-class";
 import { asOfMonth, monthLabel } from "@/lib/depreciation";
 import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, pageOf } from "@/lib/paging";
 import { finWhere, regWhere, type FinFilter } from "@/lib/registration";
@@ -10,10 +9,6 @@ import {
   type CategoryTile, type FinanceSort, type LifeFilter, type LifeStage,
 } from "@/lib/finance-list";
 import { depRows, type DepAssetRow } from "./depreciation-queries";
-
-export function parseAssetStatus(raw: string | null | undefined, cls: AssetClass): AssetStatus | null {
-  return raw != null && isStatusOf(cls, raw) ? raw : null;
-}
 
 export interface FinanceListParams {
   cls: AssetClass; status: AssetStatus | null; fin: FinFilter | null; q: string; page: number;
