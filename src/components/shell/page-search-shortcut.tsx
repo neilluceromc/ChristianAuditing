@@ -1,16 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { slashFocusesSearch } from "@/lib/shortcuts";
-
-/**
- * Every overlay that "/" must stand aside for. Each is rendered only while
- * open: modal dialogs, drawers and the command palette (`aria-modal`), the
- * non-modal filter popups (FacetDropdown, the people facet and the column
- * chooser are `role="dialog"`), Menu popups (`role="menu"`) and combobox
- * lists (`role="listbox"`).
- */
-const OVERLAY = '[aria-modal="true"], [role="dialog"], [role="menu"], [role="listbox"]';
+import { SHORTCUT_OVERLAY as OVERLAY, slashFocusesSearch } from "@/lib/shortcuts";
 
 /**
  * The page's search box: only a field explicitly marked `data-page-search`

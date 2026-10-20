@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isMacPlatform, paletteShortcutOpens, searchShortcutLabel, slashFocusesSearch, type SlashKey } from "./shortcuts";
+import {
+  bracketTogglesSidebar,
+  isMacPlatform,
+  paletteShortcutOpens,
+  searchShortcutLabel,
+  slashFocusesSearch,
+  type SlashKey,
+} from "./shortcuts";
 
 describe("searchShortcutLabel (spec §2.3 / §4: Ctrl K, or ⌘K on Mac)", () => {
   it("reads ⌘K on Apple platforms", () => {
@@ -81,5 +88,36 @@ describe("paletteShortcutOpens — Ctrl K / ⌘K opens the palette, never under 
   it("does nothing while a dialog or drawer other than the palette is open", () => {
     expect(press({ otherModalOpen: true })).toBe(false);
     expect(press({ metaKey: true, ctrlKey: false, otherModalOpen: true })).toBe(false);
+  });
+});
+
+describe("bracketTogglesSidebar (Phase 46 spec §4.1: \"[\" collapses or expands the sidebar, never while typing)", () => {
+  const bracket: SlashKey = { ...base, key: "[" };
+  it("takes a bare [ pressed outside any field", () => {
+    expect(bracketTogglesSidebar(bracket)).toBe(true);
+    expect(bracketTogglesSidebar({ ...bracket, targetTag: "A" })).toBe(true);
+    expect(bracketTogglesSidebar({ ...bracket, targetTag: "BUTTON" })).toBe(true);
+  });
+
+  it("ignores any other key, ] included", () => {
+    for (const key of ["]", "{", "/", "b"]) expect(bracketTogglesSidebar({ ...bracket, key })).toBe(false);
+  });
+
+  it("ignores [ with a modifier held", () => {
+    expect(bracketTogglesSidebar({ ...bracket, ctrlKey: true })).toBe(false);
+    expect(bracketTogglesSidebar({ ...bracket, metaKey: true })).toBe(false);
+    expect(bracketTogglesSidebar({ ...bracket, altKey: true })).toBe(false);
+  });
+
+  it("ignores [ while typing in an input, textarea, select or contenteditable", () => {
+    for (const tag of ["INPUT", "TEXTAREA", "SELECT"]) expect(bracketTogglesSidebar({ ...bracket, targetTag: tag })).toBe(false);
+    expect(bracketTogglesSidebar({ ...bracket, targetTag: "INPUT", targetType: "checkbox" })).toBe(false);
+    expect(bracketTogglesSidebar({ ...bracket, targetTag: "DIV", targetEditable: true })).toBe(false);
+  });
+
+  it("stands aside while a dialog, menu or popup is open, or for a key something else handled", () => {
+    expect(bracketTogglesSidebar({ ...bracket, overlayOpen: true })).toBe(false);
+    expect(bracketTogglesSidebar({ ...bracket, targetInOverlay: true })).toBe(false);
+    expect(bracketTogglesSidebar({ ...bracket, defaultPrevented: true })).toBe(false);
   });
 });

@@ -15,6 +15,8 @@ import { navDestinations } from "@/lib/shell";
 import { NavigationTracker } from "@/components/shell/navigation-tracker";
 import { StuckNavGuard } from "@/components/shell/stuck-nav-guard";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
+import { SidebarShell } from "@/components/shell/sidebar-collapse";
+import { parseSidebar, SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
 import { defaultClassFor } from "@/lib/asset-class";
 import { getApprovalsBadge, readNavCounts } from "@/server/modules/home/nav-counts";
@@ -43,9 +45,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const badges: NavBadges = { approvals, counts: { ...counts, approvals: approvals.open } };
   // Spec §4.2: /inventory drops `cls` from its URLs when it is the viewer's default, so the nav matcher needs it.
   const defaultCls = defaultClassFor(user.role);
+  // Phase 46 spec §4.1: the sidebar's rail or full state, read here so the first paint is already right.
+  const sidebar = parseSidebar(jar.get(SIDEBAR_COOKIE)?.value);
 
   return (
-    <div className="flex min-h-screen">
+    <SidebarShell initial={sidebar}>
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:rounded-(--radius-btn) focus:bg-accent focus:px-3 focus:py-2 focus:text-[13px] focus:text-accent-fg print:hidden"
@@ -87,7 +91,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Suspense fallback={null}><NavigationTracker /></Suspense>
       {/* Same-page filter links that never commit in production fall back to an ordinary load (src/lib/stuck-nav.ts). */}
       <StuckNavGuard />
-    </div>
+    </SidebarShell>
   );
 }
 

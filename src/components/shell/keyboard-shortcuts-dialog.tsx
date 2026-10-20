@@ -33,6 +33,7 @@ export function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
   const rows: Array<{ keys: string[]; what: string }> = [
     { keys: [search], what: "Search assets, people, requests" },
     { keys: ["/"], what: "Focus this page's search box" },
+    { keys: ["["], what: "Collapse or expand the sidebar" },
     { keys: ["J", "K"], what: "Approvals: move down or up the queue" },
     { keys: ["A"], what: "Approvals: run the main action (approve, or retry a failed one)" },
     { keys: ["Esc"], what: "Close a panel or dialog" },

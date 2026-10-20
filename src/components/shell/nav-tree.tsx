@@ -6,10 +6,10 @@ import type { NavCurrent } from "@/lib/nav-match";
 import type { NavView, VisibleItem, VisibleSection } from "@/lib/workspaces";
 
 /** Spec §4.5: the chip highlight — the hover fill plus a 1 px inset strong ring. */
-const CHIP = "bg-surface-subtle shadow-[inset_0_0_0_1px_var(--border-strong)]";
+export const CHIP = "bg-surface-subtle shadow-[inset_0_0_0_1px_var(--border-strong)]";
 
 /** Spec §4.3: mono 11 px muted, right-aligned; red with a 6 px dot only for urgent counts. Zero never shows. */
-function Count({ badge }: { badge: BadgeView | null }) {
+export function Count({ badge }: { badge: BadgeView | null }) {
   if (!badge) return null;
   return (
     <span

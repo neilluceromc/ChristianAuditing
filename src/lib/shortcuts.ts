@@ -65,3 +65,23 @@ export function slashFocusesSearch(e: SlashKey): boolean {
   if (e.targetEditable) return false;
   return e.targetTag !== "INPUT" && e.targetTag !== "TEXTAREA" && e.targetTag !== "SELECT";
 }
+
+/**
+ * Phase 46 spec §4.1: "[" collapses or expands the desktop sidebar. Like "/", it does nothing while typing in a
+ * field (any input, textarea, select or contenteditable), with a modifier held, or while an overlay is open or
+ * holds the focus (a menu's type-ahead or a dialog must keep the key).
+ */
+export function bracketTogglesSidebar(e: SlashKey): boolean {
+  if (e.key !== "[" || e.defaultPrevented) return false;
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  if (e.overlayOpen || e.targetInOverlay) return false;
+  if (e.targetEditable) return false;
+  return e.targetTag !== "INPUT" && e.targetTag !== "TEXTAREA" && e.targetTag !== "SELECT";
+}
+
+/**
+ * Every overlay a single-key shortcut ("/", "[") stands aside for. Each is rendered only while open: modal dialogs,
+ * drawers and the command palette (`aria-modal`), the non-modal filter popups (FacetDropdown, the people facet and
+ * the column chooser are `role="dialog"`), Menu popups (`role="menu"`) and combobox lists (`role="listbox"`).
+ */
+export const SHORTCUT_OVERLAY = '[aria-modal="true"], [role="dialog"], [role="menu"], [role="listbox"]';
