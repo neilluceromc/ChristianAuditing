@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   calls: [] as unknown[],
   rows: [] as Array<{ day: Date; key: string; value: bigint }>,
+  fail: null as Error | null,
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/server/db/client", () => ({
     metricSnapshot: {
       findMany: async (args: unknown) => {
         h.calls.push(args);
+        if (h.fail) throw h.fail;
         return h.rows;
       },
     },
@@ -27,6 +29,7 @@ const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 beforeEach(() => {
   h.calls = [];
   h.rows = [];
+  h.fail = null;
 });
 
 describe("metricHistory", () => {
@@ -57,5 +60,22 @@ describe("metricHistory", () => {
   it("no keys → no read, an empty record", async () => {
     expect(await metricHistory([], NOW)).toEqual({});
     expect(h.calls).toHaveLength(0);
+  });
+
+  it("fails soft: a failed read is logged and every key reads as 8 nulls (collecting history), not a throw", async () => {
+    h.fail = new Error("connection lost");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const r = await metricHistory(["it.spare", "fin.bookC"], NOW);
+      expect(r).toEqual({
+        "it.spare": [null, null, null, null, null, null, null, null],
+        "fin.bookC": [null, null, null, null, null, null, null, null],
+      });
+      expect(h.calls).toHaveLength(1);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log.mock.calls[0]).toContain(h.fail);
+    } finally {
+      log.mockRestore();
+    }
   });
 });
