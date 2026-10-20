@@ -100,6 +100,12 @@
 
   /* Phase 42: the sidebar nav's edge shadows while it overflows (.nav-scroll-shadows) */
   --scroll-shadow: rgba(16, 24, 40, 0.1);
+
+  /* Phase 46 (spec §3.3): chart series colours, for series only — never text, never status. Validated on --surface;
+     the light aqua is under 3:1, so every chart also has direct labels and a table view. */
+  --chart-1: #2563a8;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
 }
 
 [data-density="compact"] {
@@ -244,6 +250,11 @@
   --placeholder-stripes: repeating-linear-gradient(135deg, #1a1e25 0 6px, #1d2129 6px 12px);
 
   --scroll-shadow: rgba(0, 0, 0, 0.45);
+
+  /* chart series, re-derived for --surface #171a20 */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
 }
 
 /* ── Map tokens into Tailwind utility namespaces ── */
@@ -269,6 +280,9 @@
   --color-accent-soft-border: var(--accent-soft-border);
   --color-accent-soft-text: var(--accent-soft-text);
   --color-accent-tint: var(--accent-tint);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
 
   --font-sans: var(--font-geist-sans), "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "Cascadia Mono", Consolas, monospace;

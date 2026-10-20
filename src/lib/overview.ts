@@ -57,7 +57,10 @@ export interface NeedItem {
 
 export interface TrendSeries {
   title: string;
+  /** what one point counts ("assets"); "₱" = money */
   unit: string;
+  /** what one label is — the table's first column and the card's "last 12 weeks" */
+  period?: "week" | "day" | "month";
   labels: string[];
   /** at most 3 series, each with one value per label */
   series: { name: string; values: number[] }[];
@@ -69,6 +72,10 @@ export interface MakeUp {
   title: string;
   rows: { label: string; value: number; tone: MakeUpTone; href?: string }[];
   money?: true;
+  /** what one unit of a count row is ("assets"): a segment names itself "Deployed: 12 assets" */
+  unit?: string;
+  /** one line under the legend (IT: does the spare pool cover next week's hires?) */
+  note?: string;
 }
 
 export interface Ranked {
@@ -239,10 +246,12 @@ const FLEET_TONE: Record<string, MakeUpTone> = {
   DEPLOYED: "chart-1", TEMPORARY: "chart-2", SPARE: "chart-3", DEFECTIVE: "warn", MISSING: "bad",
 };
 
-/** The fleet's stacked bar: one row per status slice, each linking to that status's filtered inventory. */
-export function fleetMakeUp(fleet: { slices: { status: string; count: number; href: string }[] }): MakeUp {
+/** The fleet's stacked bar: one row per status slice, each linking to that status's filtered inventory; the coverage line under it. */
+export function fleetMakeUp(fleet: { slices: { status: string; count: number; href: string }[]; coverage?: string }): MakeUp {
   return {
     title: "Fleet by status",
+    unit: "assets",
+    ...(fleet.coverage ? { note: fleet.coverage } : {}),
     rows: fleet.slices.map((s) => ({
       label: statusLabel(s.status), value: s.count, tone: FLEET_TONE[s.status] ?? "neutral", href: s.href,
     })),
@@ -448,6 +457,7 @@ const REQUEST_TONE: Record<string, MakeUpTone> = {
 export function requestStateMakeUp(counts: Record<string, number>): MakeUp {
   return {
     title: "Requests by state",
+    unit: "requests",
     rows: PURCHASE_TABS.filter((t) => t.id !== "ALL" && (counts[t.id] ?? 0) > 0).map((t) => ({
       label: t.label, value: counts[t.id], tone: REQUEST_TONE[t.id] ?? "neutral", href: t.href,
     })),
@@ -483,6 +493,7 @@ const DELIVERY_ROWS = [
 export function deliveryMakeUp(counts: Record<string, number>): MakeUp {
   return {
     title: "Webhook deliveries · 7 days",
+    unit: "deliveries",
     rows: DELIVERY_ROWS.filter((d) => (counts[d.status] ?? 0) > 0).map((d) => ({ label: d.label, value: counts[d.status], tone: d.tone })),
   };
 }

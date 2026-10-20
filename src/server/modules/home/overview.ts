@@ -167,6 +167,7 @@ async function itTrend(now: Date): Promise<TrendSeries> {
   return {
     title: "Asset movements per week",
     unit: "assets",
+    period: "week",
     labels: weekLabels(now, TREND_WEEKS),
     series: [
       { name: "Assigned", values: weekBuckets(dates.assigned, now, TREND_WEEKS) },
@@ -269,6 +270,7 @@ async function purchaseFlowTrend(now: Date): Promise<TrendSeries> {
   return {
     title: "Requests per week",
     unit: "requests",
+    period: "week",
     labels: weekLabels(now, TREND_WEEKS),
     series: [
       { name: "Created", values: weekBuckets(created.map((r) => r.createdAt), now, TREND_WEEKS) },
@@ -427,6 +429,7 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
     trend: {
       title: "Capitalized per month",
       unit: "₱",
+      period: "month",
       labels: monthLabels(now, TREND_MONTHS),
       series: [{ name: "Capitalized", values: monthBuckets(capitalized, now, TREND_MONTHS).map(cents) }],
     },
@@ -515,6 +518,7 @@ export async function adminOverview(user: Viewer, now: Date = new Date()): Promi
     trend: {
       title: "Direct changes per day",
       unit: "changes",
+      period: "day",
       labels: perDay.labels,
       series: [{ name: "IT", values: perDay.it }, { name: "Purchasing", values: perDay.purchasing }],
     },
