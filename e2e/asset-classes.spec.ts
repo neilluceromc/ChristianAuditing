@@ -39,6 +39,12 @@ async function login(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
+  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
+  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
+  await expect
+    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
+    .toBe(id);
 }
 
 const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: { tag }, select: { id: true } })).id;
@@ -163,14 +169,16 @@ test.describe("Finance sees two tabs", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto("/finance/assets?cls=PURCHASING");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
-    // Phase 40 §6: the status chips read as their words.
-    await expect(page.getByRole("link", { name: "Operational", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Deployed", exact: true })).toHaveCount(0);
+    // Phase 47 (spec §3 item 4): the status tiles carry the class's own words (count, caption and book value follow
+    // the label in each tile's name, so match its start): Purchasing's OPERATIONAL is "In use".
+    const tiles = page.getByRole("navigation", { name: "Filter by status" });
+    await expect(tiles.getByRole("link", { name: /^In use\b/ })).toBeVisible();
+    await expect(tiles.getByRole("link", { name: /^Deployed\b/ })).toHaveCount(0);
 
     await page.goto("/finance/assets");
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Deployed", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Operational", exact: true })).toHaveCount(0);
+    await expect(tiles.getByRole("link", { name: /^Deployed\b/ })).toBeVisible();
+    await expect(tiles.getByRole("link", { name: /^In use\b/ })).toHaveCount(0);
   });
 });
 

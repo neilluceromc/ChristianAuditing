@@ -18,6 +18,12 @@ async function login(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
+  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
+  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
+  await expect
+    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
+    .toBe(id);
 }
 
 async function expectNoSeriousAxe(page: Page) {
@@ -228,14 +234,18 @@ test.describe("home — /finance/assets, the register", () => {
 
     // The finance sidebar has an "Assets" link with this same text (an h3
     // heading before Phase 42) — scope to the page's h1 title.
-    // Phase 35 (plan P-5): the page is "Assets"; its footer line carries the whole filter's totals.
+    // Phase 35 (plan P-5): the page is "Assets". Phase 47 (spec §3 item 2): the At cost card carries the totals.
     await expect(page.getByRole("heading", { name: "Assets", level: 1 })).toBeVisible();
-    await expect(page.getByText(/\d+ assets? · \d+ with a cost · ₱[\d,.]+ at cost/)).toBeVisible();
+    const totals = page.getByRole("region", { name: "Money totals" });
+    await expect(totals).toContainText("At cost");
+    await expect(totals).toContainText(/₱[\d,.]+/);
+    await expect(totals).toContainText(/\d+ assets?( · \d+)? with a cost/);
 
-    const chip = page.getByRole("link", { name: "Defective", exact: true });
+    // Phase 47 (spec §3 item 4): the status chips are the Phase 45 tiles; DEFECTIVE reads "In repair"
+    const chip = page.getByRole("navigation", { name: "Filter by status" }).getByRole("link", { name: /^In repair\b/ });
     await chip.click();
     await expect(page).toHaveURL(/status=DEFECTIVE/, { timeout: 15_000 });
-    await expect(chip).toHaveAttribute("aria-current", "page");
+    await expect(chip).toHaveAttribute("aria-current", "true");
 
     const row = page.getByRole("row", { name: /BR-MN-0731/ });
     await expect(row).toBeVisible();

@@ -80,6 +80,12 @@ async function login(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
+  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
+  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
+  await expect
+    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
+    .toBe(id);
 }
 
 async function expectNoSeriousAxe(page: Page) {
@@ -305,12 +311,14 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       const chips = page.getByRole("navigation", { name: "Finance state" });
       await expect(chips.getByRole("link", { name: /^All \d+/ })).toBeVisible();
       await expect(chips.getByRole("link", { name: /^To review \d+/ })).toBeVisible();
-      await expect(page.getByRole("navigation", { name: "Asset status" }).getByRole("link", { name: "Any status" })).toBeVisible();
+      // Phase 47 (spec §3 item 4): the status chip row is now the Phase 45 status tiles (count, caption, book value)
+      await expect(page.getByRole("navigation", { name: "Filter by status" }).getByRole("link", { name: /^In stock\b/ })).toBeVisible();
 
       await page.goto("/finance/assets?fin=no-cost");
       await expect(row(page, noCost)).toBeVisible();
       await expect(row(page, waiting)).toHaveCount(0);
-      const costCells = await page.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => tr.querySelectorAll("td")[5]?.textContent?.trim()));
+      // Phase 47 (spec §3 item 6): Asset, Category, Status, Finance, Cost, … — Cost is the fifth cell
+      const costCells = await page.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => tr.querySelectorAll("td")[4]?.textContent?.trim()));
       expect(costCells.length).toBeGreaterThan(0);
       expect(costCells.every((c) => c === "—")).toBe(true);
 
@@ -324,9 +332,11 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
 
       await page.getByRole("link", { name: noCost, exact: true }).click();
       await page.waitForURL((u) => u.pathname.startsWith("/finance/assets/"));
-      await expect(page.getByRole("heading", { name: "Money summary" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Financial history" })).toBeVisible();
+      // Phase 47 (spec §4.1, Option B): the tag is the h1 of the left panel, the Documents card sits in it, and the
+      // main column's tabs include the Financial history
+      await expect(page.getByRole("heading", { name: noCost, level: 1 })).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "Asset summary" }).getByRole("heading", { name: "Documents" })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Asset sections" }).getByRole("link", { name: /^Financial history/ })).toBeVisible();
     } finally {
       await restore(noCost, a);
       await restore(waiting, b);
@@ -378,7 +388,9 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await expect(r).toBeVisible();
       await expect(r).toContainText("Approved");
       await expect(r).toContainText(expectedBook(55000, start));
-      await expect(page.getByText(/^1 asset · 1 with a cost · .* book value/)).toBeVisible();
+      // Phase 47 (spec §3 item 5): the toolbar's "N assets shown" and their combined book value (the old footer's line)
+      await expect(page.locator('p[aria-live="polite"]').filter({ hasText: /^1 asset shown\b/ })).toContainText(expectedBook(55000, start));
+      await expect(page.locator("tfoot")).toContainText("Total · 1 asset shown");
       await expect(page.getByText(/As of today \(.+ counted\)/)).toBeVisible();
     } finally {
       await restore(tag, before);
@@ -441,22 +453,26 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     try {
       await approvedLaptop(tag);
       await login(page, FINANCE);
-      await page.goto(`/finance/assets/${before.id}`);
-      await expect(page.getByRole("heading", { name: "Depreciation schedule" })).toBeVisible();
+      // Phase 47 (spec §4.2): the Depreciation ledger's All years view is one summary row per year, whose year is a
+      // link that opens that year's months (`?year=`).
+      await page.goto(`/finance/assets/${before.id}?year=all`);
       const table = page.getByRole("table", { name: "Depreciation by year" });
+      await expect(table).toBeVisible();
       // Phase 38: BR-LT-0148 is purchased ~720 days ago, so its life starts about two years back and the EARLIEST year
-      // has no projected months. Expand the CURRENT year, which holds the current (actual) month and later (projected) ones.
+      // has no projected months. Open the CURRENT year, which holds the current (actual) month and later (projected) ones.
       const now = new Date();
       const thisMonth = asOfMonth(now);
-      const year = table.getByRole("button", { name: String(Math.floor(thisMonth / 12)), exact: true });
-      await waitForHydration(year);
-      await year.click();
-      await expect(year).toHaveAttribute("aria-expanded", "true");
-      const monthRow = (m: number) => table.getByRole("row", { name: new RegExp(`^${monthLabel(m)}`) });
-      await expect(monthRow(thisMonth)).toContainText("done");
-      await expect(monthRow(thisMonth)).not.toContainText("projected");
+      const yearNo = Math.floor(thisMonth / 12);
+      await table.getByRole("link", { name: String(yearNo), exact: true }).click();
+      await page.waitForURL((u) => u.searchParams.get("year") === String(yearNo));
+      const months = page.getByRole("table", { name: `Depreciation by month, ${yearNo}` });
+      await expect(months).toBeVisible();
+      const monthRow = (m: number) => months.getByRole("row", { name: new RegExp(`^${monthLabel(m)}`) });
+      await expect(monthRow(thisMonth)).toContainText("This month");
+      await expect(monthRow(thisMonth)).toHaveAttribute("aria-current", "date");
+      if (thisMonth % 12 > 0) await expect(monthRow(thisMonth - 1)).toContainText("Counted");
       // a later month of the same year reads projected (skipped in December, when the current year has no later month)
-      if (thisMonth % 12 < 11) await expect(monthRow(thisMonth + 1)).toContainText("projected");
+      if (thisMonth % 12 < 11) await expect(monthRow(thisMonth + 1)).toContainText("Projected");
     } finally {
       await restore(tag, before);
       await db.assetCategory.update({ where: { id: cat.id }, data: { depreciationLifeMonths: cat.depreciationLifeMonths, depreciationSalvagePercent: cat.depreciationSalvagePercent } });
