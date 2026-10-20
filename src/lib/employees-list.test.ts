@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEES_LIST_CONFIG, orderByLoadout } from "./employees-list";
+import { monthStartManila } from "./cris-limits";
 import { parseListState } from "./url-state";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), EMPLOYEES_LIST_CONFIG);
@@ -28,6 +29,30 @@ describe("buildEmployeeWhere", () => {
     expect(buildEmployeeWhere(parse("kind=BOGUS")).department).toBeUndefined();
   });
 
+  // Phase 45 (spec §3.1): the "New this month" tab.
+  describe("joined=month", () => {
+    // 2026-10-20 in Manila; the Manila month began at 2026-09-30T16:00Z
+    const now = new Date("2026-10-20T03:00:00Z");
+    it("keeps people who joined on or after the Manila month start", () => {
+      const where = buildEmployeeWhere(parse("joined=month"), now);
+      expect(where.joinedAt).toEqual({ gte: monthStartManila(now) });
+      expect(monthStartManila(now).toISOString()).toBe("2026-09-30T16:00:00.000Z");
+    });
+    it("alongside the leavers default", () => {
+      expect(buildEmployeeWhere(parse("joined=month"), now)).toEqual({
+        joinedAt: { gte: monthStartManila(now) }, employment: { not: "OFFBOARDED" },
+      });
+    });
+    it("defaults now to the current time", () => {
+      const gte = (buildEmployeeWhere(parse("joined=month")).joinedAt as { gte: Date }).gte;
+      expect(gte.getTime()).toBe(monthStartManila(new Date()).getTime());
+    });
+    it("any other value is dropped by the parser, so adds no clause", () => {
+      expect(buildEmployeeWhere(parse("joined=year"), now).joinedAt).toBeUndefined();
+      expect(buildEmployeeWhere(parse(""), now).joinedAt).toBeUndefined();
+    });
+  });
+
   // Phase 20 (spec §5): leavers are hidden by default.
   describe("leavers hidden by default", () => {
     it("empty state excludes OFFBOARDED", () => {
@@ -43,7 +68,7 @@ describe("buildEmployeeWhere", () => {
       expect(buildEmployeeWhere(parse("employment=ACTIVE&leavers=1"))).toEqual({ employment: { in: ["ACTIVE"] } });
     });
     it("facets include leavers, so the toggle round-trips through the URL", () => {
-      expect(EMPLOYEES_LIST_CONFIG.facets).toEqual(["department", "kind", "employment", "leavers"]);
+      expect(EMPLOYEES_LIST_CONFIG.facets).toEqual(["department", "kind", "employment", "leavers", "joined"]);
     });
   });
 });

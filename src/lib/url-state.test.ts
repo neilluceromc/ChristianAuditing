@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseListState, primarySortOf, serializeListState, toggleSort, withFilter, withSearch,
-  clearFilters, toSearchParams, withPer, type ListConfig,
+  clearFilters, toSearchParams, withPer, parseIdsParam, type ListConfig,
 } from "./url-state";
 
 const config: ListConfig = {
@@ -129,5 +129,27 @@ describe("toSearchParams", () => {
     expect(sp.get("q")).toBe("x");
     expect(sp.get("status")).toBe("b");
     expect(sp.has("gone")).toBe(false);
+  });
+});
+
+describe("parseIdsParam", () => {
+  const ids = (qs: string, max = 3) => parseIdsParam(new URLSearchParams(qs), max);
+  it("splits a comma-joined list, trimming each id", () => {
+    expect(ids("ids=a, b ,c")).toEqual(["a", "b", "c"]);
+  });
+  it("is empty when absent, blank or only commas", () => {
+    expect(ids("")).toEqual([]);
+    expect(ids("ids=")).toEqual([]);
+    expect(ids("ids=,, ,")).toEqual([]);
+  });
+  it("drops duplicates, keeping the first position", () => {
+    expect(ids("ids=a,b,a,c,b")).toEqual(["a", "b", "c"]);
+  });
+  it("allows exactly max, and refuses above it", () => {
+    expect(ids("ids=a,b,c", 3)).toEqual(["a", "b", "c"]);
+    expect(ids("ids=a,b,c,d", 3)).toBe("over");
+  });
+  it("counts distinct ids, so duplicates alone never trip the cap", () => {
+    expect(ids("ids=a,a,a,a,b", 3)).toEqual(["a", "b"]);
   });
 });

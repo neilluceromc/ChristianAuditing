@@ -132,6 +132,15 @@ export function clearFilters(state: ListState): ListState {
   return { ...state, q: "", filters: {}, page: 1 };
 }
 
+/**
+ * Phase 45 (spec §3.4): the `ids` param of a bulk action - comma-joined, trimmed, deduped (first position kept).
+ * More than `max` distinct ids is "over": the caller refuses, it never slices.
+ */
+export function parseIdsParam(sp: URLSearchParams, max: number): string[] | "over" {
+  const ids = [...new Set((sp.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
+  return ids.length > max ? "over" : ids;
+}
+
 /** Next 15 gives pages a plain record; normalize to URLSearchParams. */
 export function toSearchParams(sp: Record<string, string | string[] | undefined>): URLSearchParams {
   const out = new URLSearchParams();

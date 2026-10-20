@@ -1,17 +1,20 @@
 import type { EmploymentStatus, GroupKind, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
+import { monthStartManila } from "./cris-limits";
 
 export const EMPLOYMENT_STATUSES = ["ACTIVE", "OFFBOARDING", "OFFBOARDED"] as const satisfies readonly EmploymentStatus[];
 
 const GROUP_KINDS = ["INTERNAL", "CLIENT"] as const satisfies readonly GroupKind[];
 
 export const EMPLOYEES_LIST_CONFIG: ListConfig = {
-  facets: ["department", "kind", "employment", "leavers"],
+  // Phase 45 (spec §3.1): `joined=month` is the "New this month" tab - a closed set, so any other value parses as absent
+  facets: ["department", "kind", "employment", "leavers", "joined"],
+  facetValues: { joined: ["month"] },
   sortable: ["name", "employeeNo", "joinedAt", "loadout"],
   defaultSort: [{ key: "name", dir: "asc" }],
 };
 
-export function buildEmployeeWhere(state: ListState): Prisma.EmployeeWhereInput {
+export function buildEmployeeWhere(state: ListState, now: Date = new Date()): Prisma.EmployeeWhereInput {
   const where: Prisma.EmployeeWhereInput = {};
   if (state.q) {
     where.OR = [
@@ -25,6 +28,8 @@ export function buildEmployeeWhere(state: ListState): Prisma.EmployeeWhereInput 
   // Phase 37 (spec §2.3): the Staff facet — Internal | Client staff — filters on the group's kind.
   const kind = (state.filters.kind ?? []).filter((v): v is GroupKind => (GROUP_KINDS as readonly string[]).includes(v));
   if (kind.length) where.department = { kind: { in: kind } };
+  // Phase 45 (spec §3.1): joined on or after the 1st of this month, Manila time.
+  if ((state.filters.joined ?? []).includes("month")) where.joinedAt = { gte: monthStartManila(now) };
   const employment = (state.filters.employment ?? []).filter((v): v is EmploymentStatus =>
     (EMPLOYMENT_STATUSES as readonly string[]).includes(v));
   if (employment.length) {

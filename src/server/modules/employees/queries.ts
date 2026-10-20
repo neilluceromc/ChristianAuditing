@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { buildEmployeeOrderBy, buildEmployeeWhere, orderByLoadout } from "@/lib/employees-list";
+import { EMPLOYEE_TABS, employeeTabBase, employeeTabState } from "@/lib/employee-tabs";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
 import { pageOf } from "@/lib/paging";
@@ -182,8 +183,13 @@ function toExportRow(e: {
  * `where`; with it, off the kept id set, since that filter only resolves after
  * the candidate pass.
  */
-export async function employeeExportRows(state: ListState, gapsOnly: boolean): Promise<{ rows: EmployeeExportRow[] } | { over: number }> {
-  const where = buildEmployeeWhere(state);
+export async function employeeExportRows(
+  state: ListState, gapsOnlyIn: boolean, ids?: string[],
+): Promise<{ rows: EmployeeExportRow[] } | { over: number }> {
+  // Phase 45 (spec §3.4): a selection (`ids`) overrides every list filter - search, facets, leavers and gaps -
+  // and exports exactly those people, in the list's sort. The route has already capped it at BULK_MAX.
+  const gapsOnly = ids ? false : gapsOnlyIn;
+  const where: Prisma.EmployeeWhereInput = ids ? { id: { in: ids } } : buildEmployeeWhere(state);
   const orderBy = buildEmployeeOrderBy(state.sort);
   const loadoutSort = primarySortOf(state.sort, "loadout");
   if (!gapsOnly) {
@@ -254,6 +260,23 @@ export async function employeeFacetOptions(state: ListState): Promise<EmployeeFa
       value: s, label: s, count: empGroups.find((g) => g.employment === s)?._count ?? 0,
     })),
   };
+}
+
+/**
+ * Phase 45 (spec §3.1): each tab's count - what that tab shows within the current search, Works for and leavers
+ * scope. The base is the state with the tab filters removed; each count adds just that tab's filter, so the number
+ * is exactly what clicking the tab lists. Missing kit needs per-person policy resolution, so it is the list's own
+ * gaps cut (`listEmployees(base, true).total`), not a SQL count.
+ */
+export async function employeeTabCounts(state: ListState): Promise<Record<string, number>> {
+  const base = employeeTabBase(state);
+  const now = new Date(); // one clock for every count, so "New this month" cannot straddle midnight against the rest
+  const entries = await Promise.all(EMPLOYEE_TABS.map(async (t): Promise<[string, number]> => {
+    const tab = employeeTabState(base, false, t.key);
+    if (tab.gapsOnly) return [t.key, (await listEmployees(tab.state, true)).total];
+    return [t.key, await prisma.employee.count({ where: buildEmployeeWhere(tab.state, now) })];
+  }));
+  return Object.fromEntries(entries);
 }
 
 /** Phase 36 (spec §4.1): the holder picker's "Recent" list — the user's last picks, still ACTIVE, at most RECENT_PEOPLE. */
