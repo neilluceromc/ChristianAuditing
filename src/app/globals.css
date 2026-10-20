@@ -7,6 +7,9 @@
   --surface-subtle: #fcfcfd;
   --surface-accent: #f8fbfe;
   --surface-raised: #ffffff;
+  /* Phase 45: striped list rows and their hover (Inventory and Employees) */
+  --zebra: #f7f8fa;
+  --row-hover: #eef1f5;
   --border: #e4e7ec;
   --border-strong: #d0d5dd;
   --border-faint: #f2f4f7;
@@ -83,6 +86,9 @@
 
   /* density: the ONLY thing the toggle changes (41px → 33px) */
   --row-h: 41px;
+  /* Phase 45: the Inventory and Employees lists' own row and header heights (comfortable 56/40, compact 48/32) */
+  --list-row-h: calc(var(--row-h) + 15px);
+  --list-head-h: calc(var(--row-h) - 1px);
 
   /* placeholder stripes for product imagery */
   --placeholder-stripes: repeating-linear-gradient(135deg, #eef1f5 0 6px, #f7f9fb 6px 12px);
@@ -95,6 +101,31 @@
   --row-h: 33px;
 }
 
+/* Dense is a third size only the two lists style for; every other table reads it as compact. */
+[data-density="dense"] {
+  --row-h: 33px;
+  --list-row-h: 36px;
+  --list-head-h: 32px;
+}
+
+/* Table `striped`: no row dividers, every even body row on the zebra tint, a hover tint, and a ticked row
+   (aria-selected) keeps its accent tint. */
+.list-striped tbody tr {
+  border-bottom-width: 0;
+}
+.list-striped tbody tr:nth-child(even):not([aria-selected]) {
+  background-color: var(--zebra);
+}
+.list-striped tbody tr:not([aria-selected]):hover {
+  background-color: var(--row-hover);
+}
+
+/* Table `stickyHeader`: the head pins under whatever sits above it. A list's sticky toolbar measures its own
+   height into --list-sticky-top; with none, the head pins to the top of the window. */
+.list-sticky-head thead {
+  top: var(--list-sticky-top, 0px);
+}
+
 /* ── Colour tokens — dark (re-derived, not inverted) ── */
 [data-theme="dark"] {
   --canvas: #0f1115;
@@ -102,6 +133,8 @@
   --surface-subtle: #1a1e25;
   --surface-accent: #152435;
   --surface-raised: #1d2129;
+  --zebra: #1b1f26;
+  --row-hover: #232831;
   --border: #262b33;
   --border-strong: #333a45;
   --border-faint: #1e232b;
@@ -158,6 +191,8 @@
   --color-surface-subtle: var(--surface-subtle);
   --color-surface-accent: var(--surface-accent);
   --color-surface-raised: var(--surface-raised);
+  --color-zebra: var(--zebra);
+  --color-row-hover: var(--row-hover);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-border-faint: var(--border-faint);

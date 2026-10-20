@@ -1,8 +1,32 @@
 import { cn } from "@/lib/cn";
 
-export function Table({ className, children }: { className?: string; children: React.ReactNode }) {
+/**
+ * `striped` (Phase 45): zebra rows, no dividers, row hover; styled by `.list-striped` in globals.css.
+ * `stickyHeader`: from 1280 px (`xl`) the wrapper stops being a horizontal scroller, because any overflow other
+ * than visible would make it the header's scroll container and the window-level `position: sticky` would never
+ * engage; below that it keeps scrolling sideways and the header scrolls away with the rows. The head pins at
+ * `--list-sticky-top` (default 0px). Neither prop changes the default output.
+ */
+export function Table({
+  className,
+  children,
+  striped,
+  stickyHeader,
+}: {
+  className?: string;
+  children: React.ReactNode;
+  striped?: boolean;
+  stickyHeader?: boolean;
+}) {
   return (
-    <div className={cn("overflow-x-auto rounded-(--radius-card) border border-border bg-surface shadow-card", className)}>
+    <div
+      className={cn(
+        "overflow-x-auto rounded-(--radius-card) border border-border bg-surface shadow-card",
+        striped && "list-striped",
+        stickyHeader && "list-sticky-head xl:overflow-visible",
+        className,
+      )}
+    >
       <table className="w-full border-collapse text-[12.5px]">{children}</table>
     </div>
   );
