@@ -4,6 +4,7 @@ import { dayFromISO } from "@/lib/deadlines";
 import { manilaDay, SNAPSHOT_KEYS, type SnapshotKey } from "@/lib/snapshot";
 import { toCentavos } from "@/lib/depreciation";
 import { tabWhere } from "@/lib/approvals-list";
+import type { ApprovalClassKey } from "@/lib/approval-access";
 import { finWhere } from "@/lib/registration";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState } from "@/lib/url-state";
@@ -20,7 +21,7 @@ import { financeWaitingRows, unitsValue } from "@/server/modules/home/queries";
  * approval with an asset has that asset's class; one without has none), so summing the classes approvalClassWhere
  * gives a role reproduces that role's Approvals count.
  */
-const APPROVAL_CLASS: Record<"it" | "purchasing" | "none", Prisma.ApprovalWhereInput> = {
+const APPROVAL_CLASS: Record<ApprovalClassKey, Prisma.ApprovalWhereInput> = {
   it: { asset: { cls: "IT" } },
   purchasing: { asset: { cls: "PURCHASING" } },
   none: { assetId: null },

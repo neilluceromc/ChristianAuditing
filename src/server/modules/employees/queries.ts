@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { buildEmployeeOrderBy, buildEmployeeWhere, orderByLoadout } from "@/lib/employees-list";
+import { buildEmployeeOrderBy, buildEmployeeWhere, EMPLOYEES_LIST_CONFIG, orderByLoadout } from "@/lib/employees-list";
+import type { KitGapGroup } from "@/lib/overview";
 import { EMPLOYEE_TABS, employeeTabBase, employeeTabState } from "@/lib/employee-tabs";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
 import { fmtDate } from "@/lib/format";
@@ -10,7 +11,7 @@ import { EXPORT_CAP, type HoldingsExportRow } from "@/lib/export-columns";
 import { sameNameKey } from "@/lib/same-name";
 import { RECENT_PEOPLE } from "@/lib/people-search";
 import { recentPicks } from "@/server/recent-picks";
-import { primarySortOf, type ListState, type SortKey } from "@/lib/url-state";
+import { parseListState, primarySortOf, type ListState, type SortKey } from "@/lib/url-state";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 
 export interface EmployeeListRow {
@@ -55,6 +56,32 @@ export async function resolveMissing(employees: Array<{
     if (!policy && !ex.some((x) => x.kind === "ADD")) return [e.id, null] as const;
     return [e.id, computeLoadout(effectiveSlots(policy?.slots ?? [], ex), e.assets).missingRequired] as const;
   }));
+}
+
+/**
+ * Phase 46 (spec §3.2): the IT Overview's breakdown — how many people on the Missing kit tab (`/employees?gaps=1`)
+ * each group holds. The candidates are that tab's (the list's default where: leavers hidden) and each is cut by
+ * `resolveMissing` exactly as the list cuts them, so a group's count equals `/employees?department=<id>&gaps=1`, and
+ * the internal groups' sum equals `/employees?kind=INTERNAL&gaps=1`. Groups with nobody missing kit are left out.
+ */
+export async function kitGapsByGroup(now: Date = new Date()): Promise<KitGapGroup[]> {
+  const where = buildEmployeeWhere(parseListState(new URLSearchParams(), EMPLOYEES_LIST_CONFIG), now);
+  const [candidates, groups] = await Promise.all([
+    prisma.employee.findMany({
+      where,
+      select: { id: true, title: true, departmentId: true, assets: rowInclude.assets },
+    }),
+    prisma.department.findMany({ select: { id: true, name: true, kind: true } }),
+  ]);
+  const missing = await resolveMissing(candidates);
+  const counts = new Map<string, number>();
+  for (const c of candidates) {
+    if ((missing.get(c.id) ?? 0) > 0) counts.set(c.departmentId, (counts.get(c.departmentId) ?? 0) + 1);
+  }
+  return groups.flatMap((g) => {
+    const count = counts.get(g.id) ?? 0;
+    return count > 0 ? [{ id: g.id, name: g.name, kind: g.kind, count }] : [];
+  });
 }
 
 /**
