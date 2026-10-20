@@ -1,4 +1,5 @@
 import type { AssetClass, User } from "@prisma/client";
+import { cn } from "@/lib/cn";
 import { hasCris } from "@/lib/cris-settings";
 import { Avatar } from "@/components/ui/avatar";
 import { WORKSPACE_META, type VisibleSection, type WorkspaceId } from "@/lib/workspaces";
@@ -16,8 +17,16 @@ import { WorkspaceTag } from "./workspace-switcher";
  * Phase 46 spec §4.1: the panel collapses to a 72 px icon rail. Its width keys off the shell's `data-sidebar`
  * (SidebarShell, set from the `br.sidebar` cookie on the server); the brand row and the nav swap to their rail
  * forms, the account row keeps only the avatar and its menu, and "Collapse sidebar" sits above the account row.
- * The column is z-40 so the rail's flyouts paint over the page's sticky list chrome (z-30).
+ * The column (sticky, so its own stacking context) keeps Phase 45's z-scale, under the Cris dock (z-30) and the
+ * floating bulk bar (z-20), and is raised to z-40 only while a rail item is hovered or holds the focus, i.e. while
+ * its flyout shows, so the flyout paints over the page's sticky list chrome (z-30).
  */
+/** No unconditional z-index: only the flyout-time raise (see above). */
+const ASIDE = cn(
+  "sticky top-0 hidden h-dvh shrink-0 self-start p-2 pr-0 lg:flex",
+  "has-[[data-rail-item]:focus-within]:z-40 has-[[data-rail-item]:hover]:z-40",
+);
+
 export function Sidebar({
   user,
   ws,
@@ -34,7 +43,7 @@ export function Sidebar({
   defaultCls: AssetClass;
 }) {
   return (
-    <aside aria-label="Primary" className="sticky top-0 z-40 hidden h-dvh shrink-0 self-start p-2 pr-0 lg:flex">
+    <aside aria-label="Primary" className={ASIDE}>
       <div className="flex w-[236px] flex-col rounded-[14px] border border-border bg-surface group-data-[sidebar=rail]/shell:w-[72px]">
         <SidebarVariant
           full={

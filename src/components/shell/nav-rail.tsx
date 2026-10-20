@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
@@ -31,6 +31,9 @@ function CornerPill({ badge }: { badge: BadgeView }) {
   );
 }
 
+/** The rail icon's description when its flyout lists views. */
+export const viewsHint = (n: number) => `Has ${n} view${n === 1 ? "" : "s"}`;
+
 function RailItem({ item, current, badges }: { item: VisibleItem; current: NavCurrent; badges: NavBadges }) {
   const isCurrent = current.item === item.label;
   const hasViews = item.views.length > 0;
@@ -40,6 +43,8 @@ function RailItem({ item, current, badges }: { item: VisibleItem; current: NavCu
   const badge = itemBadge(item, badges);
   // Esc (or choosing a destination) hides the flyout until the pointer leaves or the focus moves on.
   const [dismissed, setDismissed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const hintId = useId();
   const itemRef = useRef<HTMLLIElement>(null);
   const iconRef = useRef<HTMLAnchorElement>(null);
   const flyRef = useRef<HTMLDivElement>(null);
@@ -59,20 +64,40 @@ function RailItem({ item, current, badges }: { item: VisibleItem; current: NavCu
     if (h > 0 && r.top - 4 > lowest) fly.style.top = `${Math.max(8, lowest)}px`;
   }
 
+  const flyShown = () => !!flyRef.current && flyRef.current.getClientRects().length > 0;
+
+  // WCAG 1.4.13: a flyout opened by hover alone (the focus elsewhere) is dismissible too. With the focus inside the
+  // item, its own onKeyDown handles Esc and stops it before it reaches the document.
+  useEffect(() => {
+    if (!hovered || dismissed) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && flyShown()) setDismissed(true);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [hovered, dismissed]);
+
   return (
     <li
       ref={itemRef}
+      data-rail-item=""
       className="group/fly relative flex justify-center"
-      onMouseEnter={place}
+      onMouseEnter={() => {
+        place();
+        setHovered(true);
+      }}
       onFocus={place}
-      onMouseLeave={() => setDismissed(false)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setDismissed(false);
+      }}
       onBlur={(e) => {
         if (!itemRef.current?.contains(e.relatedTarget as Node | null)) setDismissed(false);
       }}
       onClick={() => setDismissed(true)}
       onKeyDown={(e) => {
         if (e.key !== "Escape" || dismissed) return;
-        if (!flyRef.current || flyRef.current.getClientRects().length === 0) return;
+        if (!flyShown()) return;
         // This Esc is the flyout's: a page panel listening for Esc must not close too.
         e.preventDefault();
         e.stopPropagation();
@@ -85,6 +110,7 @@ function RailItem({ item, current, badges }: { item: VisibleItem; current: NavCu
         href={item.href}
         aria-label={badge ? `${item.label}, ${badge.label}` : item.label}
         aria-current={page ? "page" : isCurrent ? "true" : undefined}
+        aria-describedby={hasViews ? hintId : undefined}
         data-nav-current={isCurrent || undefined}
         className={cn(
           "relative grid size-10 place-items-center rounded-[9px]",
@@ -95,6 +121,12 @@ function RailItem({ item, current, badges }: { item: VisibleItem; current: NavCu
         <Icon name={item.icon} size={18} className={isCurrent ? "text-accent" : "text-fg-muted"} />
         {badge && <CornerPill badge={badge} />}
       </Link>
+      {/* Tells a screen-reader user that the next links are this link's views. */}
+      {hasViews && (
+        <span id={hintId} hidden>
+          {viewsHint(item.views.length)}
+        </span>
+      )}
       <div
         ref={flyRef}
         data-rail-flyout=""

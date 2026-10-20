@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { filterSectionsForRole, WORKSPACE_META, WORKSPACE_NAV } from "@/lib/workspaces";
 import type { NavBadges } from "@/lib/nav-badges";
 import type { NavCurrent } from "@/lib/nav-match";
-import { NavRail, pillText } from "./nav-rail";
+import { NavRail, pillText, viewsHint } from "./nav-rail";
 import { SidebarCollapseButton, SidebarShell, SidebarVariant } from "./sidebar-collapse";
 import { WorkspaceTag } from "./workspace-switcher";
 
@@ -22,7 +22,7 @@ const render = (current: NavCurrent, b: NavBadges = badges) =>
 
 /** Every rail item: its `<li …>` markup, split at the next top-level item. */
 function railItems(html: string): string[] {
-  return html.split('<li class="group/fly').slice(1);
+  return html.split('<li data-rail-item=""').slice(1);
 }
 
 /** The rail item whose icon links to `href`. */
@@ -101,6 +101,21 @@ describe("NavRail", () => {
       expect(work.fly).toContain(">Worklist</p>");
       expect(work.fly).not.toContain("<ul");
       expect(work.fly).not.toContain("<a ");
+    });
+
+    it("describes an icon with views by their number, so a screen reader knows a list follows", () => {
+      expect(viewsHint(1)).toBe("Has 1 view");
+      for (const it of items) {
+        const { icon, body } = item(html, it.href);
+        if (it.views.length === 0) {
+          expect(icon).not.toContain("aria-describedby");
+          continue;
+        }
+        const id = / aria-describedby="([^"]+)"/.exec(icon)?.[1];
+        expect(id, `${it.label} has a description`).toBeDefined();
+        expect(body).toContain(`<span id="${id}" hidden="">Has ${it.views.length} view${it.views.length === 1 ? "" : "s"}</span>`);
+      }
+      expect(item(html, "/inventory").body).toContain(">Has 5 views</span>");
     });
 
     it("hides every flyout until hover or focus, and its title from assistive tech", () => {

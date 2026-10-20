@@ -33,8 +33,11 @@ export function paletteShortcutOpens(e: PaletteKey): boolean {
   return !e.otherModalOpen;
 }
 
-/** The parts of a keydown the "/" shortcut reads — plain data, so the rule is testable without a DOM. */
-export interface SlashKey {
+/**
+ * The parts of a keydown a single-key shortcut ("/", "[") reads: plain data, so the rules are testable without a
+ * DOM. Only the target's tag is read, never an input's type: every input (a checkbox included) blocks the key.
+ */
+export interface SingleKey {
   key: string;
   ctrlKey: boolean;
   metaKey: boolean;
@@ -42,7 +45,6 @@ export interface SlashKey {
   defaultPrevented: boolean;
   /** upper-case tag name of the event target, e.g. "INPUT" */
   targetTag: string | null;
-  targetType: string | null;
   targetEditable: boolean;
   /** a dialog, drawer, palette, menu, listbox or filter popup is open anywhere on the page */
   overlayOpen: boolean;
@@ -51,32 +53,49 @@ export interface SlashKey {
 }
 
 /**
- * Spec §2.3: "/" focuses the page's search box, and does nothing while typing
- * in a field — any input, textarea, select or contenteditable target — or
- * with a modifier held (so Ctrl / and browser shortcuts keep working). It
- * also stands aside while any overlay is open — the command palette is not
- * portalled, so the page behind it stays live, and "/" must never pull focus
- * out of a dialog, a menu or a filter popup.
+ * The one rule every single-key shortcut shares: `key` itself, not already handled, no modifier held (so Ctrl /
+ * and browser shortcuts keep working), no overlay open or holding the focus, and never while typing in a field
+ * (any input, textarea, select or contenteditable target).
  */
-export function slashFocusesSearch(e: SlashKey): boolean {
-  if (e.key !== "/" || e.defaultPrevented) return false;
+export function singleKeyShortcut(e: SingleKey, key: string): boolean {
+  if (e.key !== key || e.defaultPrevented) return false;
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
   if (e.overlayOpen || e.targetInOverlay) return false;
   if (e.targetEditable) return false;
   return e.targetTag !== "INPUT" && e.targetTag !== "TEXTAREA" && e.targetTag !== "SELECT";
 }
 
+/** A browser keydown as a SingleKey (reads the page for open overlays). */
+export function readSingleKey(e: KeyboardEvent): SingleKey {
+  const target = e.target instanceof HTMLElement ? e.target : null;
+  return {
+    key: e.key,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+    altKey: e.altKey,
+    defaultPrevented: e.defaultPrevented,
+    targetTag: target?.tagName ?? null,
+    targetEditable: target?.isContentEditable ?? false,
+    overlayOpen: document.querySelector(SHORTCUT_OVERLAY) !== null,
+    targetInOverlay: target?.closest(SHORTCUT_OVERLAY) != null,
+  };
+}
+
 /**
- * Phase 46 spec §4.1: "[" collapses or expands the desktop sidebar. Like "/", it does nothing while typing in a
- * field (any input, textarea, select or contenteditable), with a modifier held, or while an overlay is open or
- * holds the focus (a menu's type-ahead or a dialog must keep the key).
+ * Spec §2.3: "/" focuses the page's search box, under the single-key rule. It stands aside while any overlay is
+ * open because the command palette is not portalled, so the page behind it stays live, and "/" must never pull
+ * focus out of a dialog, a menu or a filter popup.
  */
-export function bracketTogglesSidebar(e: SlashKey): boolean {
-  if (e.key !== "[" || e.defaultPrevented) return false;
-  if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  if (e.overlayOpen || e.targetInOverlay) return false;
-  if (e.targetEditable) return false;
-  return e.targetTag !== "INPUT" && e.targetTag !== "TEXTAREA" && e.targetTag !== "SELECT";
+export function slashFocusesSearch(e: SingleKey): boolean {
+  return singleKeyShortcut(e, "/");
+}
+
+/**
+ * Phase 46 spec §4.1: "[" collapses or expands the desktop sidebar, under the same single-key rule (a menu's
+ * type-ahead or a dialog keeps the key).
+ */
+export function bracketTogglesSidebar(e: SingleKey): boolean {
+  return singleKeyShortcut(e, "[");
 }
 
 /**

@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Icon } from "@/components/ui/icon";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/cn";
-import { bracketTogglesSidebar, SHORTCUT_OVERLAY } from "@/lib/shortcuts";
+import { bracketTogglesSidebar, readSingleKey } from "@/lib/shortcuts";
 import { nextSidebar, sidebarCookie, type SidebarState } from "@/lib/sidebar-state";
 
 interface SidebarContextValue {
@@ -30,18 +30,23 @@ const SIDEBAR = 'aside[aria-label="Primary"]';
  */
 export function SidebarShell({ initial, children }: { initial: SidebarState; children: React.ReactNode }) {
   const [state, setState] = useState(initial);
-  const stateRef = useRef(initial);
+  // A server render (router.refresh, say after another tab toggled and rewrote the cookie) brings a new `initial`:
+  // adopt it (state adjusted in render).
+  const [seenInitial, setSeenInitial] = useState(initial);
+  if (initial !== seenInitial) {
+    setSeenInitial(initial);
+    setState(initial);
+  }
   const shellRef = useRef<HTMLDivElement>(null);
   // A toggle while the focus sat in the sidebar: the focused link may not exist in the other layout.
   const refocus = useRef(false);
 
   const toggle = useCallback(() => {
-    const next = nextSidebar(stateRef.current);
-    stateRef.current = next;
+    const next = nextSidebar(state);
     refocus.current = !!shellRef.current?.querySelector(SIDEBAR)?.contains(document.activeElement);
     document.cookie = sidebarCookie(next);
     setState(next);
-  }, []);
+  }, [state]);
 
   // The focused nav link was swapped for its other-layout twin: land on the toggle rather than on <body>.
   useEffect(() => {
@@ -55,20 +60,7 @@ export function SidebarShell({ initial, children }: { initial: SidebarState; chi
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "[") return; // cheap exit before any DOM query
-      const target = e.target instanceof HTMLElement ? e.target : null;
-      const handled = bracketTogglesSidebar({
-        key: e.key,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        altKey: e.altKey,
-        defaultPrevented: e.defaultPrevented,
-        targetTag: target?.tagName ?? null,
-        targetType: target instanceof HTMLInputElement ? target.type : null,
-        targetEditable: target?.isContentEditable ?? false,
-        overlayOpen: document.querySelector(SHORTCUT_OVERLAY) !== null,
-        targetInOverlay: target?.closest(SHORTCUT_OVERLAY) != null,
-      });
-      if (!handled) return;
+      if (!bracketTogglesSidebar(readSingleKey(e))) return;
       // Below lg the sidebar is not shown (the drawer is unchanged): leave the key and the cookie alone.
       const aside = shellRef.current?.querySelector(SIDEBAR);
       if (!aside || aside.getClientRects().length === 0) return;

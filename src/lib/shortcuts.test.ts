@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   bracketTogglesSidebar,
+  singleKeyShortcut,
   isMacPlatform,
   paletteShortcutOpens,
   searchShortcutLabel,
   slashFocusesSearch,
-  type SlashKey,
+  type SingleKey,
 } from "./shortcuts";
 
 describe("searchShortcutLabel (spec §2.3 / §4: Ctrl K, or ⌘K on Mac)", () => {
@@ -24,9 +25,9 @@ describe("searchShortcutLabel (spec §2.3 / §4: Ctrl K, or ⌘K on Mac)", () =>
   });
 });
 
-const base: SlashKey = {
+const base: SingleKey = {
   key: "/", ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false,
-  targetTag: "BODY", targetType: null, targetEditable: false, overlayOpen: false, targetInOverlay: false,
+  targetTag: "BODY", targetEditable: false, overlayOpen: false, targetInOverlay: false,
 };
 
 describe("slashFocusesSearch (spec §2.3: \"/\" focuses the page's search box, never while typing)", () => {
@@ -49,13 +50,14 @@ describe("slashFocusesSearch (spec §2.3: \"/\" focuses the page's search box, n
 
   it("ignores / while typing in a field", () => {
     for (const tag of ["INPUT", "TEXTAREA", "SELECT"]) {
-      expect(slashFocusesSearch({ ...base, targetTag: tag, targetType: tag === "INPUT" ? "text" : null })).toBe(false);
+      expect(slashFocusesSearch({ ...base, targetTag: tag })).toBe(false);
     }
     expect(slashFocusesSearch({ ...base, targetTag: "DIV", targetEditable: true })).toBe(false);
   });
 
-  it("ignores / on any input, even a checkbox", () => {
-    expect(slashFocusesSearch({ ...base, targetTag: "INPUT", targetType: "checkbox" })).toBe(false);
+  it("ignores / on any input, a checkbox included: only the tag is read, never the input type", () => {
+    expect(slashFocusesSearch({ ...base, targetTag: "INPUT" })).toBe(false);
+    expect("targetType" in base).toBe(false);
   });
 
   it("ignores / while a dialog, drawer, palette, menu or popup is open (review I1, M2)", () => {
@@ -92,7 +94,7 @@ describe("paletteShortcutOpens — Ctrl K / ⌘K opens the palette, never under 
 });
 
 describe("bracketTogglesSidebar (Phase 46 spec §4.1: \"[\" collapses or expands the sidebar, never while typing)", () => {
-  const bracket: SlashKey = { ...base, key: "[" };
+  const bracket: SingleKey = { ...base, key: "[" };
   it("takes a bare [ pressed outside any field", () => {
     expect(bracketTogglesSidebar(bracket)).toBe(true);
     expect(bracketTogglesSidebar({ ...bracket, targetTag: "A" })).toBe(true);
@@ -109,9 +111,8 @@ describe("bracketTogglesSidebar (Phase 46 spec §4.1: \"[\" collapses or expands
     expect(bracketTogglesSidebar({ ...bracket, altKey: true })).toBe(false);
   });
 
-  it("ignores [ while typing in an input, textarea, select or contenteditable", () => {
+  it("ignores [ while typing in any input (a checkbox included), textarea, select or contenteditable", () => {
     for (const tag of ["INPUT", "TEXTAREA", "SELECT"]) expect(bracketTogglesSidebar({ ...bracket, targetTag: tag })).toBe(false);
-    expect(bracketTogglesSidebar({ ...bracket, targetTag: "INPUT", targetType: "checkbox" })).toBe(false);
     expect(bracketTogglesSidebar({ ...bracket, targetTag: "DIV", targetEditable: true })).toBe(false);
   });
 
@@ -119,5 +120,15 @@ describe("bracketTogglesSidebar (Phase 46 spec §4.1: \"[\" collapses or expands
     expect(bracketTogglesSidebar({ ...bracket, overlayOpen: true })).toBe(false);
     expect(bracketTogglesSidebar({ ...bracket, targetInOverlay: true })).toBe(false);
     expect(bracketTogglesSidebar({ ...bracket, defaultPrevented: true })).toBe(false);
+  });
+});
+
+describe("singleKeyShortcut (the rule \"/\" and \"[\" share)", () => {
+  it("takes only the named key, under the same guards", () => {
+    expect(singleKeyShortcut({ ...base, key: "x" }, "x")).toBe(true);
+    expect(singleKeyShortcut({ ...base, key: "x" }, "y")).toBe(false);
+    expect(singleKeyShortcut({ ...base, key: "x", altKey: true }, "x")).toBe(false);
+    expect(singleKeyShortcut({ ...base, key: "x", targetTag: "SELECT" }, "x")).toBe(false);
+    expect(singleKeyShortcut({ ...base, key: "x", overlayOpen: true }, "x")).toBe(false);
   });
 });
