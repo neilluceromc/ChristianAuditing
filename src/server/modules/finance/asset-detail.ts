@@ -117,7 +117,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
           {
             entityType: "asset", entityId: a.id,
             OR: [
-              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update"] } },
+              // asset.return.undone: the send-back's undo (finance follow-up); the other undos start with finance./depreciation.
+              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update", "asset.return.undone"] } },
               { action: { startsWith: "finance." } },
               { action: { startsWith: "depreciation." } },
               { action: { startsWith: "document." } },

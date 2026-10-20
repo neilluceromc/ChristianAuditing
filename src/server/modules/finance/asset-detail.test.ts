@@ -146,6 +146,13 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
     expect(where.OR.some((w) => w.entityType === "asset" && w.entityId === "a1")).toBe(true);
   });
 
+  it("reads the undo of a send-back too (finance follow-up: it does not start with finance.)", async () => {
+    await financeAssetDetail("a1", NOW);
+    const where = h.auditFindMany.mock.calls[0][0].where as { OR: Array<{ entityType?: string; OR?: Array<{ action?: { in?: string[] } }> }> };
+    const asset = where.OR.find((w) => w.entityType === "asset")!;
+    expect(asset.OR!.some((w) => w.action?.in?.includes("asset.return.undone"))).toBe(true);
+  });
+
   it("keeps the finance-relevant rows with email and role joined; drops lifecycle and non-finance updates", async () => {
     const d = (await financeAssetDetail("a1", NOW))!;
     expect(d.audit.map((r) => r.action).sort()).toEqual(["finance.confirm", "finance.reopened", "purchase.recorded", "update", "update"]);

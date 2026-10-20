@@ -190,6 +190,10 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
     verb: (d) => (d?.notCapitalised?.to === true ? "approved the asset as not capitalised" : "approved the asset for depreciation"),
   },
   "finance.reopened": { kind: "approval", verb: "sent the asset back to Finance after a cost change" },
+  // Finance follow-up (spec §3): an undo within 15 minutes, and an admin's reopen
+  "finance.confirm.undone": { kind: "approval", verb: "undid the approval" },
+  "finance.confirm.reopened": { kind: "approval", verb: "reopened the review" },
+  "asset.return.undone": { kind: "review", verb: "undid the send-back" },
   // cost and purchase
   update: { kind: "cost", verb: (d) => `changed the ${changedList(d, "purchase details")}` },
   "import-update": { kind: "cost", verb: (d) => `changed the ${changedList(d, "purchase details")} by import` },
@@ -197,6 +201,7 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
   // depreciation settings
   "depreciation.override": { kind: "settings", verb: "set a custom depreciation" },
   "depreciation.override.cleared": { kind: "settings", verb: "removed the custom depreciation" },
+  "depreciation.override.undone": { kind: "settings", verb: "undid the depreciation settings change" },
   "depreciation.policy": { kind: "settings", verb: "changed the category's depreciation policy" },
   // documents and attachments
   "document.uploaded": {
@@ -220,8 +225,8 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
   "note.reopened": { kind: "notes", verb: "reopened a note" },
 };
 
-/** Kinds for actions not in the table, by prefix; anything else is a review. */
-function kindFor(entityType: string, action: string): HistoryKind {
+/** Kinds for actions not in the table, by prefix; anything else is a review. The undo rules (finance-undo.ts) read it too. */
+export function historyKind(entityType: string, action: string): HistoryKind {
   const known = HISTORY_VERBS[action];
   if (entityType === "purchase-record") return "cost";
   if (known) return known.kind;
@@ -257,9 +262,14 @@ export function isFinanceRelevant(e: { entityType: string; action: string; diff:
 
 /**
  * Diff keys that are not changes to show: the actor's own name, Cris's marker, the reason-bearing notes, objects,
- * and the asset notes' thread id (`noteId`, Task 6: it says which thread, never a change).
+ * and the asset notes' thread id (`noteId`, Task 6: it says which thread, never a change). The finance follow-up adds
+ * the earlier values an undo restores: IT's reply an approval or send-back cleared (`resubmitNote`), and the override
+ * note an undo puts back (`depreciationNote`, the same note the reason already shows).
  */
-const HIDDEN_FIELDS = new Set(["via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "noteId", "document", "attachment"]);
+const HIDDEN_FIELDS = new Set([
+  "via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "noteId", "document", "attachment",
+  "resubmitNote", "depreciationNote",
+]);
 const MONEY_FIELDS = new Set(["cost", "total", "fees", "salvage", "unitCost", "price", "repairQuote"]);
 const CHIP_LABELS: Record<string, string> = {
   lifeMonths: "useful life", quantity: "units", fees: "delivery and fees", unitCost: "unit cost",
@@ -362,7 +372,7 @@ function auditToRow(e: AuditRow, ctx: HistoryContext): HistoryRow {
     actor: system ? SYSTEM_ACTOR : e.actorLabel,
     actorKey: e.actorId ?? SYSTEM_KEY,
     role: e.actorRole ? ROLE_SHORT[e.actorRole] : null,
-    kind: kindFor(e.entityType, e.action),
+    kind: historyKind(e.entityType, e.action),
     verb: historyVerb(e),
     changes: changesOf(e, ctx.names ?? {}),
     reason: reasonOf(e),

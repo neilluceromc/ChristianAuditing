@@ -302,3 +302,52 @@ describe("isFinanceRelevant / historyVerb", () => {
       .toBe("approved the asset as not capitalised");
   });
 });
+
+describe("undo and reopen lines (finance follow-up, spec §3)", () => {
+  const at = new Date("2026-10-21T02:50:00Z");
+  const lines = [
+    row({ id: "cmund00000000und1", action: "finance.confirm.undone", source: "web", createdAt: at,
+      diff: { financeConfirmed: { from: "Ana Cruz", to: null }, review: { from: "Approved", to: "To review" } } }),
+    row({ id: "cmund00000000und2", action: "asset.return.undone", source: "web", createdAt: at,
+      diff: { review: { from: "Sent back", to: "To review" }, flagged: { from: ["Cost"], to: null }, resubmitNote: { from: null, to: "Fixed" } } }),
+    row({ id: "cmund00000000und3", action: "depreciation.override.undone", source: "web", createdAt: at,
+      diff: { lifeMonths: { from: 24, to: null }, salvage: { from: 1000, to: null }, depreciationNote: { from: "Field use", to: null } } }),
+    row({ id: "cmund00000000und4", action: "finance.confirm.reopened", source: "web", reason: "Wrong category", createdAt: at,
+      actorId: "u-adm", actorLabel: "Ada Admin", actorRole: "admin", diff: { review: { from: "Approved", to: "To review" } } }),
+  ];
+  const byId = (id: string) => buildHistory(lines, [], {}, CTX).rows.find((r) => r.id === id)!;
+
+  it("are finance history", () => {
+    for (const l of lines) expect(isFinanceRelevant(l)).toBe(true);
+  });
+
+  it("read as the undo, in the history's kinds, with the reversal as chips and no hidden keys", () => {
+    expect(byId("cmund00000000und1")).toMatchObject({
+      kind: "approval", verb: "undid the approval", role: "Finance", changes: [{ field: "review", from: "Approved", to: "To review" }],
+    });
+    expect(byId("cmund00000000und2")).toMatchObject({
+      kind: "review", verb: "undid the send-back",
+      changes: [{ field: "flagged", from: "Cost", to: "—" }, { field: "review", from: "Sent back", to: "To review" }],
+    });
+    expect(byId("cmund00000000und3")).toMatchObject({
+      kind: "settings", verb: "undid the depreciation settings change", reason: null,
+      changes: [{ field: "salvage", from: "₱1,000.00", to: "—" }, { field: "useful life", from: "2 years", to: "—" }],
+    });
+    expect(byId("cmund00000000und4")).toMatchObject({
+      kind: "approval", verb: "reopened the review", role: "Admin", reason: "Wrong category",
+      changes: [{ field: "review", from: "Approved", to: "To review" }],
+    });
+  });
+
+  it("an approval's and a send-back's earlier values stay out of the chips", () => {
+    const confirm2 = row({ id: "cmcnf00000000cnf2", action: "finance.confirm",
+      diff: { financeConfirmed: { from: null, to: "Ana Cruz" }, resubmitNote: { from: "Fixed the OR", to: null } } });
+    expect(buildHistory([confirm2], [], {}, CTX).rows[0]).toMatchObject({ verb: "approved the asset for depreciation", changes: [] });
+    const cleared = row({ id: "cmclr00000000clr1", action: "depreciation.override.cleared",
+      diff: { lifeMonths: { from: 24, to: null }, salvage: { from: 1000, to: null }, note: { from: "Field use", to: null } } });
+    expect(buildHistory([cleared], [], {}, CTX).rows[0]).toMatchObject({
+      verb: "removed the custom depreciation", reason: null,
+      changes: [{ field: "salvage", from: "₱1,000.00", to: "—" }, { field: "useful life", from: "2 years", to: "—" }],
+    });
+  });
+});

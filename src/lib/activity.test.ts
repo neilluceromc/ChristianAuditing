@@ -460,6 +460,20 @@ describe("Phase 35 registration sentences", () => {
     expect(s("finance.reopened", { cost: { from: null, to: 500 } }))
       .toBe("L. Domingo added a cost to BR-LT-0214, so it went back to Finance");
   });
+  it("finance follow-up (spec §3): the undos and the admin's reopen", () => {
+    expect(s("finance.confirm.undone", { review: { from: "Approved", to: "To review" } })).toBe("L. Domingo undid the approval of BR-LT-0214");
+    expect(s("asset.return.undone", null)).toBe("L. Domingo undid sending BR-LT-0214 back");
+    expect(s("depreciation.override.undone", null)).toBe("L. Domingo undid the depreciation settings change on BR-LT-0214");
+    expect(s("finance.confirm.reopened", null)).toBe("L. Domingo reopened BR-LT-0214's review");
+    expect(auditPhrase({ action: "finance.confirm.undone", diff: null })).toBe("undid the approval");
+    expect(auditPhrase({ action: "asset.return.undone", diff: null })).toBe("undid the send-back");
+    expect(auditPhrase({ action: "depreciation.override.undone", diff: null })).toBe("undid the depreciation settings change");
+    expect(auditPhrase({ action: "finance.confirm.reopened", diff: null })).toBe("reopened the review");
+    expect(actionLabel("finance.confirm.undone")).toBe("Approval undone");
+    expect(actionLabel("asset.return.undone")).toBe("Send-back undone");
+    expect(actionLabel("depreciation.override.undone")).toBe("Custom depreciation undone");
+    expect(actionLabel("finance.confirm.reopened")).toBe("Review reopened");
+  });
 });
 
 describe("Phase 35 depreciation sentences", () => {

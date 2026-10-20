@@ -78,7 +78,15 @@ export async function clearAssetOverride(input: unknown): Promise<ActionResult<n
   if (!asset || asset.depreciationLifeMonths === null) return conflict("This asset has no custom depreciation to clear.");
   await prisma.$transaction(async (tx) => {
     await tx.asset.update({ where: { id }, data: { depreciationLifeMonths: null, depreciationSalvage: null, depreciationNote: null } });
-    await writeAudit(tx, { actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: id, action: "depreciation.override.cleared" });
+    // What was removed, so an undo (finance-undo.ts) can put it back exactly.
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: id, action: "depreciation.override.cleared",
+      diff: {
+        lifeMonths: { from: asset.depreciationLifeMonths, to: null },
+        salvage: { from: asset.depreciationSalvage === null ? null : Number(asset.depreciationSalvage), to: null },
+        note: { from: asset.depreciationNote, to: null },
+      },
+    });
   });
   revalidatePath("/finance/assets");
   revalidatePath("/finance/depreciation");

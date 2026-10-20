@@ -28,6 +28,9 @@ export const ACTION_LABELS: Record<string, string> = {
   cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
   "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Supplier set",
   "depreciation.policy": "Depreciation policy", "depreciation.override": "Custom depreciation", "depreciation.override.cleared": "Custom depreciation cleared",
+  // Finance follow-up (spec §3): undo within 15 minutes, and an admin's reopen
+  "finance.confirm.undone": "Approval undone", "asset.return.undone": "Send-back undone",
+  "depreciation.override.undone": "Custom depreciation undone", "finance.confirm.reopened": "Review reopened",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
@@ -228,6 +231,17 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
     }
     case "depreciation.override.cleared":
       return omitEntity ? `${actor}cleared custom depreciation` : `${actor}cleared custom depreciation on ${entry.entityLabel}`;
+    // Finance follow-up (spec §3): an undo names what it took back; the reopen is the admin's
+    case "finance.confirm.undone":
+      return omitEntity ? `${actor}undid the approval` : `${actor}undid the approval of ${entry.entityLabel}`;
+    case "asset.return.undone":
+      return omitEntity ? `${actor}undid the send-back` : `${actor}undid sending ${entry.entityLabel} back`;
+    case "depreciation.override.undone":
+      return omitEntity
+        ? `${actor}undid the depreciation settings change`
+        : `${actor}undid the depreciation settings change on ${entry.entityLabel}`;
+    case "finance.confirm.reopened":
+      return omitEntity ? `${actor}reopened the review` : `${actor}reopened ${entry.entityLabel}'s review`;
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw
