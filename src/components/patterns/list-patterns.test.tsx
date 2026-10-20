@@ -71,6 +71,14 @@ describe("FloatingBulkBar", () => {
     expect(html.indexOf("3 selected")).toBeLessThan(html.indexOf("Export"));
     expect(html.indexOf("Export")).toBeLessThan(html.indexOf("Clear"));
   });
+  it("floats at z-20: under the sticky toolbar (z-30) and its popovers, over the footer (z-10)", () => {
+    const html = renderToStaticMarkup(
+      <FloatingBulkBar count={1} onClear={() => {}}>
+        <button type="button">Export</button>
+      </FloatingBulkBar>,
+    );
+    expect(html).toMatch(/class="pointer-events-none fixed inset-x-0 z-20 /);
+  });
 });
 
 describe("StickyList and StickyToolbar", () => {
@@ -81,7 +89,7 @@ describe("StickyList and StickyToolbar", () => {
       </StickyList>,
     );
     expect(html).toContain("data-sticky-list");
-    expect(html).toMatch(/aria-hidden="true" class="h-0"><\/div><div class="sticky top-0 z-20[^"]*bg-canvas[^"]*py-2/);
+    expect(html).toMatch(/aria-hidden="true" class="h-0"><\/div><div class="sticky top-0 z-30[^"]*bg-canvas[^"]*py-2/);
   });
 });
 
@@ -123,6 +131,9 @@ describe("ListFooter", () => {
     expect(html).toContain("Rows per page");
     expect(html).toContain('<option value="100" selected="">100</option>');
     expect(html).not.toContain('aria-label="Pagination"');
+  });
+  it("is a z-10 sticky bar that keeps clear of Cris's corner (data-cris-avoid)", () => {
+    expect(footer(36, 900, 2)).toMatch(/^<div data-cris-avoid="" class="sticky bottom-0 z-10 /);
   });
   it("says No rows for an empty list", () => {
     expect(footer(1, 0)).toContain("No rows");

@@ -31,7 +31,7 @@ export function FloatingBulkBar({
 function Bar({ label, children, onClear }: { label: string; children: React.ReactNode; onClear: () => void }) {
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4"
+      className="pointer-events-none fixed inset-x-0 z-20 flex justify-center px-4"
       style={{ bottom: "calc(64px + env(safe-area-inset-bottom))" }}
     >
       <div

@@ -207,10 +207,14 @@ Wrap the page in `ListNavigationProvider` and `ListPendingRegion`, and switch pa
 - **Toolbar controls:** 36 px tall with 8 px gaps. There is 16 px between tiles or tabs, toolbar and table.
 
 ### 4.2 Zebra rows
-- **New tokens:** add `--zebra` and `--row-hover` for light and dark, with the spike's values: light
-  `#f7f8fa` / `#eef1f5`, dark `#1b1f26` / `#232831`. Expose them as `--color-zebra` and `--color-row-hover`.
+- **New tokens:** add `--zebra` and `--row-hover` for light and dark: light `#f7f8fa` / `#f2f4f7`, dark
+  `#1b1f26` / `#232831`. Expose them as `--color-zebra` and `--color-row-hover`.
+  - The light hover is lighter than the spike's `#eef1f5`, which left muted text (`#667085`) at 4.39:1 on a
+    hovered row; `#f2f4f7` gives 4.51:1 (final review, 2026-10-20).
 - **Table prop:** add `striped` to `Table`. A striped table has no row dividers, every even body row on `bg-zebra`,
   and hover on `bg-row-hover`. A ticked row keeps `bg-accent-tint`.
+  - A hovered row also shows a 2 px accent edge on its first cell (an inset shadow), because in light the hover
+    tint barely differs from the zebra.
 - **Scope:** only these two lists pass `striped`.
 
 ### 4.3 Sticky toolbar, header and footer

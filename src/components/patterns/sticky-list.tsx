@@ -16,6 +16,14 @@ import { useListNavigation } from "@/components/patterns/list-navigation";
  * (`ListFooter`, in list-footer.tsx so a Server Component can pass it its href builders) inside one
  * StickyList: the toolbar and footer then stick only while the list is on screen, and the table's
  * `stickyHeader` head pins under the toolbar through `--list-sticky-top`.
+ *
+ * The one z-scale for the list chrome (each sticky bar is its own stacking context, so a popover's z only counts
+ * inside its bar; the toolbar therefore sits highest, or the footer and bulk bar would paint over its popovers):
+ *   z-10  table head (`THead`) and the sticky footer (`ListFooter`)
+ *   z-20  the floating bulk bar (`FloatingBulkBar`)
+ *   z-30  the sticky toolbar (`StickyToolbar`), whose facet, column and filter popovers are z-40 inside it;
+ *         the Cris dock is also z-30 but renders after #main, so it stays on top
+ *   z-40  portalled menus · z-50 dialogs, drawers, tooltips · z-60 toasts
  */
 
 /**
@@ -45,8 +53,13 @@ export function StickyToolbar({ children, className }: { children: React.ReactNo
     const sentinel = sentinelRef.current;
     if (!bar || !sentinel) return;
     const list = bar.closest<HTMLElement>("[data-sticky-list]");
+    const root = document.documentElement;
     const ro = new ResizeObserver(() => {
-      list?.style.setProperty("--list-sticky-top", `${Math.round(bar.getBoundingClientRect().height)}px`);
+      const h = `${Math.round(bar.getBoundingClientRect().height)}px`;
+      list?.style.setProperty("--list-sticky-top", h);
+      // The window's scroll-padding-top (globals.css, :root:has([data-sticky-list])) reads it, so a row reached by
+      // Shift+Tab scrolls clear of the toolbar and the pinned head instead of landing under them (WCAG 2.4.11).
+      root.style.setProperty("--list-scroll-top", h);
     });
     ro.observe(bar);
     // stuck = the sentinel has scrolled out above the window's top edge (not merely below the fold)
@@ -56,6 +69,7 @@ export function StickyToolbar({ children, className }: { children: React.ReactNo
       ro.disconnect();
       io.disconnect();
       list?.style.removeProperty("--list-sticky-top");
+      root.style.removeProperty("--list-scroll-top");
     };
   }, []);
 
@@ -66,7 +80,7 @@ export function StickyToolbar({ children, className }: { children: React.ReactNo
         ref={barRef}
         data-stuck={stuck || undefined}
         className={cn(
-          "sticky top-0 z-20 -mx-6 border-b bg-canvas px-6 py-2 transition-colors duration-(--dur-1)",
+          "sticky top-0 z-30 -mx-6 border-b bg-canvas px-6 py-2 transition-colors duration-(--dur-1)",
           stuck ? "border-border" : "border-transparent",
           className,
         )}

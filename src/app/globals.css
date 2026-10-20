@@ -11,9 +11,10 @@
   --surface-subtle: #fcfcfd;
   --surface-accent: #f8fbfe;
   --surface-raised: #ffffff;
-  /* Phase 45: striped list rows and their hover (Inventory and Employees) */
+  /* Phase 45: striped list rows and their hover (Inventory and Employees). --row-hover is the darkest tint muted
+     text (#667085) sits on and must still pass AA: 4.51:1 (#eef1f5 was 4.39:1). */
   --zebra: #f7f8fa;
-  --row-hover: #eef1f5;
+  --row-hover: #f2f4f7;
   --border: #e4e7ec;
   --border-strong: #d0d5dd;
   --border-faint: #f2f4f7;
@@ -114,7 +115,9 @@
 
 /* Table `striped`: no row dividers, every even body row on the zebra tint, a hover tint, and a ticked row
    (aria-selected) keeps its accent tint. The tints are painted by the cells, not the row (which stays clear),
-   so the rounded corner cells below clip them to the card's corners. */
+   so the rounded corner cells below clip them to the card's corners. In light the hover tint is barely darker than
+   the zebra (it is held to AA for muted text), so a hovered row also shows a 2 px accent edge on its first cell:
+   an inset shadow, which follows that cell's rounded corner. */
 .list-striped tbody tr,
 .list-striped tbody tr:hover {
   border-bottom-width: 0;
@@ -128,6 +131,9 @@
 }
 .list-striped tbody tr:not([aria-selected]):hover > td {
   background-color: var(--row-hover);
+}
+.list-striped tbody tr:not([aria-selected]):hover > :first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .list-striped tbody tr[aria-selected] > td {
   background-color: var(--accent-tint);
@@ -162,6 +168,18 @@
 }
 .list-sticky-head tbody tr:last-child > td:last-child {
   border-bottom-right-radius: calc(var(--radius-card) - 1px);
+}
+
+/* A sticky list keeps keyboard focus in view (WCAG 2.4.11): rows are Tab stops, and the window's scroll padding
+   makes a focused row scroll clear of the sticky toolbar plus the pinned head above it (StickyToolbar writes its
+   height into --list-scroll-top) and of the 48 px sticky footer below it, or of Cris's corner when that is taller
+   (--cris-clear, cris-widget.css). `:root:has()` (0,2,0) outranks Cris's `html:has([data-cris-dock])` (0,1,1),
+   whichever stylesheet loads last. */
+@media screen {
+  :root:has([data-sticky-list]) {
+    scroll-padding-top: calc(var(--list-scroll-top, 0px) + var(--list-head-h));
+    scroll-padding-bottom: max(var(--cris-clear, 0px), 64px);
+  }
 }
 
 /* ── Colour tokens — dark (re-derived, not inverted) ── */

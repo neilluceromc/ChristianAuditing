@@ -33,7 +33,12 @@ export function ListFooter({
   const perHrefs: Record<number, string> = Object.fromEntries(PER_PAGE_OPTIONS.map((n) => [n, perHrefFor(n)]));
   const fmt = (n: number) => n.toLocaleString("en-US");
   return (
-    <div className="sticky bottom-0 z-20 -mx-6 mt-1 flex min-h-12 flex-wrap items-center gap-x-6 gap-y-1 border-t border-border bg-canvas/95 px-6 py-2 backdrop-blur">
+    // data-cris-avoid: while Cris shows, the bar keeps its pages out of Cris's corner (cris-widget.css). z-10: the
+    // list z-scale is in sticky-list.tsx.
+    <div
+      data-cris-avoid=""
+      className="sticky bottom-0 z-10 -mx-6 mt-1 flex min-h-12 flex-wrap items-center gap-x-6 gap-y-1 border-t border-border bg-canvas/95 px-6 py-2 backdrop-blur"
+    >
       <span className="text-[12.5px] tabular-nums text-fg-muted" aria-live="polite">
         {total === 0 ? (
           "No rows"
