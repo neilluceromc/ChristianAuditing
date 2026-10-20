@@ -125,7 +125,7 @@ export function RequestDocumentsCard({
                 e.target.value = "";
               }}
             />
-            <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 10 MB</p>
+            <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 4 MB</p>
           </div>
         )}
       </CardBody>

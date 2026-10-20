@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
+import { readUpload } from "@/server/storage";
 import { contentDisposition, UPLOAD_TYPES } from "@/server/uploads";
 
 export async function GET(
@@ -13,11 +13,7 @@ export async function GET(
   const row = await prisma.acknowledgement.findUnique({ where: { id: ackId } });
   if (!row || row.employeeId !== id) return new Response("Not found", { status: 404 });
 
-  const root = path.resolve(process.cwd(), "uploads");
-  const abs = path.resolve(root, row.path);
-  if (!abs.startsWith(root + path.sep)) return new Response("Not found", { status: 404 }); // traversal guard
-
-  const bytes = await readFile(abs).catch(() => null);
+  const bytes = await readUpload(row.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });
 
   return new Response(new Uint8Array(bytes), {

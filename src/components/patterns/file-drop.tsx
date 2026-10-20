@@ -23,7 +23,7 @@ export type FileDropProps = Take & {
  * needs (a kind, an Upload) before anything is written.
  */
 export function FileDrop(props: FileDropProps) {
-  const { label, accept = ".pdf,.png,.jpg,.jpeg", hint = "PDF · PNG · JPG — max 10 MB", disabled = false } = props;
+  const { label, accept = ".pdf,.png,.jpg,.jpeg", hint = "PDF · PNG · JPG — max 4 MB", disabled = false } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
