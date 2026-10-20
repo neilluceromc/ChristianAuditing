@@ -6,14 +6,14 @@ import { reasonOptional } from "./reason";
 // string is a field error at the picker, never an Invalid Date reaching
 // Prisma. Required (not the `""`-union `stock-schema.ts` carries) — the
 // Effective date field always has a value, defaulted to today by the dialog.
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
+export const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
 
 // "Today" is the Asia/Manila calendar date, the same clock every date the app
 // prints uses (`fmtDate`). The UTC date this used to read was yesterday for a
 // Manila user between 00:00 and 08:00, so the dialog's default date and this
 // check disagreed with the header line the transfer then rendered (Phase 20
 // review M-5; caught by the Phase 21 final battery running at 01:00 Manila).
-const todayStr = () => localDateISO(new Date());
+export const todayStr = () =>localDateISO(new Date());
 
 /**
  * Phase 20 (spec §3). `toDepartmentId` differing from the employee's CURRENT

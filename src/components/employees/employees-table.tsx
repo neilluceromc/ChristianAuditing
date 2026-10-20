@@ -28,6 +28,8 @@ import { useListNavigation } from "@/components/patterns/list-navigation";
 import { FloatingBulkBar } from "@/components/patterns/floating-bulk-bar";
 import { LIST } from "@/components/patterns/list-styles";
 import { useFitsCard } from "@/components/patterns/use-fits-card";
+import type { PickerGroup } from "@/lib/groups";
+import { BulkTransferDialog } from "./bulk-transfer-dialog";
 
 /**
  * The fixed columns' widths (padding included). The table lays out fixed (`table-fixed`): Employee has no width
@@ -102,6 +104,7 @@ export function EmployeesTable({
   state,
   sortHrefs,
   canMutate,
+  departments = [],
 }: {
   rows: EmployeeListRow[];
   state: ListState;
@@ -109,11 +112,14 @@ export function EmployeesTable({
   sortHrefs: Record<string, string>;
   /** admin and it_staff: the checkbox column and the bulk bar exist only for them (spec §3.4). */
   canMutate: boolean;
+  /** Departments and clients for Transfer… (spec §3.4); the page loads them only for `canMutate`. */
+  departments?: PickerGroup[];
 }) {
   const router = useRouter();
   // Phase 30 (spec §6.5): a sort runs in the list's shared transition, so the region dims while it loads.
   const { navigate } = useListNavigation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [transferOpen, setTransferOpen] = useState(false);
 
   // Select-all-on-page covers the rows that can be selected; an Offboarded row never can.
   const pageIds = rows.filter(selectable).map((r) => r.id);
@@ -148,7 +154,8 @@ export function EmployeesTable({
   const head = (sortable: boolean, extra?: string) => cn(LIST.head, sortable ? LIST.thSort : LIST.th, "whitespace-nowrap", extra);
 
   // Page order, so the export and the forms list people the way the operator sees them.
-  const ids = rows.filter((r) => selected.has(r.id)).map((r) => r.id).join(",");
+  const selectedIds = rows.filter((r) => selected.has(r.id)).map((r) => r.id);
+  const ids = selectedIds.join(",");
 
   return (
     <div ref={boxRef} className="flex flex-col" style={{ "--employees-table-min": `${tableMin}px` } as React.CSSProperties}>
@@ -237,16 +244,24 @@ export function EmployeesTable({
       {/* Phase 45 (spec §3.4): the same floating bar as Inventory, while rows are ticked. */}
       {canMutate && (
         <FloatingBulkBar count={selected.size} onClear={() => setSelected(new Set())}>
-          {/* Task 8 wires this to BulkTransferDialog. A disabled kit Button takes no pointer events, so the
-              wrapper carries the tooltip too. */}
-          <span title="Coming in this phase" className="inline-flex">
-            <Button size="sm" variant="primary" disabled title="Coming in this phase">Transfer…</Button>
-          </span>
+          <Button size="sm" variant="primary" onClick={() => setTransferOpen(true)}>Transfer…</Button>
           {/* a route handler that streams a file: a plain navigation, never prefetched */}
           <ButtonLink size="sm" native href={`/employees/export?ids=${ids}`}>Export</ButtonLink>
           {/* one printable form per person: not worth prefetching on every tick */}
           <ButtonLink size="sm" prefetch={false} href={`/employees/forms?ids=${ids}`}>Print IT forms</ButtonLink>
         </FloatingBulkBar>
+      )}
+      {/* mounted only while open, so each opening starts with fresh fields */}
+      {canMutate && transferOpen && (
+        <BulkTransferDialog
+          ids={selectedIds}
+          departments={departments}
+          onClose={() => setTransferOpen(false)}
+          onDone={() => {
+            setTransferOpen(false);
+            setSelected(new Set());
+          }}
+        />
       )}
     </div>
   );

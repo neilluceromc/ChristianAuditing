@@ -10,6 +10,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/employees",
 }));
+// The bulk Transfer dialog's server action (it pulls in auth); markup tests never submit.
+vi.mock("@/server/modules/employees/transfer-actions", () => ({ bulkTransferEmployees: vi.fn() }));
 
 const row = (over: Partial<EmployeeListRow>): EmployeeListRow => ({
   id: "e1", name: "Ana Cruz", title: "Support Lead", employeeNo: "EMP-0042", department: "Finance",

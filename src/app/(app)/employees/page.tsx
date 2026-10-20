@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
 import { requireUser } from "@/server/auth/guards";
+import { prisma } from "@/server/db/client";
 import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withPer, withSearch,
 } from "@/lib/url-state";
@@ -40,10 +41,18 @@ export default async function EmployeesPage({
   // at the same instant, so they cannot disagree across the month boundary.
   const now = new Date();
 
-  const [{ rows, total, page, pageCount, hiddenLeavers }, facets, tabCounts] = await Promise.all([
+  const [{ rows, total, page, pageCount, hiddenLeavers }, facets, tabCounts, departments] = await Promise.all([
     listEmployees(state, gapsOnly, now),
     employeeFacetOptions(state, now),
     employeeTabCounts(state, now),
+    // Transfer… (spec §3.4) offers active departments and clients; only admin and it_staff have the bulk bar.
+    canMutate
+      ? prisma.department.findMany({
+        where: { archivedAt: null },
+        select: { id: true, name: true, kind: true, archivedAt: true },
+        orderBy: { name: "asc" },
+      })
+      : Promise.resolve([]),
   ]);
 
   const href = (s: typeof state, gaps = gapsOnly, base = "/employees") => {
@@ -136,7 +145,14 @@ export default async function EmployeesPage({
                 <>
                   {/* key: any URL-state change remounts the island, so a selection never survives a
                       page/filter/sort change (it would act on rows no longer on screen). */}
-                  <EmployeesTable key={listKey} rows={rows} state={state} sortHrefs={sortHrefs} canMutate={canMutate} />
+                  <EmployeesTable
+                    key={listKey}
+                    rows={rows}
+                    state={state}
+                    sortHrefs={sortHrefs}
+                    canMutate={canMutate}
+                    departments={departments}
+                  />
                   <ListFooter
                     page={page}
                     per={state.per}
