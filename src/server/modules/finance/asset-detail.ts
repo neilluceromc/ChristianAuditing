@@ -24,10 +24,7 @@ export interface FinanceAssetDetail {
   approvedBy: string | null; approvedAt: Date | null; notCapitalised: boolean;
   costC: number | null; result: DepResult | null; note: string | null; policyText: string; custom: boolean;
   lifeMonths: number | null; salvageC: number | null;
-  startLabel: string | null; endLabel: string | null; monthsUsed: number | null; asOfLabel: string;
-  pr: { id: string; refNo: string; requester: string; totalC: number } | null;
-  vendor: string | null; invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null; feesC: number | null;
-  warrantyUntil: Date | null; coveredBy: string | null; contact: string | null;
+  startLabel: string | null; endLabel: string | null; monthsUsed: number | null;
   docs: Array<{ kind: string; title: string; file: { id: string; fileName: string; size: number | null } | null }>;
   years: LifeYear[];
   /**
@@ -63,7 +60,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       assignee: { select: { name: true } },
       vendor: { select: { name: true } },
       purchaseRequest: {
-        select: { id: true, refNo: true, requestedBy: { select: { name: true } }, units: { select: { qty: true, unitPrice: true } } },
+        select: { id: true, refNo: true, requestedBy: { select: { name: true } } },
       },
       purchaseRecord: { select: { id: true, fees: true, quantity: true } },
       documents: { select: { id: true, kind: true, fileName: true, size: true, createdAt: true }, orderBy: { createdAt: "asc" } },
@@ -100,10 +97,6 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
   const start = result?.startMonth ?? null;
   const startOk = policy && start !== null;
   const monthsUsed = startOk ? Math.min(Math.max(asOf - start + 1, 0), policy.lifeMonths) : null;
-
-  const prTotalC = a.purchaseRequest
-    ? a.purchaseRequest.units.reduce((sum, u) => sum + (toCentavos(u.unitPrice) ?? 0) * u.qty, 0)
-    : 0;
 
   type DocFile = { id: string; fileName: string; size: number | null };
   const bySlot = new Map<string, DocFile>();
@@ -170,13 +163,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     lifeMonths: policy?.lifeMonths ?? null, salvageC: policy?.salvage ?? null,
     startLabel: startOk ? monthLabel(start) : null,
     endLabel: startOk ? monthLabel(start + policy.lifeMonths - 1) : null,
-    monthsUsed, asOfLabel: monthLabel(asOf),
-    pr: a.purchaseRequest
-      ? { id: a.purchaseRequest.id, refNo: a.purchaseRequest.refNo, requester: a.purchaseRequest.requestedBy.name, totalC: prTotalC }
-      : null,
-    vendor: a.vendor?.name ?? null, invoiceRef: a.invoiceRef, receiptRef: a.receiptRef, purchasedAt: a.purchasedAt,
-    feesC: toCentavos(a.purchaseRecord?.fees),
-    warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy, contact: a.warrantyContact,
+    monthsUsed,
     docs,
     years: result && costC !== null ? lifeYears(costC, depStart, policy, asOf) : [],
     cost: {

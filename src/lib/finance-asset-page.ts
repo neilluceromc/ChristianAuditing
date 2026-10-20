@@ -1,6 +1,10 @@
 import type { DepResult, MonthIndex } from "./depreciation";
-import { HISTORY_KINDS, HISTORY_KIND_LABELS, type HistoryKind, type HistoryRow } from "./finance-history";
+import {
+  HISTORY_KINDS, buildHistory, type AuditRow, type DepLine, type HistoryContext, type HistoryKind, type HistoryResult,
+  type HistoryRow,
+} from "./finance-history";
 import { ATTACHMENT_KINDS, type AttachmentKind } from "./asset-notes";
+import { csvTextCell } from "./csv";
 
 /*
  * Phase 47 (Task 7, spec §4): the Finance asset page (mockup Option B · Ledger). Pure: the URL state every tab and
@@ -154,18 +158,33 @@ export function assetDocHref(assetId: string, docId: string, inline = false): st
   return `/inventory/${encodeURIComponent(assetId)}/documents/${encodeURIComponent(docId)}/download${inline ? "?inline=1" : ""}`;
 }
 
+// ---- the history ---------------------------------------------------------------------------------------------------
+
+/**
+ * The Financial history for the page's (or the export's) URL state. A person filter naming no one in this asset's
+ * history (a stale or hand-edited `?hw=`) is treated as Everyone, so the select and the list never disagree; the
+ * returned `hw` is the filter actually applied.
+ */
+export function assetHistory(
+  audit: AuditRow[],
+  lines: DepLine[],
+  state: Pick<AssetPageState, "hk" | "hw" | "hp">,
+  ctx: HistoryContext,
+  pageSize?: number,
+): { history: HistoryResult; hw: string | null } {
+  const run = (person: string | null) =>
+    buildHistory(audit, lines, { kind: state.hk, person: person ?? undefined, page: state.hp, pageSize }, ctx);
+  const history = run(state.hw);
+  if (state.hw && !history.actors.some((a) => a.key === state.hw)) return { history: run(null), hw: null };
+  return { history, hw: state.hw };
+}
+
 // ---- the history CSV ------------------------------------------------------------------------------------------------
 
 /** The kind pill's word for one entry (the filter's labels are plural). */
 export const HISTORY_KIND_PILL: Record<HistoryKind, string> = {
   approval: "Approval", review: "Review", cost: "Cost", settings: "Settings", docs: "Documents", notes: "Note", dep: "Depreciation",
 };
-
-function csvCell(v: string): string {
-  // a cell a spreadsheet would read as a formula (= + - @) gets a leading apostrophe, so it stays text
-  const safe = /^[=+\-@]/.test(v) ? `'${v}` : v;
-  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-}
 
 /**
  * Export log (spec §4.5): the filtered entries as CSV — RFC 4180 quoting, CRLF line ends, a UTF-8 BOM so a
@@ -174,9 +193,9 @@ function csvCell(v: string): string {
 export function historyCsv(rows: readonly HistoryRow[]): string {
   const head = ["Reference", "Exact time", "Who", "Role", "Kind", "What", "Changes", "Reason", "Source", "Signed in as", "Related"];
   const lines = rows.map((r) => [
-    r.ref, r.exact, r.actor, r.role ?? "", HISTORY_KIND_PILL[r.kind] ?? HISTORY_KIND_LABELS[r.kind], r.verb,
+    r.ref, r.exact, r.actor, r.role ?? "", HISTORY_KIND_PILL[r.kind], r.verb,
     r.changes.map((c) => `${c.field}: ${c.from} → ${c.to}`).join("; "),
     r.reason ?? "", r.sourceLabel, r.account ?? "", r.related,
-  ].map(csvCell).join(","));
+  ].map(csvTextCell).join(","));
   return `﻿${[head.join(","), ...lines].join("\r\n")}`;
 }

@@ -40,8 +40,10 @@ export function xlsxResponse(filename: string, body: Buffer): Response {
  * `audit`, `employees`, `farewell-EMP-0042` — and CRLF was already unreachable
  * here regardless (`Headers` throws on `\r`/`\n` in a value), so this closes
  * the one gap that was real: attribute breakout via a quote.
+ *
+ * `ext` (Phase 47): "csv" for the asset Financial history's Export log; every xlsx caller keeps the default.
  */
-export function exportFilename(prefix: string, now: Date): string {
+export function exportFilename(prefix: string, now: Date, ext: "xlsx" | "csv" = "xlsx"): string {
   const safePrefix = prefix.replace(/[^A-Za-z0-9_-]/g, "");
-  return `${safePrefix}-${now.toISOString().slice(0, 10)}.xlsx`;
+  return `${safePrefix}-${now.toISOString().slice(0, 10)}.${ext}`;
 }

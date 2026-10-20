@@ -123,7 +123,7 @@ const hrow = (over: Partial<HistoryRow> = {}): HistoryRow => ({
 
 describe("HistoryEntry (spec §4.5)", () => {
   it("initials, \"Name (Role) verb\", kind pill, time, chips, quoted reason and source", () => {
-    const html = renderToStaticMarkup(<HistoryEntry row={hrow()} />);
+    const html = renderToStaticMarkup(<HistoryEntry row={hrow()} kindLabel="Review" />);
     expect(html).toContain(">AC<");
     expect(html).toMatch(/Ana Cruz[\s\S]*\(Finance\)[\s\S]*sent the asset back/);
     expect(html).toContain("Review");
@@ -133,17 +133,17 @@ describe("HistoryEntry (spec §4.5)", () => {
     expect(html).toContain("Web app");
   });
   it("Details is a collapsed toggle; open, it shows the reference, exact time, source, account and what it relates to", () => {
-    const closed = renderToStaticMarkup(<HistoryEntry row={hrow()} />);
+    const closed = renderToStaticMarkup(<HistoryEntry row={hrow()} kindLabel="Review" />);
     expect(tagWith(closed, "aria-expanded")).toContain('aria-expanded="false"');
     expect(closed).not.toContain("AUD-20261021-ABC123");
-    const open = renderToStaticMarkup(<HistoryEntry row={hrow()} initialOpen />);
+    const open = renderToStaticMarkup(<HistoryEntry row={hrow()} kindLabel="Review" initialOpen />);
     expect(tagWith(open, "aria-expanded")).toContain('aria-expanded="true"');
     for (const s of ["Reference", "AUD-20261021-ABC123", "Exact time", "GMT+8 (Asia/Manila)", "Done through", "Signed in as", "ana@example.com", "Related", "Asset IT-0001"]) {
       expect(open).toContain(s);
     }
   });
   it("System has no role and no reason; no chips, no chip row", () => {
-    const html = renderToStaticMarkup(<HistoryEntry row={hrow({ actor: "System", role: null, reason: null, changes: [], account: null })} />);
+    const html = renderToStaticMarkup(<HistoryEntry row={hrow({ actor: "System", role: null, reason: null, changes: [], account: null })} kindLabel="Review" />);
     expect(html).not.toContain("(null)");
     expect(html).not.toContain("“");
     expect(html).not.toMatch(/<s[ >]/);
@@ -213,6 +213,9 @@ describe("NotesTab (spec §4.3, shared with the Inventory record)", () => {
     expect(html).toContain("Resolved");
     expect(html.indexOf("Body n2")).toBeLessThan(html.indexOf("Body n1"));
     expect(tagWith(html, 'data-resolved="true"')).toContain("opacity-");
+    // focus finds each thread's toggle again after the refresh (form-focus.ts)
+    expect(html).toMatch(/<button[^>]*data-resolve-toggle="n2"/);
+    expect(html).toMatch(/<button[^>]*data-resolve-toggle="n1"/);
   });
   it("viewers read only: no compose, reply or resolve", () => {
     const html = renderToStaticMarkup(<NotesTab assetId="a1" threads={[note("n1")]} canPost={false} />);
@@ -240,6 +243,7 @@ describe("AttachmentsTab (spec §4.4, shared with the Inventory record)", () => 
     );
     expect(html).toContain("Proof of payment");
     expect(html).toContain("Drop a file here");
+    expect(html).toMatch(/<p role="status" aria-live="polite"/); // announces "Uploaded <name>"
     expect(html).toMatch(/All[\s\S]*2/);
     expect(html).toMatch(/Photo[\s\S]*1/);
     expect(html).toContain("q1.pdf");

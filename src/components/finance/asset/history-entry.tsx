@@ -2,7 +2,6 @@
 
 import { useId, useState } from "react";
 import { cn } from "@/lib/cn";
-import { HISTORY_KIND_PILL } from "@/lib/finance-asset-page";
 import type { HistoryRow } from "@/lib/finance-history";
 import { Avatar } from "@/components/ui/avatar";
 import { Pill } from "@/components/ui/pill";
@@ -12,7 +11,16 @@ import { Pill } from "@/components/ui/pill";
  * chip per changed field (old struck through → new); the reason in quotes; the source pill; and a Details toggle
  * with the reference, exact time, source, signed-in account and what the entry relates to.
  */
-export function HistoryEntry({ row, initialOpen = false }: { row: HistoryRow; initialOpen?: boolean }) {
+export function HistoryEntry({
+  row,
+  kindLabel,
+  initialOpen = false,
+}: {
+  row: HistoryRow;
+  /** The kind pill's word (`HISTORY_KIND_PILL`), passed in so this client file needs no history logic. */
+  kindLabel: string;
+  initialOpen?: boolean;
+}) {
   const [open, setOpen] = useState(initialOpen);
   const detailsId = useId();
   return (
@@ -24,7 +32,7 @@ export function HistoryEntry({ row, initialOpen = false }: { row: HistoryRow; in
             <span className="font-semibold text-fg">{row.actor}</span>
             {row.role && <span className="text-fg-muted"> ({row.role})</span>} {row.verb}
           </p>
-          <Pill>{HISTORY_KIND_PILL[row.kind]}</Pill>
+          <Pill>{kindLabel}</Pill>
           <time dateTime={row.at.toISOString()} className="font-mono text-[11px] tabular-nums text-fg-muted">{row.time}</time>
         </div>
 

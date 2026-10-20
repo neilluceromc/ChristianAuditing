@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_ASSET_PAGE_STATE, assetPageHref, fmtFileSize, historyCsv, lifeSummary, noScheduleReason, parseAssetPageState,
+  DEFAULT_ASSET_PAGE_STATE, assetHistory, assetPageHref, fmtFileSize, historyCsv, lifeSummary, noScheduleReason, parseAssetPageState,
   previewKind, shortMonthLabel,
 } from "./finance-asset-page";
-import type { HistoryRow } from "./finance-history";
+import type { AuditRow, HistoryRow } from "./finance-history";
 import type { DepResult } from "./depreciation";
 
 /*
@@ -105,6 +105,28 @@ describe("small formatters", () => {
     expect(previewKind("d.JPG")).toBe("image");
     expect(previewKind("e.docx")).toBeNull();
     expect(previewKind("noext")).toBeNull();
+  });
+});
+
+describe("assetHistory (the person filter)", () => {
+  const audit = (id: string, actorId: string | null): AuditRow => ({
+    id, actorId, actorLabel: actorId ?? "System", actorEmail: null, actorRole: null, entityType: "asset", entityId: "a1",
+    action: "finance.confirm", diff: null, source: "web", reason: null, createdAt: new Date("2026-10-01T00:00:00Z"),
+  });
+  const rows = [audit("e1", "u1"), audit("e2", "u2")];
+  const ctx = { assetTag: "IT-0001" };
+  it("a known person filters", () => {
+    const r = assetHistory(rows, [], { hk: "all", hw: "u1", hp: 1 }, ctx);
+    expect(r.hw).toBe("u1");
+    expect(r.history.total).toBe(1);
+  });
+  it("an unknown person is Everyone, and says so", () => {
+    const r = assetHistory(rows, [], { hk: "all", hw: "gone", hp: 1 }, ctx);
+    expect(r.hw).toBeNull();
+    expect(r.history.total).toBe(2);
+  });
+  it("a page size reaches buildHistory (the export takes every row)", () => {
+    expect(assetHistory(rows, [], { hk: "all", hw: null, hp: 1 }, ctx, 1).history.rows).toHaveLength(1);
   });
 });
 

@@ -14,6 +14,8 @@ export type FileDropProps = Take & {
   accept?: string;
   hint?: string;
   disabled?: boolean;
+  /** Phase 47: the "Choose file" button, so a caller can return focus to it (after an upload). */
+  buttonRef?: React.Ref<HTMLButtonElement>;
 };
 
 /**
@@ -52,7 +54,7 @@ export function FileDrop(props: FileDropProps) {
       )}
     >
       <p className="text-xs text-fg-secondary">{props.multiple ? "Drop files here, or" : "Drop a file here, or"}</p>
-      <Button type="button" size="sm" disabled={disabled} onClick={() => inputRef.current?.click()}>
+      <Button ref={props.buttonRef} type="button" size="sm" disabled={disabled} onClick={() => inputRef.current?.click()}>
         {props.multiple ? "Choose files" : "Choose file"}
       </Button>
       {hint && <p className="font-mono text-[10px] text-fg-faint">{hint}</p>}

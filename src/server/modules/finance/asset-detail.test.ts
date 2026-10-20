@@ -181,7 +181,6 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
     expect(r.changes).toEqual([{ field: "supplier", from: "Octagon", to: "Acme Trading" }]);
     expect(JSON.stringify(rows)).not.toContain("ven-");
   });
-
 });
 
 describe("financeAssetDetail — notes, attachments, documents", () => {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
-import { assetPageHref, type AssetPageState } from "@/lib/finance-asset-page";
+import { HISTORY_KIND_PILL, assetPageHref, type AssetPageState } from "@/lib/finance-asset-page";
 import { HISTORY_KINDS, HISTORY_KIND_LABELS, type HistoryKind, type HistoryResult, type HistoryRow } from "@/lib/finance-history";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Card } from "@/components/ui/card";
@@ -96,7 +96,7 @@ export function HistoryTab({ id, state, history }: { id: string; state: AssetPag
                   {g.label}
                 </h3>
                 <ol className="divide-y divide-border-faint">
-                  {g.rows.map((r) => <li key={r.id}><HistoryEntry row={r} /></li>)}
+                  {g.rows.map((r) => <li key={r.id}><HistoryEntry row={r} kindLabel={HISTORY_KIND_PILL[r.kind]} /></li>)}
                 </ol>
               </li>
             ))}

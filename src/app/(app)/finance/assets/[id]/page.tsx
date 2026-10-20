@@ -15,9 +15,8 @@ import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { toSearchParams } from "@/lib/url-state";
 import { pathAllowedForRole } from "@/lib/workspaces";
 import { canPostOnAsset } from "@/lib/asset-notes";
-import { buildHistory } from "@/lib/finance-history";
 import { defaultLedgerYear, ledgerMonths, ledgerYears } from "@/lib/finance-ledger";
-import { assetPageHref, lifeSummary, noScheduleReason, parseAssetPageState } from "@/lib/finance-asset-page";
+import { assetHistory, assetPageHref, lifeSummary, noScheduleReason, parseAssetPageState } from "@/lib/finance-asset-page";
 import { PageHeader } from "@/components/ui/page-header";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ReviewBox } from "@/components/finance/review-box";
@@ -99,6 +98,11 @@ export default async function FinanceAssetPage({
   // the document open in the preview: only one of this asset's own document slots
   const openDoc = state.doc ? d.docs.find((x) => x.file?.id === state.doc) ?? null : null;
   const holderId = extra?.assignee?.id ?? null;
+
+  // history (spec §4.5): an unknown `?hw=` reads as Everyone, so the select and the list agree
+  const history = state.tab === "history"
+    ? assetHistory(d.audit, d.depLines, state, { assetTag: d.tag, categoryName: d.category, purchaseUnits: d.purchaseUnits, names: d.historyNames })
+    : null;
 
   return (
     <>
@@ -241,18 +245,7 @@ export default async function FinanceAssetPage({
                   hrefFor={(patch) => assetPageHref(d.id, state, { tab: "files", ...patch })}
                 />
               )}
-              {state.tab === "history" && (
-                <HistoryTab
-                  id={d.id}
-                  state={state}
-                  history={buildHistory(
-                    d.audit,
-                    d.depLines,
-                    { kind: state.hk, person: state.hw ?? undefined, page: state.hp },
-                    { assetTag: d.tag, categoryName: d.category, purchaseUnits: d.purchaseUnits, names: d.historyNames },
-                  )}
-                />
-              )}
+              {history && <HistoryTab id={d.id} state={{ ...state, hw: history.hw }} history={history.history} />}
             </ListPendingRegion>
           </div>
         </ListNavigationProvider>
