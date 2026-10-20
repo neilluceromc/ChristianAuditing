@@ -97,6 +97,9 @@ describe("EmployeesTable", () => {
     const html = table([row({}), row({ id: "e2", name: "Faith Mercado", employment: "OFFBOARDED" })]);
     expect(html).toMatch(/<input type="checkbox"[^>]*aria-label="Select Faith Mercado"[^>]*disabled=""/);
     expect(html).not.toMatch(/<input type="checkbox"[^>]*aria-label="Select Ana Cruz"[^>]*disabled=""/);
+    // the cell carries the reason too: some browsers show no tooltip for a disabled control
+    expect(html).toMatch(/<td[^>]*title="Offboarded people can(?:&#x27;|')t be selected"/);
+    expect(html.match(/<td[^>]*title="Offboarded/g)).toHaveLength(1);
     expect(html).not.toMatch(/<input type="checkbox"[^>]*aria-label="Select all on this page"[^>]*disabled=""/);
     // a page of leavers only has nothing to select
     const leavers = table([row({ employment: "OFFBOARDED" })]);

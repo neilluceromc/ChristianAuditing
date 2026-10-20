@@ -104,7 +104,7 @@ export default async function EmployeesPage({
     chips.push({ label: "Leavers shown", removeHref: href(withFilter(state, "leavers", []), gapsOnly) });
   }
   if (gapsOnly) {
-    chips.push({ label: "Policy gaps only", removeHref: href(state, false) });
+    chips.push({ label: "Missing kit", removeHref: href(state, false) });
   }
 
   return (

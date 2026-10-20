@@ -201,8 +201,10 @@ export function EmployeesTable({
                 {canMutate && (
                   // The whole cell is the checkbox's target (Fitts): a click on the input toggles through its own
                   // onChange, a click on the cell around it toggles here; neither opens the row.
+                  // A disabled input shows no tooltip in some browsers, so the cell carries the reason too.
                   <Td
                     className={cn(LIST.check, "cursor-default")}
+                    title={canSelect ? undefined : "Offboarded people can't be selected"}
                     onClick={(e: React.MouseEvent) => {
                       e.stopPropagation();
                       if (canSelect && e.target === e.currentTarget) toggleRow(row.id);
