@@ -14,6 +14,8 @@ export const AUDIT_ACTIONS = [
   "lifecycle.assign", "lifecycle.return", "lifecycle.change-status", "lifecycle.replace", "lifecycle.triage",
   "lifecycle.transfer", "loan.due-changed", "reservation.placed", "reservation.released",
   "document.uploaded", "document.signed", "secret.created", "SECRET_READ",
+  // Phase 47: the shared asset notes and attachments (src/server/modules/assets)
+  "note.posted", "note.replied", "note.resolved", "note.reopened", "attachment.uploaded",
   // approvals: the queue's transitions and the worker
   "approval.requested", "claim", "release", "approve", "reject", "escalate", "retry", "executed", "execution.failed",
   ...Object.values(APPROVAL_TYPE_LABEL).map((t) => `${t} executed`),

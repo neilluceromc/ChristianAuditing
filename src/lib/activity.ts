@@ -19,6 +19,9 @@ export const ACTION_LABELS: Record<string, string> = {
   "lifecycle.change-status executed": "Status changed (approved request)",
   "reservation.placed": "Hold placed", "reservation.released": "Hold released",
   "document.uploaded": "Document attached", "document.signed": "Document signed",
+  // Phase 47: the shared asset notes and attachments
+  "note.posted": "Note posted", "note.replied": "Note reply", "note.resolved": "Note resolved", "note.reopened": "Note reopened",
+  "attachment.uploaded": "Attachment added",
   "secret.created": "Secret added", SECRET_READ: "Secret read",
   "approval.requested": "Change requested", comment: "Comment", "unit-update": "Units updated",
   submit: "Submitted", "it-review": "IT review", "it-reject": "Returned by IT", "request-info": "Info requested",
@@ -487,6 +490,20 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       return omitEntity ? `${actor}edited a note` : `${actor}edited a note on ${entry.entityLabel}`;
     case "note.deleted":
       return omitEntity ? `${actor}deleted a note` : `${actor}deleted a note on ${entry.entityLabel}`;
+    // Phase 47 (spec §4.3, §4.4): the shared asset notes and attachments, written on the asset.
+    case "note.posted":
+      return omitEntity ? `${actor}added a note` : `${actor}added a note on ${entry.entityLabel}`;
+    case "note.replied":
+      return omitEntity ? `${actor}replied to a note` : `${actor}replied to a note on ${entry.entityLabel}`;
+    case "note.resolved":
+      return omitEntity ? `${actor}marked a note resolved` : `${actor}marked a note resolved on ${entry.entityLabel}`;
+    case "note.reopened":
+      return omitEntity ? `${actor}reopened a note` : `${actor}reopened a note on ${entry.entityLabel}`;
+    case "attachment.uploaded": {
+      const file = diff?.attachment?.to;
+      const what = typeof file === "string" && file ? file : "an attachment";
+      return omitEntity ? `${actor}attached ${what}` : `${actor}attached ${what} to ${entry.entityLabel}`;
+    }
     case "employee.setup": {
       // one diff key: the field's label ("Entra / Intune", "VPN" …) → { from, to } with the value as words
       const label = diff ? Object.keys(diff)[0] ?? "IT setup" : "IT setup";
