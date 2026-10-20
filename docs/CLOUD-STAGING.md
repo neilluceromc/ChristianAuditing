@@ -35,12 +35,15 @@ Claude's parts are marked **(Claude)**. Everything else is yours.
 ### 1. Create the Supabase project
 
 1. Supabase → **New project**. Plan **Free**, region **Southeast Asia (Singapore)**.
-2. Choose a strong **database password** and keep it in your password manager. You need it for
-   the two connection strings below. (Lost it? Project Settings → Database → Reset database
-   password.)
+2. Choose a strong **database password of letters and digits only** (Supabase's Generate button
+   makes one) and keep it in your password manager. You need it for the two connection strings
+   below. A password with `@`, `/`, `#` or `?` breaks the connection URL, and then Postgres's own
+   error message can print the whole URL, password included. (Lost it? Project Settings → Database
+   → Reset database password.)
 3. Note the Postgres version the project runs (Project Settings → Infrastructure). Our data comes
-   from Postgres 16; Supabase runs 15 or 17. A restore into either works. For backups see
-   [Backups](#backups-the-dump-rule).
+   from Postgres 16. The restore is meant for **Postgres 17**, the current Supabase default;
+   Postgres 15 is untested. On 17, backups need `-Image postgres:17-alpine` (see
+   [Backups](#backups-the-dump-rule)).
 
 ### 2. Turn the Data API off, run `lockdown.sql`, create the `documents` bucket
 
@@ -79,6 +82,7 @@ Remove-Item Env:SUPABASE_DB_URL
 - It copies the dump into `inventory-db-1`, runs `pg_restore --no-owner --no-privileges
   --schema=public --exit-on-error --single-transaction` into Supabase, and deletes the copy.
 - **All or nothing:** if anything fails, nothing is kept. Read the error, fix it, run it again.
+  **Before you paste an error anywhere** (chat included), check it does not contain your password.
 - `_prisma_migrations` comes along, so the first Vercel build has no migration to apply.
 - If PowerShell refuses to run scripts, run it as
   `powershell -ExecutionPolicy Bypass -File .\scripts\supabase\restore.ps1 -Dump <path>`.
@@ -93,10 +97,18 @@ select table_name, grantee from information_schema.role_table_grants
 where table_schema = 'public' and grantee in ('anon', 'authenticated');
 ```
 
-**(Claude) then** compares the row count of every table on the laptop and on Supabase, through
-`psql` in the laptop's container: counts only, never row data. Claude never sees the Supabase URL,
-so for the Supabase side Claude gives you a read-only command; you run it in the terminal where
-`SUPABASE_DB_URL` is set (as in step 3) and paste back the table names and counts it prints.
+**Then check the copy.** `scripts/supabase/counts.ps1` is read-only: it prints one
+`table<TAB>count` line per table in `public`, sorted by name, with exact counts and never row data.
+
+You run the Supabase side, in the terminal where `SUPABASE_DB_URL` is set (as in step 3):
+
+```powershell
+.\scripts\supabase\counts.ps1 -Target supabase
+```
+
+and paste the lines it prints into chat (table names and numbers only; no secret is in them).
+**(Claude)** runs `.\scripts\supabase\counts.ps1 -Target laptop` against the laptop database and
+compares the two lists table by table. Any difference stops the cutover here.
 
 ### 5. In Vercel: import the repository, paste the environment variables
 
@@ -116,6 +128,10 @@ schema.
    and `No pending migrations to apply`.
 6. Check Project → Settings → **Domains**. If the production address differs from the
    `APP_BASE_URL` you pasted, correct the variable and **Redeploy**.
+7. Check Project → Settings → **Git**: the **Production Branch** must be `main`. The first deploy
+   above was started by the import; the real test is the **first push to `main` after it**. When
+   that push happens, check Vercel → Deployments shows a new production deployment for it. If it
+   does not, set Settings → Git → Production Branch to `main` and push again (or Redeploy).
 
 Functions run in Singapore (`sin1`, set in `vercel.json`), next to the database.
 
@@ -129,7 +145,7 @@ Functions run in Singapore (`sin1`, set in `vercel.json`), next to the database.
 | `SECRET_ENCRYPTION_KEY` | **exactly the laptop `.env` value** | Open the laptop's `.env` yourself and copy the value. Never a new one. |
 | `APP_BASE_URL` | `https://<project>.vercel.app` | The project name from step 5 (no trailing slash). |
 | `SUPABASE_URL` | the project URL, `https://<ref>.supabase.co` | Supabase → Project Settings → **Data API** (Project URL), or **Connect** → App frameworks. |
-| `SUPABASE_SERVICE_ROLE_KEY` | the `service_role` key | Supabase → Project Settings → **API Keys** → **Legacy API keys** → `service_role` → Reveal. Server-only: never in a `NEXT_PUBLIC_` variable. |
+| `SUPABASE_SERVICE_ROLE_KEY` | the **secret key** (`sb_secret_…`), recommended; or the legacy `service_role` key | Supabase → Project Settings → **API Keys** → **Secret keys** → Reveal and copy (create one if none is listed). The legacy `service_role` key (the **Legacy API keys** tab, a long `eyJ…` value) also works. Server-only: never in a `NEXT_PUBLIC_` variable. |
 | `CRON_SECRET` | a new random value, also stored in Supabase Vault | Make one in your terminal: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The same value goes into Vault in step 6. |
 | `SIGNUP_REQUIRES_APPROVAL` | `1` | Fixed value; see [Sign-up](#sign-up-on-the-public-internet). |
 | `QUICK_LOGIN_EMAILS` | **never set on Vercel** | One-click sign-in with no password. The laptop uses it; on the public internet anyone could use it. |
@@ -188,7 +204,9 @@ answers `401`. Any `FAIL` makes it exit non-zero.
 
 Cut over. From now on **every push to `main` deploys to Vercel**, which replaces
 `scripts/deploy-staging.ps1`: "deploy only on the owner's word" becomes "push to `main` only on the
-owner's word". The Playwright battery stays local, because it seeds.
+owner's word". After the **first** push to `main`, check that Vercel deployed it (step 5, item 7);
+if not, set Vercel → Settings → Git → Production Branch to `main`. The Playwright battery stays
+local, because it seeds.
 
 ---
 
@@ -211,21 +229,20 @@ $env:SUPABASE_DB_URL = '<session pooler URI, port 5432>'
 Remove-Item Env:SUPABASE_DB_URL
 ```
 
-- It runs `pg_dump -Fc --schema=public` inside `inventory-db-1`, validates it with `pg_restore -l`
-  (it prints the number of `TABLE DATA` entries and fails on zero), copies it out and deletes the
-  temporary copy. It never prints the URL and never overwrites an existing file.
-- **If it stops with "server version mismatch"**, the Supabase project runs a newer Postgres (17)
-  than the container's `pg_dump` (16), and `pg_dump` refuses a newer server. Use a throwaway
-  `postgres:17-alpine` container instead (Docker downloads it the first time), from the repository
-  root, with `SUPABASE_DB_URL` set as above:
+- It runs `pg_dump -Fc --schema=public`, validates the result with `pg_restore -l` (it prints the
+  number of `TABLE DATA` entries and fails on zero), and only then moves it to `-Out`; temporary
+  files are always deleted. It never prints the URL, refuses the transaction pooler (port 6543), and
+  never overwrites an existing file unless you add `-Force`.
+- **On a Postgres 17 project (the Supabase default) add `-Image postgres:17-alpine`.** `pg_dump`
+  refuses a server newer than itself ("server version mismatch"), and the laptop container's is 16.
+  With `-Image`, the dump runs in a throwaway container of that image (Docker downloads it the first
+  time) instead of `inventory-db-1`, with the same checks:
 
   ```powershell
-  $env:PGURL = $env:SUPABASE_DB_URL
-  docker run --rm -e PGURL -v "${PWD}\backups:/out" postgres:17-alpine sh -c 'set -f; pg_dump -Fc --schema=public -d $PGURL -f /out/supabase-<date>.dump && pg_restore -l /out/supabase-<date>.dump | grep -c TABLE.DATA'
-  Remove-Item Env:PGURL
+  .\scripts\supabase\dump.ps1 -Out .\backups\supabase-<date>-before-<migration>.dump -Image postgres:17-alpine
   ```
 
-  The number it prints is the `TABLE DATA` count; zero or an error means no usable backup.
+- If it fails, check the error for your password before pasting it anywhere.
 - To put a dump back, use `restore.ps1` against an **empty** project (it refuses tables that already
   exist), then run `lockdown.sql` again.
 
@@ -254,5 +271,6 @@ Stop the Supabase schedule first if both should not run jobs at once:
 | `scripts/supabase/lockdown.sql` | Closes the Data API roles' access to `public`. Run before and again after the restore. |
 | `scripts/supabase/schedule.sql` | `pg_cron` + `pg_net` jobs `worker-tick` and `worker-maintenance`, reading `app_url` and `cron_secret` from Vault. |
 | `scripts/supabase/restore.ps1` | Laptop dump into Supabase, through `inventory-db-1`. |
-| `scripts/supabase/dump.ps1` | Validated `pg_dump -Fc` of Supabase, through `inventory-db-1`. |
+| `scripts/supabase/dump.ps1` | Validated `pg_dump -Fc` of Supabase, through `inventory-db-1` or, with `-Image`, a throwaway container. |
+| `scripts/supabase/counts.ps1` | Read-only exact row count per table in `public` (`-Target laptop` or `supabase`). |
 | `scripts/supabase/smoke.mjs` | Read-only check: `/login` 200, `/api/worker/tick` 401 without the secret. |

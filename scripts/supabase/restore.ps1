@@ -93,6 +93,6 @@ finally {
 }
 
 if ($code -ne 0) {
-  Fail "pg_restore failed (exit $code). Nothing was kept: the restore runs in one transaction. Read the error above, fix it, run again."
+  Fail "pg_restore failed (exit $code). Nothing was kept: the restore runs in one transaction. Read the error above, fix it, run again. Before pasting the error anywhere, check it does not contain your password."
 }
 Write-Host 'restore: OK. Next: run scripts/supabase/lockdown.sql AGAIN in the Supabase SQL editor.' -ForegroundColor Green
