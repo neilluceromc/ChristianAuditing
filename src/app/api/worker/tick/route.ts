@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { cronAuthorized } from "@/server/worker-auth";
 import { recoverStale, runTicks } from "@/worker/run";
 
 /*
@@ -11,16 +11,8 @@ import { recoverStale, runTicks } from "@/worker/run";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-function authorized(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const got = Buffer.from(req.headers.get("authorization") ?? "");
-  const want = Buffer.from(`Bearer ${secret}`);
-  return got.length === want.length && timingSafeEqual(got, want);
-}
-
 export async function POST(req: Request): Promise<Response> {
-  if (!authorized(req)) return new Response("Unauthorized", { status: 401 });
+  if (!cronAuthorized(req)) return new Response("Unauthorized", { status: 401 });
   try {
     const recovered = await recoverStale();
     const { done, budgetHit } = await runTicks({

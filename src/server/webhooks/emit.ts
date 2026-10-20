@@ -78,8 +78,9 @@ export async function emitWebhook(
     await tx.job.create({
       data: { type: "DELIVER_WEBHOOK", payload: { deliveryId: delivery.id } },
     });
-    // Cloud staging (spec §4.3): on Vercel, work it once the response is sent (after this transaction commits).
-    // Inside the worker this is a no-op: no request scope (swallowed) or a tick already running (isTicking).
-    kickWorker();
   }
+  // Cloud staging (spec §4.3): one job per endpoint above, so this is "at least one job queued". One kick for
+  // all of them: on Vercel it works them once the response is sent (after this transaction commits). Inside
+  // the worker it is a no-op: no request scope (swallowed) or a tick already running (isTicking).
+  if (endpoints.length > 0) kickWorker();
 }
