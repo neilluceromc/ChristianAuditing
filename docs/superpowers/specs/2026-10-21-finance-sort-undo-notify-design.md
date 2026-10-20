@@ -99,3 +99,45 @@ Finance asked for three things:
 ## 6. Data
 - **No schema change.** Undo reads the latest audit entries and the asset's current fields.
 - **New audit action codes** go into `AUDIT_ACTIONS` and `ACTION_LABELS`, and the history's verb table.
+
+## 7. Added 2026-10-21 (owner, same follow-up)
+
+### 7.1 Sign-in lands on Home
+After any sign-in, the app goes to **Home** (`/`), not the role's old landing page. This covers credentials, quick login, sign-up, bootstrap and Microsoft.
+
+**Exception (my call):** a `next` link the person was sent from still wins. Scanning a label QR while signed out then still opens that asset after sign-in.
+
+A signed-in person who visits `/login` also goes to Home. `ROLE_LANDING` stays only where a page guard bounces someone from a page they can't see.
+
+### 7.2 Search as you type
+Every list search box filters **as you type**. This covers Inventory, Finance → Assets, Employees, and every other list that uses the house search box.
+
+**How it behaves:**
+- **When it fires:** about **300 ms after the last keystroke or a paste**. Enter still fires at once.
+- **History:** the URL updates with `router.replace`, so typing never floods the browser history.
+- **Focus:** focus and the caret stay in the box while results update.
+- **Clearing:** an empty box clears the search.
+- **Length:** a single letter is enough.
+
+**Starts-with first:** while searching, matches that **start with** the text come first, then matches that only contain it. Each group keeps the list's chosen sort.
+
+| List | Fields checked for starts-with |
+|---|---|
+| Inventory | tag, model, serial, holder name |
+| Finance → Assets | tag, model, serial, holder name |
+| Employees | name, employee no., email |
+
+**Exact tag no longer opens on its own (barcode-scanner exception):**
+- Typing or pasting a full tag ("MAC-51") **only filters the list**. It never opens the record.
+- The Inventory exact-tag redirect, which exists for USB barcode scanners that type the tag and then press **Enter**, now happens **only when Enter is pressed**. The search box sends `go=1` on Enter, and the page drops it after use.
+- So a scanner still opens the record, and pasting or typing never does.
+
+### 7.3 Employees: sort by joined
+The Employees toolbar gets a **Sort** select:
+- Name A–Z (default)
+- Name Z–A
+- Recently joined
+- Earliest joined
+- Employee no.
+
+It uses the list's existing sort keys (`name`, `employeeNo`, `joinedAt`) and URL `sort` values. The "joined" sorts show the join date under the name ("Joined 3 Mar 2025", in Manila time).

@@ -129,3 +129,47 @@
 **Docs:** a HANDOVER entry (at) and PICKUP: no migration, the rulings, follow-ups.
 
 **Commits:** `test(e2e): finance sort and undo` and `docs(handover): Finance sorting, undo and notifications`.
+
+### Task 5: Sign-in lands on Home
+**Files:** `src/server/auth/actions.ts` (credentials, quick login, sign-up, bootstrap), the Auth.js redirect for Microsoft (`src/server/auth/index.ts` callbacks or config), `src/middleware.ts` (a signed-in visit to /login goes to `/`), plus tests.
+
+**Rule:** `safeNext(next) ?? "/"`. `ROLE_LANDING` stays in the page guards.
+
+**Tests:** each sign-in path redirects to `/` with no `next`, and to the `next` when one is given; middleware sends a signed-in user on `/login` to `/`.
+
+**Commit:** `feat(auth): every sign-in lands on Home`.
+
+### Task 6: Search as you type, starts-with first, Enter-only exact-tag open
+**Files:**
+- `src/components/patterns/search-box.tsx` (+ test): `debounceMs = 300`, `onSubmit(q, { enter })`, `router.replace` in its callers, focus kept.
+- Replace the hand-rolled search inputs with SearchBox in `src/components/inventory/inventory-toolbar.tsx` and `src/components/employees/employees-toolbar.tsx`.
+- Every other SearchBox caller gets live search automatically.
+- **Inventory:** the exact-tag redirect (`src/app/(app)/inventory/page.tsx:90-93`) applies only with `go=1`, which only Enter sends; it is stripped after use.
+- **Prefix-first ranking** in the list queries:
+  - inventory: `src/server/modules/inventory/*` `listAssets`;
+  - finance: `computeFinance`;
+  - employees: `src/server/modules/employees/queries.ts`.
+
+  Starts-with matches come first, then contains, keeping the chosen sort inside each group. Do it in SQL or with a computed rank, without a full extra scan. Stay fast at staging scale.
+
+**Tests:**
+- The debounce fires once after a pause, Enter fires at once, a paste fires; focus is kept.
+- `go=1` is required for the redirect; a typed or pasted exact tag only filters.
+- Ranking: "E" puts names starting with E first, in each list.
+
+**Commit:** `feat(lists): search as you type with starts-with first; an exact tag opens only on Enter`.
+
+### Task 7: Employees sort select
+**Files:** `src/components/employees/employees-toolbar.tsx`, the employees table (join date line), `src/lib/employees-list.ts` if needed, plus tests.
+
+**Behaviour:** per spec §7.3, using the existing sort keys and URL state.
+
+**Tests:** the select's options build the right URL; the join-date line shows only on the joined sorts.
+
+**Commit:** `feat(employees): sort by name, joined date or employee no.`.
+
+*(Task 4, the browser tests and docs, runs LAST: after Tasks 5–7, covering them too. Its e2e adds:*
+- *sign-in lands on Home, and a `next` link wins;*
+- *typing "E" in Employees shows E-names first without Enter;*
+- *pasting an exact tag in Inventory filters without opening, while Enter on it opens;*
+- *Employees sort by Recently joined.)*
