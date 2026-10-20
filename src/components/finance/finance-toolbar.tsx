@@ -1,10 +1,9 @@
 "use client";
 
 import { useId } from "react";
-import { Input } from "@/components/ui/input";
-import { Icon } from "@/components/ui/icon";
 import { Select } from "@/components/ui/select";
 import { useListNavigation } from "@/components/patterns/list-navigation";
+import { SearchBox } from "@/components/patterns/search-box";
 import { LIST } from "@/components/patterns/list-styles";
 import { cn } from "@/lib/cn";
 import { fmtMoneyExact } from "@/lib/format";
@@ -42,7 +41,6 @@ function LabelledSelect({
         // select takes the URL's value again once the next view lands (or on Back).
         key={value}
         id={id}
-        aria-label={label}
         defaultValue={value}
         onChange={(e) => onChange(e.target.value)}
         className={cn(LIST.control, "w-auto max-w-[220px] pl-2.5")}
@@ -77,35 +75,14 @@ export function FinanceToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="relative w-full max-w-[340px] flex-1 basis-[240px]">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint">
-          <Icon name="search" size={14} />
-        </span>
-        <Input
-          // Keyed on the URL's q: a search is a soft navigation, and an uncontrolled input ignores a new defaultValue.
-          key={state.q}
-          type="search"
-          data-page-search
-          aria-label="Search assets"
-          placeholder="Tag, model, serial or holder"
-          defaultValue={state.q}
-          className="h-9 py-0 pl-8 pr-7 text-[13px]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") go("q", e.currentTarget.value);
-          }}
-        />
-        {state.q && (
-          <button
-            type="button"
-            aria-label="Clear search"
-            // Fitts / WCAG 2.5.8: a 24 × 24 px target, centred, inside the input's pr-7 gutter
-            className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-(--radius-ctl) text-fg-muted hover:bg-surface-subtle hover:text-fg"
-            onClick={() => go("q", "")}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      <SearchBox
+        value={state.q}
+        ariaLabel="Search assets"
+        placeholder="Tag, model, serial or holder"
+        onSubmit={(q) => go("q", q)}
+        className="w-full max-w-[340px] flex-1 basis-[240px]"
+        inputClassName="h-9 py-0 text-[13px]"
+      />
       <LabelledSelect label="Category" value={category} onChange={(v) => go("category", v)}>
         <option value="">All categories</option>
         {tiles.map((t) => (

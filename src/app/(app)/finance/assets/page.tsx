@@ -8,7 +8,7 @@ import {
   LIFE_LABEL, clearFinanceFilters, financeClassHref, financeExportHref, financeListHref, parseFinanceListState, withFinance,
   type FinanceListState,
 } from "@/lib/finance-list";
-import { financeAssets, financeClassCounts } from "@/server/modules/finance/queries";
+import { financeAssets, financeClassCount } from "@/server/modules/finance/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -39,7 +39,9 @@ export default async function FinanceAssetsPage({
   await requireRole("admin", "finance_staff");
   const parsed = parseFinanceListState(toSearchParams(await searchParams));
   const now = new Date();
-  const [data, classCounts] = await Promise.all([financeAssets(parsed, now), financeClassCounts()]);
+  const otherCls = parsed.cls === "IT" ? "PURCHASING" : "IT";
+  // the shown class's count is its All categories tile; only the other class needs a query
+  const [data, otherCount] = await Promise.all([financeAssets(parsed, now), financeClassCount(otherCls)]);
   // The view as applied: the query drops a category that is not a tile of the class, and clamps the page.
   const state: FinanceListState = { ...parsed, category: data.category, page: data.page, per: data.per };
   const href = (s: FinanceListState) => financeListHref(s);
@@ -48,7 +50,7 @@ export default async function FinanceAssetsPage({
   const classTabs: TabDef[] = ASSET_CLASSES.map((c) => ({
     key: c,
     label: CLASS_LABEL[c],
-    count: classCounts[c],
+    count: c === state.cls ? data.categoryTiles[0].count : otherCount,
     href: c === state.cls ? href(state) : financeClassHref(state, c),
     on: c === state.cls,
   }));

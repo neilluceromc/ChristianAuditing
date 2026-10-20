@@ -147,10 +147,16 @@ describe("FinanceToolbar: the URL each control builds", () => {
         shown={{ count: 1234, bookC: 9_876_543_21 }}
       />,
     );
+    // the shared SearchBox (search-box.tsx), sized for the toolbar
     expect(html).toContain('aria-label="Search assets"');
-    expect(html).toMatch(/<select[^>]*aria-label="Category"/);
-    expect(html).toMatch(/<select[^>]*aria-label="Life"/);
-    expect(html).toMatch(/<select[^>]*aria-label="Sort"/);
+    expect(html).toMatch(/<div class="relative w-full max-w-\[340px\] flex-1 basis-\[240px\]">/);
+    // each select is named by its visible label alone (no aria-label to drift from it)
+    for (const label of ["Category", "Life", "Sort"]) {
+      const id = html.match(new RegExp(`<label for="([^"]+)"[^>]*>${label}</label>`))?.[1];
+      expect(id).toBeTruthy();
+      expect(html).toMatch(new RegExp(`<select[^>]*id="${id}"`));
+    }
+    expect(html).not.toMatch(/<select[^>]*aria-label=/);
     // a folded category shows by its own name, selected
     expect(html).toMatch(/<option value="c9" selected="">Webcams<\/option>/);
     expect(html).toMatch(/<option value="full" selected="">Fully depreciated<\/option>/);
@@ -237,6 +243,22 @@ describe("FinanceTable (spec §3 item 6)", () => {
     expect(html).toContain("14 / 36 mo · 22 left");
     expect(html).toContain("No cost yet");
     expect(html.match(/aria-label="Actions for /g)).toHaveLength(1);
+  });
+  it("the state note shows under the book value, visibly; the life hints keep the category and the override", () => {
+    const h = renderToStaticMarkup(
+      <FinanceTable
+        rows={[
+          row({ id: "n1", tag: "IT-0012", note: "No policy for Docks", lifeStage: { key: "notstarted", text: "No policy for Docks", usedPct: null, usedRatio: null } }),
+          row({ id: "n2", tag: "IT-0013", custom: true, note: "Salvage is not below cost — check the override", lifeStage: { key: "notstarted", text: "Salvage is not below cost — check the override", usedPct: null, usedRatio: null } }),
+        ]}
+        shown={{ count: 2, costedCount: 2, costC: 0, accC: 0, bookC: 0 }}
+      />,
+    );
+    const notes = [...h.matchAll(/<span [^>]*data-note=""[^>]*>([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(notes).toEqual(["No policy for Docks", "Salvage is not below cost — check the override"]);
+    expect(h.match(/No policy for Docks/g)!.length).toBeGreaterThanOrEqual(2); // the note and the Life cell
+    expect(h).toContain("Salvage is not below cost — check the override");
+    expect(html).not.toContain('data-note=""'); // a depreciating row has no note
   });
   it("a totals row for every row shown", () => {
     const foot = html.slice(html.indexOf("<tfoot"));

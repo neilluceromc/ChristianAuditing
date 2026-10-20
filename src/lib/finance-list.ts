@@ -1,5 +1,5 @@
 import type { AssetClass, AssetStatus } from "@prisma/client";
-import { depreciate, monthLabel, type DepResult, type MonthIndex } from "./depreciation";
+import { depreciate, monthLabel, stateNote, type DepResult, type MonthIndex } from "./depreciation";
 import { FIN_FILTERS, parseFin, type FinFilter, type RegState } from "./registration";
 import { isStatusOf, parseCls } from "./asset-class";
 import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, parsePage } from "./paging";
@@ -52,17 +52,21 @@ export interface LifeStage {
 /**
  * The table's Life used cell. `r` is the row's depreciation result: null when it has no cost or is not capitalised.
  * Months used are read back from the engine's own result (accumulated ÷ monthly), which is exactly the months counted
- * as of the result's month while the asset is still depreciating.
+ * as of the result's month while the asset is still depreciating. With `categoryName`, the two "why not" states keep
+ * the old book-value hints (`stateNote`): "No policy for Laptops", and "— check the override" on a custom override
+ * whose salvage is not below cost.
  */
-export function lifeStage(r: DepResult | null, reg: RegState, notCapitalised: boolean, costC: number | null): LifeStage {
+export function lifeStage(
+  r: DepResult | null, reg: RegState, notCapitalised: boolean, costC: number | null, categoryName?: string,
+): LifeStage {
   const off = (text: string): LifeStage => ({ key: "notstarted", text, usedPct: null, usedRatio: null });
   if (notCapitalised) return off("Expensed, not depreciated");
   if (costC === null || r === null) return off("No cost yet");
   switch (r.state) {
     case "not-started":
       return off(reg !== "registered" || r.startMonth === null ? "Starts when approved" : `Starts ${monthLabel(r.startMonth)}`);
-    case "no-policy": return off("No depreciation policy");
-    case "bad-salvage": return off("Salvage is not below cost");
+    case "no-policy": return off(categoryName ? stateNote(r, categoryName)! : "No depreciation policy");
+    case "bad-salvage": return off(stateNote(r, categoryName ?? "")!);
     case "fully-depreciated": return { key: "full", text: "Fully depreciated", usedPct: 100, usedRatio: 1 };
     case "depreciating": {
       const life = r.policy!.lifeMonths;

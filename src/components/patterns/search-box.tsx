@@ -1,13 +1,18 @@
 "use client";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
+import { cn } from "@/lib/cn";
 
-/** The house search (Phase 30 §3): keyed on the URL's q, Enter submits, Clear × clears. */
-export function SearchBox({ value, ariaLabel, placeholder, onSubmit }: {
+/**
+ * The house search (Phase 30 §3): keyed on the URL's q, Enter submits, Clear × clears. `className` (the box's width)
+ * and `inputClassName` (the field's size) merge over the defaults; without them the output is unchanged.
+ */
+export function SearchBox({ value, ariaLabel, placeholder, onSubmit, className, inputClassName }: {
   value: string; ariaLabel: string; placeholder: string; onSubmit: (q: string) => void;
+  className?: string; inputClassName?: string;
 }) {
   return (
-    <div className="relative w-[280px]">
+    <div className={cn("relative w-[280px]", className)}>
       <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint"><Icon name="search" size={14} /></span>
       <Input
         // Keyed on the URL's q: a search change is a soft navigation, and an uncontrolled
@@ -18,7 +23,7 @@ export function SearchBox({ value, ariaLabel, placeholder, onSubmit }: {
         aria-label={ariaLabel}
         placeholder={placeholder}
         defaultValue={value}
-        className="pl-8 pr-7"
+        className={cn("pl-8 pr-7", inputClassName)}
         onKeyDown={(e) => { if (e.key === "Enter") onSubmit(e.currentTarget.value); }}
       />
       {value && (

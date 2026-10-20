@@ -63,8 +63,15 @@ describe("lifeStage (spec §3 item 6: Life used)", () => {
   });
   it("no policy and salvage at or above cost are not depreciating", () => {
     expect(lifeStage(started(5, COST, null), "registered", false, COST)).toEqual({ key: "notstarted", text: "No depreciation policy", usedPct: null, usedRatio: null });
-    expect(lifeStage(started(5, COST, { lifeMonths: 36, salvage: COST, basis: "custom" }), "registered", false, COST))
+    expect(lifeStage(started(5, COST, { lifeMonths: 36, salvage: COST, basis: "category" }), "registered", false, COST))
       .toEqual({ key: "notstarted", text: "Salvage is not below cost", usedPct: null, usedRatio: null });
+  });
+  it("keeps the old hints: the category with no policy, and a custom override whose salvage is not below cost", () => {
+    expect(lifeStage(started(5, COST, null), "registered", false, COST, "Docks").text).toBe("No policy for Docks");
+    expect(lifeStage(started(5, COST, { lifeMonths: 36, salvage: COST, basis: "custom" }), "registered", false, COST, "Laptops").text)
+      .toBe("Salvage is not below cost — check the override");
+    expect(lifeStage(started(5, COST, { lifeMonths: 36, salvage: COST, basis: "category" }), "registered", false, COST, "Laptops").text)
+      .toBe("Salvage is not below cost");
   });
 });
 

@@ -37,7 +37,7 @@ vi.mock("@/server/db/client", () => ({
   prisma: { asset: { findMany: h.findMany, count: h.count }, assetCategory: { findMany: h.catFindMany } },
 }));
 
-import { financeAssets, financeClassCounts, financeExportRows, type FinanceListParams } from "./queries";
+import { financeAssets, financeClassCount, financeExportRows, type FinanceListParams } from "./queries";
 import { bookValueTotals } from "./depreciation-queries";
 import { asOfMonth } from "@/lib/depreciation";
 import { monthCharge } from "@/lib/finance-list";
@@ -232,7 +232,7 @@ describe("financeAssets — rows", () => {
     expect(by((x) => x.tag === "IT-0001").lifeStage).toEqual({ key: "mid", text: "11 / 36 mo · 25 left", usedPct: 31, usedRatio: 11 / 36 });
     expect(by((x) => x.tag === "IT-0004").lifeStage.key).toBe("soon");
     expect(by((x) => x.tag === "IT-0002").lifeStage.key).toBe("full");
-    expect(by((x) => x.tag === "IT-0012").lifeStage.text).toBe("No depreciation policy");
+    expect(by((x) => x.tag === "IT-0012").lifeStage.text).toBe("No policy for Docks");
   });
   it("life filters", async () => {
     expect((await financeAssets(base({ life: "soon" }), NOW)).rows.map((x) => x.tag)).toEqual(["IT-0004"]);
@@ -298,9 +298,13 @@ describe("financeExportRows (Task 3 review: the export is exactly the list's row
   });
 });
 
-describe("financeClassCounts (spec §3 item 1: each class tab's asset count)", () => {
-  it("counts every asset of each class", async () => {
+describe("financeClassCount (spec §3 item 1: a class tab's asset count)", () => {
+  it("counts every asset of the class, as the shown class's All categories tile does", async () => {
     h.count.mockImplementation(async ({ where }: { where: Row }) => h.assets.filter((a) => matches(a, where)).length);
-    expect(await financeClassCounts()).toEqual({ IT: 13, PURCHASING: 4 });
+    expect(await financeClassCount("IT")).toBe(13);
+    expect(await financeClassCount("PURCHASING")).toBe(4);
+    expect(h.count).toHaveBeenCalledTimes(2);
+    expect((await financeAssets(base({ category: "lap", status: "SPARE", fin: "approved" }), NOW)).categoryTiles[0].count).toBe(13);
+    expect((await financeAssets(base({ cls: "PURCHASING", q: "x" }), NOW)).categoryTiles[0].count).toBe(4);
   });
 });

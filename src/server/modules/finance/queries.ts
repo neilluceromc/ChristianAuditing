@@ -99,7 +99,7 @@ async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed
     depRows({ cls: p.cls }, now),
     q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: { id: true } }) : null,
   ]);
-  const rows: FinanceRow[] = classRows.map((r) => ({ ...r, lifeStage: lifeStage(r.result, r.reg, r.notCapitalised, r.costC) }));
+  const rows: FinanceRow[] = classRows.map((r) => ({ ...r, lifeStage: lifeStage(r.result, r.reg, r.notCapitalised, r.costC, r.category) }));
   const found = hits ? new Set(hits.map((h) => h.id)) : null;
 
   const tileInput = rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.category, costC: r.result?.cost ?? null, bookC: r.result?.bookValue ?? null }));
@@ -170,13 +170,12 @@ export async function financeExportRows(p: FinanceListParams, now: Date = new Da
   return (await computeFinance(p, now)).sorted;
 }
 
-/** Spec §3 item 1: each class tab's asset count (every asset of the class, as the list's All shows with no filter). */
-export async function financeClassCounts(): Promise<Record<AssetClass, number>> {
-  const [it, purchasing] = await Promise.all([
-    prisma.asset.count({ where: financeListWhere({ cls: "IT", status: null, q: "" }) }),
-    prisma.asset.count({ where: financeListWhere({ cls: "PURCHASING", status: null, q: "" }) }),
-  ]);
-  return { IT: it, PURCHASING: purchasing };
+/**
+ * Spec §3 item 1: one class tab's asset count (every asset of the class, as the list's All shows with no filter). The
+ * page counts only the class it is not showing: the shown class's count is its All categories tile.
+ */
+export async function financeClassCount(cls: AssetClass): Promise<number> {
+  return prisma.asset.count({ where: financeListWhere({ cls, status: null, q: "" }) });
 }
 
 /**

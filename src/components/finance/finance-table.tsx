@@ -96,7 +96,15 @@ export function FinanceTable({
                 </Td>
                 <Td className={num}>{money(a.costC)}</Td>
                 <Td className={num}>{money(a.result?.accumulated)}</Td>
-                <Td className={cn(num, "font-medium text-fg")} title={a.note ?? undefined}>{money(a.result?.bookValue)}</Td>
+                <Td className={cn(num, "font-medium text-fg")}>
+                  <span className="block">{money(a.result?.bookValue)}</span>
+                  {/* the state note, as the old page showed it: "No policy for Docks", "Fully depreciated", … */}
+                  {a.note && (
+                    <span className={cn(LIST.sub, "truncate font-normal")} title={a.note} data-note="">
+                      {a.note}
+                    </span>
+                  )}
+                </Td>
                 <Td className={LIST.td}><LifeCell stage={a.lifeStage} /></Td>
                 <Td className={cn(LIST.td, "pl-1 text-right last:pr-3 dense:pl-1 dense:last:pr-3")}>
                   {a.result && a.costC !== null && (
