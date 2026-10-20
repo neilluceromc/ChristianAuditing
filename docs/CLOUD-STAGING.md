@@ -12,7 +12,8 @@ staging is still the laptop. Merging, pushing and every step below happen only o
   Never into a file, never into chat. Claude never sees, types or prints one. This file holds
   placeholders only (`<like-this>`).
 - **Never set `QUICK_LOGIN_EMAILS` on Vercel.** It is one-click sign-in with no password. The laptop
-  uses it on the office network; on the public internet anyone could use it.
+  uses it on the office network; on the public internet anyone could use it. As a backstop the app
+  ignores the variable (no provider, no buttons) whenever `VERCEL` is set.
 - **`SECRET_ENCRYPTION_KEY` must be exactly the laptop's value.** Any other value makes every
   encrypted field in the copied data unreadable.
 - **Never seed staging.** The seed empties every table.
