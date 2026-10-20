@@ -1,0 +1,262 @@
+/* "Cris at Work" (Phase 47 Task 10): the owner's Design Component's helmet CSS, scoped. Every selector sits under
+   .caw and every class and keyframe is caw-, so nothing here leaks into the app and the app's cris.css (.cr-spin and
+   friends, which animate) never reaches the scene: its rings are turned from the script instead, as in the source.
+   The card's own colours are the app's tokens (the source's values were the same); the room's are the source's,
+   light and dark. Dark follows the app: the component mirrors <html data-theme> onto .caw, and before hydration the
+   html attribute itself decides. */
+
+.caw {
+  --caw-canvas: var(--canvas);
+  --caw-surface: var(--surface);
+  --caw-border-strong: var(--border-strong);
+  --caw-text: var(--text);
+  --caw-text2: var(--text-secondary);
+  --caw-muted: var(--text-muted);
+  --caw-accent: var(--accent);
+  --caw-elev-pop: var(--elev-pop);
+  --caw-blobshadow: rgba(16, 24, 40, 0.24);
+  --caw-desk: #d6dee8;
+  --caw-wall: #e9eef4;
+  --caw-wall2: #dfe6ee;
+  --caw-furntop: #ffffff;
+  --caw-furn2: #edf1f5;
+  --caw-edge: #b7c3d1;
+  --caw-metal: #5f6d82;
+  --caw-metal2: #8b98aa;
+  --caw-bezel: #2b3442;
+  --caw-lamp: #3a4556;
+  --caw-bulb: #fff4d6;
+  --caw-cone: #fff4d6;
+  --caw-coneop: 0.55;
+  --caw-leaf: #5c9c6c;
+  --caw-sky: #cfe2f4;
+  --caw-outside: #9aa7b6;
+  --caw-shadow: rgba(30, 41, 59, 0.16);
+  --caw-ink: #1f2937;
+
+  /* the source's 560 x 520 card, now at most 560 wide and shrinking with the screen */
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 560px;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: var(--caw-canvas);
+  color: var(--caw-text);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+.caw[data-theme="dark"],
+:root[data-theme="dark"] .caw:not([data-theme]) {
+  --caw-blobshadow: rgba(0, 0, 0, 0.6);
+  --caw-desk: #212833;
+  --caw-wall: #171c24;
+  --caw-wall2: #141920;
+  --caw-furntop: #2b3340;
+  --caw-furn2: #1a2029;
+  --caw-edge: #343e4c;
+  --caw-metal: #6b7890;
+  --caw-metal2: #4a5466;
+  --caw-bezel: #06080b;
+  --caw-lamp: #0a0d11;
+  --caw-bulb: #ffe2a8;
+  --caw-cone: #ffe2a8;
+  --caw-coneop: 0.2;
+  --caw-leaf: #3f7350;
+  --caw-sky: #0b1220;
+  --caw-outside: #1b222c;
+  --caw-shadow: rgba(0, 0, 0, 0.45);
+  --caw-ink: #e6e9ef;
+}
+.caw .caw-only-dark { display: none; }
+.caw[data-theme="dark"] .caw-only-dark,
+:root[data-theme="dark"] .caw:not([data-theme]) .caw-only-dark { display: inline; }
+.caw[data-theme="dark"] .caw-only-light,
+:root[data-theme="dark"] .caw:not([data-theme]) .caw-only-light { display: none; }
+
+/* The stage: the source's 520 x 380 box; the svg fills its width and keeps its shape. It is the bubble's container,
+   so the bubble scales with the scene (1 source px = 100cqw / 520). */
+.caw .caw-stage {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  flex-shrink: 0;
+  container-type: inline-size;
+}
+.caw .caw-svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.caw .caw-f-desk { fill: var(--caw-desk); }
+.caw .caw-f-wall { fill: var(--caw-wall); }
+.caw .caw-f-wall2 { fill: var(--caw-wall2); }
+.caw .caw-f-furntop { fill: var(--caw-furntop); }
+.caw .caw-f-furn2 { fill: var(--caw-furn2); }
+.caw .caw-f-edge { fill: var(--caw-edge); }
+.caw .caw-s-edge { stroke: var(--caw-edge); }
+.caw .caw-f-metal { fill: var(--caw-metal); }
+.caw .caw-f-metal2 { fill: var(--caw-metal2); }
+.caw .caw-s-metal { stroke: var(--caw-metal); }
+.caw .caw-f-bezel { fill: var(--caw-bezel); }
+.caw .caw-f-lamp { fill: var(--caw-lamp); }
+.caw .caw-f-bulb { fill: var(--caw-bulb); }
+.caw .caw-cone { fill: var(--caw-cone); opacity: var(--caw-coneop); transition: opacity 1.2s ease; }
+.caw .caw-f-leaf { fill: var(--caw-leaf); }
+.caw .caw-f-sky { fill: var(--caw-sky); }
+.caw .caw-f-outside { fill: var(--caw-outside); }
+.caw .caw-f-shadow { fill: var(--caw-shadow); }
+.caw .caw-f-ink { fill: var(--caw-ink); }
+.caw .caw-f-blobshadow { fill: var(--caw-blobshadow); }
+.caw .caw-svgt { font-family: var(--font-sans); }
+.caw .caw-mono { font-family: var(--font-mono); }
+
+/* The liquid frame is moved from the script (see the frame loop), so it repaints in every browser. */
+
+/* Each task's screen and props fade and drift in; nothing snaps. */
+.caw .caw-pose { opacity: 0; transition: opacity 0.9s cubic-bezier(0.2, 0, 0, 1); }
+.caw .caw-ph-coding .caw-p-coding,
+.caw .caw-ph-error .caw-p-error,
+.caw .caw-ph-reading .caw-p-reading,
+.caw .caw-ph-coffee .caw-p-coffee,
+.caw .caw-ph-limit .caw-p-limit { opacity: 1; }
+.caw .caw-prop {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  transform: translateY(10px) scale(0.9);
+  transition: opacity 0.9s cubic-bezier(0.2, 0, 0, 1), transform 0.9s cubic-bezier(0.2, 0, 0, 1);
+}
+.caw .caw-ph-coding .caw-prop.caw-p-coding,
+.caw .caw-ph-error .caw-prop.caw-p-error,
+.caw .caw-ph-reading .caw-prop.caw-p-reading,
+.caw .caw-ph-coffee .caw-prop.caw-p-coffee,
+.caw .caw-ph-limit .caw-prop.caw-p-limit { opacity: 1; transform: none; }
+.caw .caw-glow { transition: fill 1.2s ease; }
+.caw .caw-ph-coding .caw-glow { fill: #6aa9e0; }
+.caw .caw-ph-error .caw-glow { fill: #f97066; }
+.caw .caw-ph-reading .caw-glow { fill: #ffffff; }
+.caw .caw-ph-coffee .caw-glow { fill: #75e0a7; }
+.caw .caw-ph-limit .caw-glow { fill: #98a2b3; }
+.caw .caw-cr-spin,
+.caw .caw-cr-spin-r,
+.caw .caw-cr-spin-f,
+.caw .caw-cr-eye,
+.caw .caw-cr-core { transform-box: fill-box; transform-origin: center; }
+.caw .caw-orb-move { transform-box: fill-box; transform-origin: center; }
+
+/* Claude limit reached: the lamp goes out, the room dims, the halo fades, and it rains on Cris. */
+.caw .caw-ph-limit .caw-cone { opacity: 0; }
+.caw .caw-f-bulb { transition: fill 1.2s ease; }
+.caw .caw-ph-limit .caw-f-bulb { fill: #5f6d82; }
+.caw .caw-dim { transition: opacity 1.2s ease; }
+.caw .caw-ph-limit .caw-dim { opacity: 0.22; }
+.caw .caw-halo-c { transition: opacity 1.2s ease; }
+.caw .caw-ph-limit .caw-halo-c { opacity: 0.2; }
+.caw .caw-tear { animation: caw-tear 1.6s ease-in infinite; }
+.caw .caw-tear.caw-t2 { animation-delay: 0.8s; }
+.caw .caw-rain path { animation: caw-rain 0.9s linear infinite; }
+.caw .caw-rain path:nth-child(2) { animation-delay: 0.3s; }
+.caw .caw-rain path:nth-child(3) { animation-delay: 0.6s; }
+@keyframes caw-tear { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(22px); opacity: 0; } }
+@keyframes caw-rain { 0% { transform: translateY(-4px); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(12px); opacity: 0; } }
+
+.caw .caw-cam { animation: caw-cam 14s ease-in-out infinite alternate; }
+.caw .caw-ph-coding .caw-key { animation: caw-key 0.5s steps(1) infinite; }
+.caw .caw-key:nth-child(3n) { animation-delay: 0.17s !important; }
+.caw .caw-key:nth-child(3n + 1) { animation-delay: 0.33s !important; }
+.caw .caw-steam path { animation: caw-steam 2.4s ease-in-out infinite; }
+.caw .caw-steam path:nth-child(2) { animation-delay: 1.2s; }
+.caw .caw-code-scroll { animation: caw-scroll 5.4s linear infinite; }
+.caw .caw-blink { animation: caw-cursor 1s steps(1) infinite; }
+.caw .caw-err-bar { animation: caw-flick 1.6s ease-in-out infinite; }
+.caw .caw-alarm { animation: caw-bob 0.8s ease-in-out infinite alternate; }
+.caw .caw-float-bob { animation: caw-bob 2.6s ease-in-out infinite alternate; }
+.caw .caw-pour { transform-box: fill-box; transform-origin: center; animation: caw-pour 4s ease-in-out infinite; }
+.caw .caw-chip-rise { animation: caw-chip 2.4s ease-out infinite; }
+.caw .caw-plant { transform-box: fill-box; transform-origin: 50% 100%; animation: caw-sway 3.6s ease-in-out infinite alternate; }
+.caw .caw-lamp-sway { transform-origin: 200px 0px; animation: caw-lamp 5s ease-in-out infinite alternate; }
+.caw .caw-cloud { animation: caw-drift 16s linear infinite; }
+
+/* The words: the doing-line and the bubble fade out, change, and fade back in. */
+.caw .caw-swap { transition: opacity 0.35s ease; }
+.caw .caw-swap.is-out { opacity: 0; }
+.caw .caw-pulse {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--caw-accent);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.caw .caw-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--caw-accent);
+  animation: caw-ring 1.6s ease-out infinite;
+}
+
+/* The speech bubble, in the source's px at 520 wide (left 52, top 100, 160 wide), scaled with the stage. */
+.caw .caw-bubble {
+  --caw-u: calc(100cqw / 520);
+  position: absolute;
+  left: calc(52 * var(--caw-u));
+  top: calc(100 * var(--caw-u));
+  width: calc(160 * var(--caw-u));
+  box-sizing: border-box;
+  padding: calc(9 * var(--caw-u)) calc(12 * var(--caw-u));
+  background: var(--caw-surface);
+  border: 1px solid var(--caw-border-strong);
+  border-radius: calc(14 * var(--caw-u));
+  box-shadow: var(--caw-elev-pop);
+  font-size: calc(13 * var(--caw-u));
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--caw-text);
+}
+.caw .caw-bubble::after {
+  content: "";
+  position: absolute;
+  right: calc(28 * var(--caw-u));
+  bottom: calc(-7 * var(--caw-u));
+  width: calc(12 * var(--caw-u));
+  height: calc(12 * var(--caw-u));
+  background: var(--caw-surface);
+  border-right: 1px solid var(--caw-border-strong);
+  border-bottom: 1px solid var(--caw-border-strong);
+  transform: rotate(45deg);
+}
+
+.caw .caw-words { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.caw .caw-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--caw-muted);
+}
+.caw .caw-title { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+.caw .caw-doing { margin: 0; font-size: 14px; color: var(--caw-text2); }
+.caw .caw-later { margin: 0; font-size: 13px; color: var(--caw-muted); }
+
+@keyframes caw-cam { from { transform: translate(-3px, -2px); } to { transform: translate(3px, 2px); } }
+@keyframes caw-key { 50% { fill: #6aa9e0; } }
+@keyframes caw-steam { 0% { opacity: 0; transform: translateY(4px); } 30% { opacity: 0.9; } 100% { opacity: 0; transform: translateY(-10px); } }
+@keyframes caw-scroll { to { transform: translateY(-81px); } }
+@keyframes caw-cursor { 50% { opacity: 0; } }
+@keyframes caw-flick { 0%, 100% { fill: #d92d20; } 50% { fill: #b42318; } }
+@keyframes caw-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+@keyframes caw-pour { 0%, 100% { transform: rotate(0); } 40%, 60% { transform: rotate(18deg) translate(4px, -2px); } }
+@keyframes caw-chip { 0% { opacity: 0; transform: translateY(6px); } 25% { opacity: 1; } 100% { opacity: 0; transform: translateY(-14px); } }
+@keyframes caw-sway { from { transform: rotate(-4deg); } to { transform: rotate(4deg); } }
+@keyframes caw-lamp { from { transform: rotate(-1.2deg); } to { transform: rotate(1.2deg); } }
+@keyframes caw-drift { 0% { transform: translateX(-40px); } 100% { transform: translateX(90px); } }
+@keyframes caw-ring { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .caw *, .caw *::after { animation: none !important; transition: none !important; }
+}

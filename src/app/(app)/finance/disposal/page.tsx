@@ -2,20 +2,22 @@ import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { PageHeader } from "@/components/ui/page-header";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Card } from "@/components/ui/card";
+import { CrisAtWork } from "@/components/cris/cris-at-work";
 
 export const metadata: Metadata = { title: pageTitle("Disposal") };
 
-/** Phase 47 spec §5.2: a placeholder, guarded like the other Finance pages, until disposals are built. */
+/**
+ * Phase 47 spec §5.2: a placeholder, guarded like the other Finance pages, until disposals are built. Task 10 (owner,
+ * 2026-10-21): its body is the "Cris at Work" scene; the sidebar and top bar stay as on every page.
+ */
 export default async function DisposalPage() {
   await requireRole("admin", "finance_staff");
   return (
     <>
       <PageHeader title="Disposal" />
-      <Card>
-        <EmptyState title="Still in development" description="Recording disposals and their value will come here." />
-      </Card>
+      <div className="flex justify-center">
+        <CrisAtWork />
+      </div>
     </>
   );
 }

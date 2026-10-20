@@ -19,7 +19,8 @@ import { fmtMoneyExact } from "@/lib/format";
  *            Finance; PDF and PNG attachments upload, list, filter and preview (the inline route); the Documents tab
  *            groups them; the Financial history shows the notes with their source and Details, filters by person and
  *            exports a CSV; the left panel stacks above the tabs at 375 px with no sideways scroll
- *   shell    Disposal "Still in development"; "CRIS" in the sidebar, the rail and the tab title; collapse animates and
+ *   shell    Disposal shows the Cris at Work scene (words cycle, theme follows, reduced motion holds on reading, fits
+ *            375 px, the sidebar stays clickable); "CRIS" in the sidebar, the rail and the tab title; collapse animates and
  *            is instant under reduced motion; person A's dark theme never reaches person B on the same browser;
  *            Cris's chat is gone after Sign out and back in (the messages stay for the usage counts)
  *   axe      both Finance pages (every asset tab), Disposal, and the Inventory record's Notes, Attachments and
@@ -482,15 +483,61 @@ test.describe.serial("Finance → one asset", () => {
 const sidebarOf = (page: Page) => page.getByRole("complementary", { name: "Primary" });
 
 test.describe("the shell", () => {
-  test("Disposal is a Finance placeholder: Still in development", async ({ page }) => {
+  test("Disposal shows Cris at Work: the words cycle, the theme follows, reduced motion holds on reading, the sidebar stays clickable, no sideways scroll at 375 px", async ({ page }) => {
+    test.setTimeout(120_000);
     await login(page, FINANCE);
     await page.goto("/finance/assets");
     await sidebarOf(page).getByRole("link", { name: "Disposal", exact: true }).click();
     await expect(page).toHaveURL(/\/finance\/disposal$/, { timeout: 15_000 });
     await expect(page.getByRole("heading", { name: "Disposal", level: 1 })).toBeVisible();
-    await expect(main(page).getByText("Still in development", { exact: true })).toBeVisible();
+    await expect(main(page).getByRole("heading", { name: "Currently working on it", level: 2 })).toBeVisible();
     await expect(main(page).getByText("Recording disposals and their value will come here.", { exact: true })).toBeVisible();
+    await expect(main(page).getByRole("img", { name: /^Cris, the gold orb, at her desk/ })).toBeVisible();
+    await expect(main(page).getByText("Still in development", { exact: true })).toHaveCount(0);
     await expect(page).toHaveTitle("Disposal · CRIS");
+
+    // the phase cycle runs (a new task every 6 s); the line is plain text, not a live region
+    const scene = main(page).locator(".caw");
+    await waitForHydration(scene);
+    const doing = scene.locator("p.caw-doing");
+    const lines = [
+      "Cris is coding the new screens.", "Cris is debugging a stubborn error.", "Cris is reading up on the rules.",
+      "Cris is taking a quick coffee break.", "Cris is waiting for her Claude limit to reset.",
+    ];
+    const first = (await doing.textContent()) ?? "";
+    expect(lines).toContain(first);
+    expect(await doing.getAttribute("aria-live")).toBeNull();
+    await expect(doing).not.toHaveText(first, { timeout: 10_000 });
+    expect(lines).toContain((await doing.textContent()) ?? "");
+
+    // the theme follows <html data-theme> live
+    await page.evaluate(() => (document.documentElement.dataset.theme = "dark"));
+    await expect(scene).toHaveAttribute("data-theme", "dark");
+    await page.evaluate(() => (document.documentElement.dataset.theme = "light"));
+    await expect(scene).toHaveAttribute("data-theme", "light");
+
+    // reduced motion: one calm phase, reading
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.reload();
+    await waitForHydration(scene);
+    await expect(doing).toHaveText("Cris is reading up on the rules.");
+    await expect(scene.locator(".caw-stage")).toHaveClass(/caw-ph-reading/);
+    await page.emulateMedia({ reducedMotion: null });
+
+    // at 375 px the scene shrinks to fit and nothing scrolls sideways
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.reload();
+    await expect(main(page).getByRole("heading", { name: "Currently working on it", level: 2 })).toBeVisible();
+    expect(await noSidewaysScroll(page)).toBe(true);
+    const box = await main(page).getByRole("img", { name: /^Cris, the gold orb/ }).boundingBox();
+    expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 900 });
+
+    // the scene is only the page's body: the sidebar still works from here
+    await page.reload();
+    await waitForHydration(sidebarOf(page).getByRole("link", { name: "Depreciation", exact: true }));
+    await sidebarOf(page).getByRole("link", { name: "Depreciation", exact: true }).click();
+    await expect(page).toHaveURL(/\/finance\/depreciation$/, { timeout: 15_000 });
 
     await login(page, IT);
     await expect(sidebarOf(page).getByRole("link", { name: "Disposal", exact: true })).toHaveCount(0);
@@ -644,6 +691,9 @@ test.describe("axe — the Finance pages, Disposal and the record's Notes, Attac
       for (const theme of ["light", "dark"] as const) {
         await setCookie(page, "br.theme", theme);
         for (const p of paths) {
+          // Disposal's scene cross-fades its words every 6 s; axe would read a mid-fade line as low contrast. Under
+          // reduced motion it holds still (the same colours), so that page is checked that way.
+          await page.emulateMedia({ reducedMotion: p === "/finance/disposal" ? "reduce" : null });
           await page.goto(p);
           await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
           await expect(main(page)).toBeVisible();

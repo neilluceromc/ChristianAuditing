@@ -19,11 +19,14 @@ describe("Finance › Disposal (Phase 47 spec §5.2: a placeholder)", () => {
     expect(h.roles).toEqual([["admin", "finance_staff"]]);
   });
 
-  it("shows its title and the in-development empty state, verbatim", async () => {
+  it("keeps its h1 and shows the Cris at Work scene (Task 10), its heading an h2 under it", async () => {
     const html = renderToStaticMarkup(await DisposalPage());
     expect(html).toMatch(/<h1[^>]*>Disposal<\/h1>/);
-    expect(html).toContain("Still in development");
+    expect(html).toContain('class="caw"');
+    expect(html).toMatch(/<h2[^>]*>Currently working on it<\/h2>/);
+    expect(html.indexOf("<h1")).toBeLessThan(html.indexOf("<h2"));
     expect(html).toContain("Recording disposals and their value will come here.");
+    expect(html).not.toContain("Still in development");
   });
 
   it("is titled Disposal · CRIS", () => {
