@@ -6,7 +6,7 @@ import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import { localDateISO } from "@/lib/format";
 import {
-  clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withSearch,
+  clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withPer, withSearch,
 } from "@/lib/url-state";
 import {
   INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
@@ -17,20 +17,23 @@ import {
   parseCls, withViewClsQS,
 } from "@/lib/asset-class";
 import {
-  exactTagMatch, facetOptions, getInventoryColumns, listAssets, purchaseYearBuckets,
+  exactTagMatch, facetOptions, getInventoryColumns, inventoryTileCounts, listAssets, purchaseYearBuckets,
 } from "@/server/modules/inventory/queries";
+import { buildInventoryTiles } from "@/lib/inventory-tiles";
 import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { PageHeader } from "@/components/ui/page-header";
-import { Pagination } from "@/components/ui/pagination";
 import { Pill } from "@/components/ui/pill";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ButtonLink } from "@/components/ui/button-link";
 import { ChipFilterRow, type FilterChip } from "@/components/patterns/chip-filter-row";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { ColumnChooser } from "@/components/inventory/column-chooser";
-import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
+import { InventoryToolbar, InventoryViewPills } from "@/components/inventory/inventory-toolbar";
 import { InventoryMoreMenu } from "@/components/inventory/inventory-more-menu";
-import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components/patterns/list-navigation";
+import { ListNavigationProvider, ListPendingRegion } from "@/components/patterns/list-navigation";
+import { CountTiles } from "@/components/patterns/count-tiles";
+import { StickyList, StickyToolbar } from "@/components/patterns/sticky-list";
+import { ListFooter } from "@/components/patterns/list-footer";
 import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
 import type { Metadata } from "next";
@@ -94,14 +97,20 @@ export default async function InventoryPage({
   // only for a role that can mutate this class at all — the same condition
   // InventoryTable already uses to decide whether the drawer exists.
   const recentPeople = canMutate ? await recentPeopleOptions(user.id) : [];
-  const today = localDateISO(new Date());
+  // One clock for the whole render: the rows' attention reasons, the attention filter, the count line and the
+  // tiles all judge "overdue" / "due soon" at the same instant, so they cannot disagree across a day boundary.
+  const now = new Date();
+  const today = localDateISO(now);
+  // Phase 45 (spec §2.1): no tiles in the Repairs view (any stage set), so no counts to load there either.
+  const stageSet = (state.filters.stage?.length ?? 0) > 0;
 
-  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, needsCorrection] = await Promise.all([
-    listAssets(state, purchaseYear, cls),
-    facetOptions(state, purchaseYear, cls),
+  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, needsCorrection, tileCounts] = await Promise.all([
+    listAssets(state, purchaseYear, cls, now),
+    facetOptions(state, purchaseYear, cls, now),
     getInventoryColumns(user.id),
     purchaseYearBuckets(state, cls),
     prisma.asset.count({ where: { AND: [{ cls }, regWhere("needs-correction")] } }),
+    stageSet ? Promise.resolve({} as Record<string, number>) : inventoryTileCounts(state, purchaseYear, cls, now),
   ]);
   // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (Show them).
   const shownColumns = state.filters.reg?.length && !visibleColumns.includes("registration")
@@ -144,6 +153,8 @@ export default async function InventoryPage({
     ]),
   );
   const repairMode = isRepairView(state);
+  // Phase 45 (spec §2.1): the count tiles — a click applies one status (or the attention filter), keeping the year.
+  const tiles = buildInventoryTiles(cls, state, tileCounts, (s) => href(s));
 
   // Phase 30 (spec §6.2): a chip reads as the value alone — the facet it belongs to is the
   // dropdown it came from. The search and the purchase year are chips too, so every narrowing
@@ -215,86 +226,92 @@ export default async function InventoryPage({
         </div>
       )}
       <ListNavigationProvider>
-        <div className="flex flex-col gap-2">
-          <InventoryToolbar
-            state={state}
-            total={total}
-            attentionCount={attentionCount}
-            facets={facets}
-            yearChips={yearChips}
-            purchaseYear={purchaseYear}
-            cls={cls}
-            defaultCls={defaultCls}
-            classes={visible}
-          >
-            <ColumnChooser visible={visibleColumns} />
-          </InventoryToolbar>
-          {/* Search, facet, Purchased and sort navigations share one transition; this region
-              dims (data-pending, aria-busy) while the next view renders. */}
-          <ListPendingRegion className="flex flex-col gap-2">
-            {repairMode && <RepairChips state={state} href={href} />}
-            {/* Clearing filters resets purchaseYear too — it is the same
-                "start over" gesture as clearing every other facet. */}
-            <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), null)} />
-            {rows.length > 0 ? (
-              <>
-                {/* key: any URL-state change remounts the island — selection must
-                    never silently survive a page/filter/sort change (it would act
-                    on rows the user can no longer see). purchaseYear is part of
-                    that key via exportQS even though it isn't part of `state`.
-                    The class must stay part of this key too — withViewClsQS
-                    names it whenever it is not the viewer's default — because
-                    the drawer's `to` and the selection Set both belong to one
-                    class view. */}
-                <InventoryTable
-                  key={exportQS}
-                  rows={rows}
-                  state={state}
-                  visible={shownColumns}
-                  canMutate={canMutate}
-                  filtersQS={exportQS.replace(/^\?/, "")}
-                  total={total}
-                  cls={cls}
-                  role={user.role}
-                  direct={direct}
-                  recentPeople={recentPeople}
-                  repairMode={repairMode}
-                  sortHrefs={sortHrefs}
-                  today={today}
+        <div className="flex flex-col gap-4">
+          <InventoryViewPills state={state} purchaseYear={purchaseYear} cls={cls} defaultCls={defaultCls} classes={visible} />
+          {tiles.length > 0 && <CountTiles tiles={tiles} label="Filter by status" />}
+          {/* Phase 45 (spec §4.3): the filter row sticks to the top of the window, the table's head under it,
+              and the footer to the bottom, while the list is on screen. */}
+          <StickyList>
+            <StickyToolbar>
+              <InventoryToolbar
+                state={state}
+                total={total}
+                attentionCount={attentionCount}
+                facets={facets}
+                yearChips={yearChips}
+                purchaseYear={purchaseYear}
+                cls={cls}
+                defaultCls={defaultCls}
+              >
+                <ColumnChooser visible={visibleColumns} />
+              </InventoryToolbar>
+            </StickyToolbar>
+            {/* Search, facet, Purchased and sort navigations share one transition; this region
+                dims (data-pending, aria-busy) while the next view renders. */}
+            <ListPendingRegion className="mt-2 flex flex-col gap-2">
+              {repairMode && <RepairChips state={state} href={href} />}
+              {/* Clearing filters resets purchaseYear too — it is the same
+                  "start over" gesture as clearing every other facet. */}
+              <ChipFilterRow chips={chips} clearHref={href(clearFilters(state), null)} />
+              {rows.length > 0 ? (
+                <>
+                  {/* key: any URL-state change remounts the island — selection must
+                      never silently survive a page/filter/sort change (it would act
+                      on rows the user can no longer see). purchaseYear is part of
+                      that key via exportQS even though it isn't part of `state`.
+                      The class must stay part of this key too — withViewClsQS
+                      names it whenever it is not the viewer's default — because
+                      the drawer's `to` and the selection Set both belong to one
+                      class view. */}
+                  <InventoryTable
+                    key={exportQS}
+                    rows={rows}
+                    state={state}
+                    visible={shownColumns}
+                    canMutate={canMutate}
+                    filtersQS={exportQS.replace(/^\?/, "")}
+                    total={total}
+                    cls={cls}
+                    role={user.role}
+                    direct={direct}
+                    recentPeople={recentPeople}
+                    repairMode={repairMode}
+                    sortHrefs={sortHrefs}
+                    today={today}
+                  />
+                  {/* page links and Rows per page run through the shared transition and mark the list busy */}
+                  <ListFooter
+                    page={page}
+                    per={state.per}
+                    total={total}
+                    pageCount={pageCount}
+                    hrefFor={(p) => href({ ...state, page: p })}
+                    perHrefFor={(n) => href(withPer(state, n))}
+                  />
+                </>
+              ) : hasFilters ? (
+                <EmptyState
+                  title="Your filters matched nothing"
+                  description={`${chips.length} active filter${chips.length === 1 ? "" : "s"} — loosen or clear them.`}
+                  actions={<ButtonLink href={href(clearFilters(state), null)}>Clear filters</ButtonLink>}
                 />
-                <div className="flex items-center justify-between pt-1">
-                  {/* spec §6.5: "page 1 of 1" says nothing */}
-                  {pageCount > 1 && (
-                    <span className="font-mono text-[11px] text-fg-muted">
-                      page {page} of {pageCount}
-                    </span>
-                  )}
-                  {/* NavLink: a page change runs through the shared transition and marks the list busy */}
-                  <Pagination page={page} pageCount={pageCount} hrefFor={(p) => href({ ...state, page: p })} linkComponent={NavLink} />
-                </div>
-              </>
-            ) : hasFilters ? (
-              <EmptyState
-                title="Your filters matched nothing"
-                description={`${chips.length} active filter${chips.length === 1 ? "" : "s"} — loosen or clear them.`}
-                actions={<ButtonLink href={href(clearFilters(state), null)}>Clear filters</ButtonLink>}
-              />
-            ) : (
-              <EmptyState
-                title="No assets yet"
-                description={
-                  !canRegister
-                    ? "No assets in this view."
-                    : importHref
-                      ? "Register the first asset, or import a spreadsheet."
-                      : "Register the first asset."
-                }
-                actions={
-                  canRegister ? <ButtonLink variant="primary" href={registerHref}>Register assets</ButtonLink> : undefined
-                }
-              />
-            )}
-          </ListPendingRegion>
+              ) : (
+                <EmptyState
+                  title="No assets yet"
+                  description={
+                    !canRegister
+                      ? "No assets in this view."
+                      : importHref
+                        ? "Register the first asset, or import a spreadsheet."
+                        : "Register the first asset."
+                  }
+                  actions={
+                    canRegister ? <ButtonLink variant="primary" href={registerHref}>Register assets</ButtonLink> : undefined
+                  }
+                />
+              )}
+            </ListPendingRegion>
+          </StickyList>
         </div>
       </ListNavigationProvider>
     </>

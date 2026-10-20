@@ -61,7 +61,7 @@ describe("whenRange (Manila calendar)", () => {
 });
 
 describe("buildAuditWhere — resolved matches and When", () => {
-  const state = (q: string, when?: string) => ({ q, page: 1, sort: [], filters: (when ? { when: [when] } : {}) as Record<string, string[]> });
+  const state = (q: string, when?: string) => ({ q, page: 1, per: 25, sort: [], filters: (when ? { when: [when] } : {}) as Record<string, string[]> });
   it("q matches action, entityId, actor, and the resolved entity ids", () => {
     const w = buildAuditWhere(state("dennis"), NO_HIDDEN_REFS, ["e1", "a2"]);
     expect(JSON.stringify(w)).toContain('"entityId":{"in":["e1","a2"]}');

@@ -346,7 +346,14 @@ test.describe("the inventory view", () => {
     // /^Status/}) is a strict-mode violation — the sortable "Status" table
     // column header (table.tsx's plain <button>) also matches. FacetDropdown's
     // own trigger is the one with aria-haspopup="dialog" (facet-dropdown.tsx).
-    await page.locator('button[aria-haspopup="dialog"]').filter({ hasText: /^Status/ }).click();
+    // Phase 45 (spec §2.2): Status lives inside the "More filters" popover — opened first, retried until hydrated.
+    const more = page.getByRole("button", { name: /^More filters/ });
+    const morePanel = page.getByRole("dialog", { name: "More filters" });
+    await expect(async () => {
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await expect(morePanel).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+    await morePanel.locator('button[aria-haspopup="dialog"]').filter({ hasText: /^Status/ }).click();
     const statusDialog = page.getByRole("dialog", { name: "Filter by Status" });
     await expect(statusDialog.getByRole("checkbox")).toHaveCount(6);
     await expect(statusDialog.getByText("RETIRED")).toBeVisible();

@@ -28,6 +28,11 @@ export function idsRefusalText(count: number): string {
   );
 }
 
+/** Phase 45: a bulk-bar selection over its cap (Employees: BULK_MAX people). Says what to do, not how many rows were read. */
+export function selectionRefusalText(max: number, noun: string): string {
+  return `Pick no more than ${max} ${noun} to export at once.`;
+}
+
 /**
  * The asset sheet. Order is the order a human reads, not the schema's order.
  *

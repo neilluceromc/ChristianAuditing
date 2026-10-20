@@ -3,7 +3,7 @@ import {
   ASSET_EXPORT_COLUMNS, AUDIT_EXPORT_COLUMNS, CONSUMPTION_EXPORT_COLUMNS, EMPLOYEE_EXPORT_COLUMNS,
   EXPIRY_EXPORT_COLUMNS, EXPORT_CAP, FAREWELL_EXPORT_COLUMNS, HOLDINGS_EXPORT_COLUMNS, IDS_CAP,
   OFFBOARDING_EXPORT_COLUMNS, ON_HAND_EXPORT_COLUMNS, capRefusalText, equipmentExportColumns, equipmentFilePrefix,
-  idsRefusalText,
+  idsRefusalText, selectionRefusalText,
   type ConsumptionExportRow, type EquipmentExportRow, type ExpiryExportRow, type HoldingsExportRow, type OffboardingExportRow,
   type OnHandExportRow,
 } from "./export-columns";
@@ -69,6 +69,15 @@ describe("idsRefusalText", () => {
     expect(text).toContain("900");
     expect(text).toContain(String(IDS_CAP));
     expect(text).not.toContain(String(EXPORT_CAP));
+  });
+});
+
+describe("selectionRefusalText", () => {
+  it("tells the person how many they may pick, and is not the row-cap message", () => {
+    const text = selectionRefusalText(200, "people");
+    expect(text).toBe("Pick no more than 200 people to export at once.");
+    expect(text).not.toContain(String(EXPORT_CAP));
+    expect(text).not.toContain("filters");
   });
 });
 

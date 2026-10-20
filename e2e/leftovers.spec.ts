@@ -72,10 +72,18 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
-/** The EMP-#### of every row on the people list, top to bottom (the first cell carries "EMP-0042 · Title"). */
+/**
+ * The EMP-#### of every row on the people list, top to bottom. Phase 45: the number is no longer on screen — the
+ * "Employee" cell keeps it as screen-reader-only text after the name — so the cell is found by its header (IT's
+ * list leads with a checkbox column) and read through textContent, which includes visually hidden text.
+ */
 async function employeeNos(page: Page): Promise<string[]> {
   await expect(page.locator("tbody tr").first()).toBeVisible();
-  const cells = await page.locator("tbody tr td:nth-child(1)").allInnerTexts();
+  const idx = await page
+    .locator("thead th")
+    .evaluateAll((ths) => ths.findIndex((th) => (th.textContent ?? "").trim().startsWith("Employee")));
+  expect(idx, 'an "Employee" column').toBeGreaterThanOrEqual(0);
+  const cells = await page.locator(`tbody tr td:nth-child(${idx + 1})`).allTextContents();
   return cells.map((c) => /EMP-\d+/.exec(c)?.[0] ?? `?${c}`);
 }
 
@@ -115,6 +123,12 @@ test.describe("Phase 31 — leftovers sweep", () => {
     // toggleSort demotes Loadout to the secondary key: sort=name,loadout.
     await expect(page).toHaveURL(/[?&]sort=name(%2C|,)loadout(&|$)/);
     await expect.poll(() => employeeNos(page)).toEqual(byName);
+
+    // Phase 45: with the EMP number off the screen, searching it is how a person is found by number.
+    const first = byName[0];
+    expect(first, "the first row's EMP number").toMatch(/^EMP-\d+$/);
+    await page.goto(`/employees?q=${first}`);
+    await expect.poll(() => employeeNos(page)).toEqual([first]);
   });
 
   test("2. the People export follows the Loadout sort", async ({ page }) => {

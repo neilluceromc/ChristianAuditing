@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf, parseIntParam, parsePage } from "./paging";
+import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, PER_PAGE_OPTIONS, pageOf, parseIntParam, parsePage, rowsRange } from "./paging";
 
 describe("pageOf", () => {
   it("names the two sizes the app already uses", () => {
@@ -34,5 +34,23 @@ describe("parseIntParam", () => {
     expect(parseIntParam(new URLSearchParams(""), "skip", 0)).toBe(0);
     expect(parseIntParam(new URLSearchParams("skip=abc"), "skip", 0)).toBe(0);
     expect(parseIntParam(new URLSearchParams("page=0"), "page", 1)).toBe(1); // `||` reads 0 as absent — the behaviour both hand-rolled versions already had (ruling R4)
+  });
+});
+
+describe("PER_PAGE_OPTIONS", () => {
+  it("offers 25, 50 and 100, the first being the default size", () => {
+    expect([...PER_PAGE_OPTIONS]).toEqual([25, 50, 100]);
+    expect(PER_PAGE_OPTIONS[0]).toBe(ENTITY_PAGE_SIZE);
+  });
+});
+
+describe("rowsRange", () => {
+  it("is the 1-based first and last row on the page", () => {
+    expect(rowsRange(1, 25, 900)).toEqual({ from: 1, to: 25 });
+    expect(rowsRange(36, 25, 900)).toEqual({ from: 876, to: 900 });
+    expect(rowsRange(2, 50, 120)).toEqual({ from: 51, to: 100 });
+  });
+  it("is 0-0 for an empty list", () => {
+    expect(rowsRange(1, 25, 0)).toEqual({ from: 0, to: 0 });
   });
 });

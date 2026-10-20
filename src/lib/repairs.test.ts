@@ -107,7 +107,7 @@ describe("quoteWarning names the share, so moving the line is visible", () => {
 describe("repairs is a saved view, so the URL decides", () => {
   // built directly rather than parsed: this is the predicate's contract, and the
   // parser's own contract (that `stage` IS a facet) is tested in inventory-list.
-  const state = (filters: Record<string, string[]>): ListState => ({ q: "", page: 1, sort: [], filters });
+  const state = (filters: Record<string, string[]>): ListState => ({ q: "", page: 1, per: 25, sort: [], filters });
 
   it("the named URL pins DEFECTIVE and sorts by the down clock", () => {
     expect(REPAIRS_SAVED_VIEW).toBe("/inventory?status=DEFECTIVE&sort=defectiveSince");
@@ -152,7 +152,7 @@ describe("repairs is a saved view, so the URL decides", () => {
   });
 
   it("resets to page 1 — a stage swap is a new result set", () => {
-    const paged: ListState = { q: "", page: 4, sort: [], filters: { status: ["DEFECTIVE"] } };
+    const paged: ListState = { q: "", page: 4, per: 25, sort: [], filters: { status: ["DEFECTIVE"] } };
     expect(withRepairStage(paged, "to-assess").page).toBe(1);
   });
 });

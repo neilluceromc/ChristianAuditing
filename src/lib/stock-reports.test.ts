@@ -226,7 +226,7 @@ describe("parseExpiryTab", () => {
 });
 
 describe("reportHref", () => {
-  const base = { q: "", page: 1, sort: [], filters: {} };
+  const base = { q: "", page: 1, per: 25, sort: [], filters: {} };
   it("is the bare path for the default state", () => {
     expect(reportHref("/stock/reports/on-hand", base)).toBe("/stock/reports/on-hand");
   });

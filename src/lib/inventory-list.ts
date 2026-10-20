@@ -4,6 +4,7 @@ import { isRepairStage } from "./repairs";
 import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
 import { parseRegState, regWhere, type RegState } from "./registration";
 import { parseProvenance, provenanceWhere, type Provenance } from "./provenance";
+import { attentionWhere } from "./inventory-attention";
 
 /**
  * EVERY status of BOTH classes (Phase 13) — the flat list for the places that
@@ -26,7 +27,10 @@ export const ASSET_STATUSES = [
 export const BULK_MAX = 200;
 
 export const INVENTORY_LIST_CONFIG: ListConfig = {
-  facets: ["status", "category", "type", "assignee", "stage", "provenance", "reg"],
+  facets: ["status", "category", "type", "assignee", "stage", "provenance", "reg",
+    // Phase 45 (spec §2.1): the Need attention tile, `?attention=1` - a filter, where `sort=attention` is only an order
+    "attention"],
+  facetValues: { attention: ["1"] },
   sortable: [
     "tag", "model", "category", "status", "purchasedAt", "warrantyUntil",
     // the repairs view's Down column
@@ -36,6 +40,14 @@ export const INVENTORY_LIST_CONFIG: ListConfig = {
   ],
   defaultSort: [{ key: "tag", dir: "asc" }],
 };
+
+/** The Need attention filter's chip and facet label (`?attention=1`). */
+export const ATTENTION_FACET_LABEL = "Need attention";
+
+/** The `attention` entry of `facetOptions`: one option, so the generic chip loop reads "Need attention", not "1". */
+export function attentionFacetOption(count: number): { value: string; label: string; count: number } {
+  return { value: "1", label: ATTENTION_FACET_LABEL, count };
+}
 
 /** A single year, or the literal bucket for assets with no `purchasedAt` at all. */
 export type PurchaseYearValue = number | "none";
@@ -116,6 +128,7 @@ export function buildAssetWhere(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
   cls: AssetClass = "IT",
+  now: Date = new Date(),
 ): Prisma.AssetWhereInput {
   // Class first: it is the one filter that is ALWAYS applied. IT by default
   // so that every consumer and every URL that predates Phase 13 behaves
@@ -172,6 +185,13 @@ export function buildAssetWhere(
   if (regs.length) {
     const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
     and.push({ OR: regs.map(regWhere) });
+    where.AND = and;
+  }
+  // Phase 45 (spec §2.1): the Need attention tile - attentionWhere agrees with attentionOf boundary for boundary,
+  // appended to AND like the derived facets above.
+  if (f.attention?.includes("1")) {
+    const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    and.push(attentionWhere(now));
     where.AND = and;
   }
   // purchaseYear is fully expressible in SQL — a straight range on

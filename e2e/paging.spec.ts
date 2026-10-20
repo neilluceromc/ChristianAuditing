@@ -327,14 +327,18 @@ test.describe.serial("paging", () => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/employees?sort=joinedAt&page=2");
     await expect(page.getByRole("table")).toBeVisible();
-    await expect(page.getByText(new RegExp(`${dbEmployeeCount} people`))).toBeVisible();
+    const fmt = (n: number) => n.toLocaleString("en-US");
+    await expect(page.getByText(new RegExp(`${fmt(dbEmployeeCount)} people`))).toBeVisible();
     // Genuinely on page 2, not silently clamped back to page 1.
     await expect(page.getByRole("navigation", { name: "Pagination" }).getByRole("link", { name: "2", exact: true }))
       .toHaveAttribute("aria-current", "page");
+    // Phase 45 (spec §4.3): the sticky footer names the rows on screen ("Rows 26–50 of N", an en dash).
+    await expect(page.getByText(`Rows 26–50 of ${fmt(dbEmployeeCount)}`, { exact: true })).toBeVisible();
 
+    // Phase 45: the EMP number is screen-reader-only text in the Employee cell now, so read textContent.
     const empNosOn = async (p: number) => {
       await page.goto(`/employees?sort=joinedAt&page=${p}`);
-      const text = await page.getByRole("table").innerText();
+      const text = (await page.getByRole("table").textContent()) ?? "";
       return [...new Set(text.match(/EMP-\d{4}/g) ?? [])];
     };
     const page1Nos = await empNosOn(1);
@@ -497,20 +501,36 @@ test.describe.serial("paging", () => {
     test.setTimeout(180_000);
     await login(page, "it@thebackroomop.com");
 
+    // Phase 45 (spec §4.3): the footer reads "Rows 1–25 of 1,025" (no "page N of M" any more), so the page
+    // count is the total over the 25-row default, and the pager's last numbered link must agree with it.
+    const rowsLine = async () => {
+      const text = (await page.getByText(/^Rows [\d,]+–[\d,]+ of [\d,]+$/).innerText()).trim();
+      const [, from, to, total] = (/^Rows ([\d,]+)–([\d,]+) of ([\d,]+)$/.exec(text) ?? []).map((s) => Number(s?.replace(/,/g, "")));
+      return { from, to, total, pages: Math.ceil(total / 25) };
+    };
+    const lastPageLink = async () =>
+      Math.max(
+        ...(await page.getByRole("navigation", { name: "Pagination" }).getByRole("link").allInnerTexts())
+          .map(Number).filter(Number.isFinite),
+      );
+
     await page.goto("/inventory");
-    const invPageText = await page.getByText(/page \d+ of \d+/).innerText();
-    const invPageCount = Number(invPageText.match(/page \d+ of (\d+)/)?.[1]);
-    expect(invPageCount).toBeGreaterThanOrEqual(41);
+    const inv = await rowsLine();
+    expect(inv.from).toBe(1);
+    expect(inv.to).toBe(25);
+    expect(inv.pages).toBeGreaterThanOrEqual(41);
+    expect(await lastPageLink()).toBe(inv.pages);
 
     await page.goto("/inventory?page=41");
     await expect(page.getByRole("table").locator("tbody tr").first()).toBeVisible();
 
     await page.goto("/employees");
-    const empPageText = await page.getByText(/page \d+ of \d+/).innerText();
-    const empPageCount = Number(empPageText.match(/page (\d+) of/)?.[1]);
-    const empTotalPages = Number(empPageText.match(/of (\d+)/)?.[1]);
+    const emp = await rowsLine();
+    const empTotalPages = emp.pages;
     expect(empTotalPages).toBeGreaterThanOrEqual(26);
-    expect(empPageCount).toBe(1);
+    expect(await lastPageLink()).toBe(empTotalPages);
+    // page 1: the rows line starts at row 1
+    expect(emp.from).toBe(1);
 
     await page.goto(`/employees?page=${empTotalPages}`);
     await expect(page.getByRole("table").locator("tbody tr").first()).toBeVisible();

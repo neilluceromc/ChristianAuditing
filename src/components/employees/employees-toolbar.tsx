@@ -1,16 +1,23 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { cn } from "@/lib/cn";
+import { usePathname } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { FacetDropdown } from "@/components/patterns/facet-dropdown";
+import { NavLink, useListNavigation } from "@/components/patterns/list-navigation";
+import { LIST } from "@/components/patterns/list-styles";
 import { EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
+import { TAB_FACETS } from "@/lib/employee-tabs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { EmployeeFacets } from "@/server/modules/employees/queries";
-import { pushGuarded } from "@/lib/stuck-nav";
 
+/**
+ * Phase 45 (spec §3.2): the Employees filter row, meant for a StickyToolbar — Search (flexible, up to 420 px) and
+ * Works for, then on the right Clear filters (only while a search, Works for or tab is set), the people count with
+ * the number in bold, and the leavers clause: "· N leavers hidden" (a link that shows them) or "· leavers shown ·
+ * Hide". The Staff and Employment facets and the Show leavers / Policy gaps only pills are gone: the tabs and the
+ * leavers link replace them, and their URL params (`kind`, `employment`, `leavers`, `gaps`) still filter.
+ */
 export function EmployeesToolbar({
   state,
   total,
@@ -24,22 +31,31 @@ export function EmployeesToolbar({
   gapsOnly: boolean;
   hiddenLeavers: number;
 }) {
-  const router = useRouter();
+  const { navigate } = useListNavigation();
   const pathname = usePathname();
-  // Phase 20 (spec §5): leavers hidden by default — an explicit employment
-  // facet always wins over the toggle (buildEmployeeWhere's own rule), but
-  // the toggle only ever needs to know whether IT itself asked to see them.
+  // Phase 20 (spec §5): leavers hidden by default — an explicit employment facet always wins over the toggle
+  // (buildEmployeeWhere's own rule), but the link only needs to know whether IT itself asked to see them.
   const showingLeavers = (state.filters.leavers ?? []).includes("1");
+  // The leavers scope is not a filter: Clear filters keeps it, and does not show for it alone.
+  const tabSet = gapsOnly || TAB_FACETS.some((f) => (state.filters[f]?.length ?? 0) > 0);
+  const filtered = state.q !== "" || (state.filters.department?.length ?? 0) > 0 || tabSet;
+  const cleared: ListState = {
+    ...state,
+    q: "",
+    filters: showingLeavers ? { leavers: ["1"] } : {},
+    page: 1,
+  };
 
   const href = (s: ListState, gaps: boolean) => {
     const qs = serializeListState(s, EMPLOYEES_LIST_CONFIG);
     if (!gaps) return pathname + qs;
     return pathname + (qs ? `${qs}&gaps=1` : "?gaps=1");
   };
+  const fmt = (n: number) => n.toLocaleString("en-US");
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="relative w-[260px]">
+      <div className="relative w-full max-w-[420px] flex-1 basis-[280px]">
         <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint">
           <Icon name="search" size={14} />
         </span>
@@ -53,80 +69,61 @@ export function EmployeesToolbar({
           type="search"
           data-page-search
           aria-label="Search employees"
-          placeholder="Search name, number, title, department or client · Enter"
+          placeholder="Search name, EMP number, title or client"
           defaultValue={state.q}
-          className="pl-8 pr-7"
+          className="h-9 py-0 pl-8 pr-7 text-[13px]"
           onKeyDown={(e) => {
-            if (e.key === "Enter") pushGuarded(router, href(withSearch(state, e.currentTarget.value), gapsOnly));
+            if (e.key === "Enter") navigate(href(withSearch(state, e.currentTarget.value), gapsOnly));
           }}
         />
         {state.q && (
           <button
             type="button"
             aria-label="Clear search"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg"
-            onClick={() => pushGuarded(router, href(withSearch(state, ""), gapsOnly))}
+            // Fitts / WCAG 2.5.8: a 24 × 24 px target, centred, inside the input's pr-7 gutter
+            className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-(--radius-ctl) text-fg-muted hover:bg-surface-subtle hover:text-fg"
+            onClick={() => navigate(href(withSearch(state, ""), gapsOnly))}
           >
             ×
           </button>
         )}
       </div>
-      <FacetDropdown
-        label="Works for"
-        options={facets.department}
-        selected={state.filters.department ?? []}
-        onApply={(values) => pushGuarded(router, href(withFilter(state, "department", values), gapsOnly))}
-      />
-      <FacetDropdown
-        label="Staff"
-        options={facets.kind}
-        selected={state.filters.kind ?? []}
-        onApply={(values) => pushGuarded(router, href(withFilter(state, "kind", values), gapsOnly))}
-      />
-      <FacetDropdown
-        label="Employment"
-        options={facets.employment}
-        selected={state.filters.employment ?? []}
-        onApply={(values) => pushGuarded(router, href(withFilter(state, "employment", values), gapsOnly))}
-      />
-      <Link
-        href={href(withFilter(state, "leavers", showingLeavers ? [] : ["1"]), gapsOnly)}
-        aria-current={showingLeavers ? "true" : undefined}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors duration-(--dur-1)",
-          showingLeavers
-            ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
-            : "border-border-strong bg-surface text-fg-secondary hover:bg-surface-subtle",
+      <div className={LIST.tall}>
+        <FacetDropdown
+          label="Works for"
+          options={facets.department}
+          selected={state.filters.department ?? []}
+          onApply={(values) => navigate(href(withFilter(state, "department", values), gapsOnly))}
+        />
+      </div>
+      <div className="ml-auto flex items-center gap-3 whitespace-nowrap text-[12.5px] tabular-nums text-fg-muted">
+        {filtered && (
+          <NavLink href={href(cleared, false)} className="font-medium text-accent hover:underline">
+            Clear filters
+          </NavLink>
         )}
-      >
-        {showingLeavers && <span aria-hidden>✓</span>}
-        {showingLeavers ? "Hide leavers" : "Show leavers"}
-      </Link>
-      <Link
-        href={href({ ...state, page: 1 }, !gapsOnly)}
-        aria-current={gapsOnly ? "true" : undefined}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors duration-(--dur-1)",
-          gapsOnly
-            ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
-            : "border-border-strong bg-surface text-fg-secondary hover:bg-surface-subtle",
-        )}
-      >
-        {gapsOnly && <span aria-hidden>✓</span>}
-        Policy gaps only
-      </Link>
-      <span className="ml-auto font-mono text-[11px] text-fg-muted" aria-live="polite">
-        {total} {total === 1 ? "person" : "people"}
-        {hiddenLeavers > 0 && (
-          <>
-            {" "}
-            ·{" "}
-            <Link href={href(withFilter(state, "leavers", ["1"]), gapsOnly)} className="underline">
-              {hiddenLeavers} leaver{hiddenLeavers === 1 ? "" : "s"} hidden
-            </Link>
-          </>
-        )}
-      </span>
+        <p aria-live="polite">
+          <span className="font-semibold text-fg">{fmt(total)}</span> {total === 1 ? "person" : "people"}
+          {showingLeavers ? (
+            <>
+              {" · leavers shown · "}
+              <NavLink
+                href={href(withFilter(state, "leavers", []), gapsOnly)}
+                className="text-accent hover:underline"
+              >
+                Hide
+              </NavLink>
+            </>
+          ) : hiddenLeavers > 0 ? (
+            <>
+              {" · "}
+              <NavLink href={href(withFilter(state, "leavers", ["1"]), gapsOnly)} className="text-accent hover:underline">
+                {fmt(hiddenLeavers)} leaver{hiddenLeavers === 1 ? "" : "s"} hidden
+              </NavLink>
+            </>
+          ) : null}
+        </p>
+      </div>
     </div>
   );
 }

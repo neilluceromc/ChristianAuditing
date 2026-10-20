@@ -1,4 +1,4 @@
-import { capRefusalText, idsRefusalText } from "@/lib/export-columns";
+import { capRefusalText, idsRefusalText, selectionRefusalText } from "@/lib/export-columns";
 
 /** text/plain, because these are read by a human in a browser tab, not parsed. */
 function refusal(text: string): Response {
@@ -10,6 +10,7 @@ function refusal(text: string): Response {
 
 export const capRefusal = (count: number) => refusal(capRefusalText(count));
 export const idsRefusal = (count: number) => refusal(idsRefusalText(count));
+export const selectionRefusal = (max: number, noun: string) => refusal(selectionRefusalText(max, noun));
 
 /**
  * The one place download headers are written. `filename` is quoted in the

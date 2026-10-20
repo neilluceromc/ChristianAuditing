@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import { ToastProvider } from "@/components/ui/toast";
+import { parseDensity } from "@/lib/density";
 import { APP_NAME } from "@/lib/page-title";
 import "./globals.css";
 
@@ -25,7 +26,7 @@ export default async function RootLayout({
   // here is what makes the choice survive a reload (the cookie contract).
   const jar = await cookies();
   const theme = jar.get("br.theme")?.value === "dark" ? "dark" : "light";
-  const density = jar.get("br.density")?.value === "compact" ? "compact" : "comfortable";
+  const density = parseDensity(jar.get("br.density")?.value);
   return (
     <html
       lang="en"

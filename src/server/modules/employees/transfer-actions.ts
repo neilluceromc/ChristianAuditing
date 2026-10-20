@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -10,6 +11,10 @@ import {
 } from "@/server/action-result";
 import { transferSchema } from "@/lib/transfer-schema";
 import { GROUP_ARCHIVED } from "@/lib/groups";
+import { BULK_MAX } from "@/lib/inventory-list";
+import {
+  bulkCountMessage, bulkTransferSchema, checkBulkTransfer, peopleCount, type BlockedPerson,
+} from "@/lib/bulk-transfer";
 
 /**
  * I-4, the same local class `item-actions.ts`/`movement-actions.ts`/
@@ -75,38 +80,9 @@ export async function transferEmployee(input: unknown): Promise<ActionResult<{ i
 
   try {
     await prisma.$transaction(async (tx) => {
-      // I-4: conditional on the department this action actually read. Zero
-      // rows means someone else's transfer already moved this person since
-      // the read above — throw before the transfer row or the audit entry
-      // are written, so the loser's transaction rolls back clean.
-      const moved = await tx.employee.updateMany({
-        where: { id: employee.id, departmentId: employee.departmentId },
-        data: { departmentId: d.toDepartmentId, title: d.toTitle },
-      });
-      if (moved.count === 0) {
-        throw new ActionFailure(conflict("Someone else just transferred this person — reload and try again."));
-      }
-      await tx.employeeTransfer.create({
-        data: {
-          employeeId: employee.id,
-          fromDepartmentId: employee.departmentId,
-          toDepartmentId: d.toDepartmentId,
-          fromTitle: employee.title,
-          toTitle: d.toTitle,
-          effectiveAt,
-          reason: d.reason || null,
-          actorId: user.id,
-        },
-      });
-      await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name,
-        entityType: "employee", entityId: employee.id,
-        action: "employee.transferred",
-        diff: {
-          department: { from: employee.department.name, to: toDepartment.name },
-          title: { from: employee.title, to: d.toTitle },
-          effectiveAt: { from: null, to: effectiveAt },
-        },
+      await recordTransfer(tx, {
+        employee, toDepartment, toTitle: d.toTitle, effectiveAt, reason: d.reason || null, actor: user,
+        raceMessage: "Someone else just transferred this person — reload and try again.",
       });
     });
   } catch (e) {
@@ -114,9 +90,135 @@ export async function transferEmployee(input: unknown): Promise<ActionResult<{ i
     throw e;
   }
 
-  revalidatePath("/employees");
-  revalidatePath(`/employees/${employee.id}`);
-  revalidatePath(`/employees/${employee.id}/timeline`);
-  revalidatePath("/offboarding");
+  revalidateTransferred([employee.id]);
   return ok({ id: employee.id });
+}
+
+/**
+ * One person's transfer writes, shared by `transferEmployee` and `bulkTransferEmployees` and always run inside the
+ * caller's `$transaction`: the employee's department and title, the dated `EmployeeTransfer` row, and the
+ * `employee.transferred` audit entry with its diff. `employee` is the row the caller READ (its department included).
+ *
+ * I-4: the employee write is conditional on the department this action actually read. Zero rows means someone
+ * else's transfer already moved this person since that read — throw before the transfer row or the audit entry
+ * are written, so the loser's transaction rolls back clean (in the bulk path, everyone's does).
+ */
+async function recordTransfer(
+  tx: Prisma.TransactionClient,
+  t: {
+    employee: { id: string; departmentId: string; title: string; department: { name: string } };
+    toDepartment: { id: string; name: string };
+    toTitle: string;
+    effectiveAt: Date;
+    reason: string | null;
+    actor: { id: string; name: string };
+    raceMessage: string;
+  },
+): Promise<void> {
+  const { employee, toDepartment, toTitle, effectiveAt, actor } = t;
+  const moved = await tx.employee.updateMany({
+    where: { id: employee.id, departmentId: employee.departmentId },
+    data: { departmentId: toDepartment.id, title: toTitle },
+  });
+  if (moved.count === 0) throw new ActionFailure(conflict(t.raceMessage));
+  await tx.employeeTransfer.create({
+    data: {
+      employeeId: employee.id,
+      fromDepartmentId: employee.departmentId,
+      toDepartmentId: toDepartment.id,
+      fromTitle: employee.title,
+      toTitle,
+      effectiveAt,
+      reason: t.reason,
+      actorId: actor.id,
+    },
+  });
+  await writeAudit(tx, {
+    actorId: actor.id, actorLabel: actor.name,
+    entityType: "employee", entityId: employee.id,
+    action: "employee.transferred",
+    diff: {
+      department: { from: employee.department.name, to: toDepartment.name },
+      title: { from: employee.title, to: toTitle },
+      effectiveAt: { from: null, to: effectiveAt },
+    },
+  });
+}
+
+function revalidateTransferred(ids: string[]) {
+  revalidatePath("/employees");
+  for (const id of ids) {
+    revalidatePath(`/employees/${id}`);
+    revalidatePath(`/employees/${id}/timeline`);
+  }
+  revalidatePath("/offboarding");
+}
+
+/**
+ * Phase 45 (spec §3.4): Transfer… from the Employees bulk bar — the same role check, rate limit and per-person
+ * writes as `transferEmployee`, for up to `BULK_MAX` people in ONE transaction. All or nothing: every person is
+ * checked first (`checkBulkTransfer`), and if anyone can't move nothing is written and the refusal carries
+ * `blocked` (who, and why) for the dialog to list. Each person keeps their own title (`toTitle` = their current
+ * one); one audit entry per person, exactly as a single transfer writes.
+ */
+export async function bulkTransferEmployees(
+  input: unknown,
+): Promise<ActionResult<{ count: number }> & { blocked?: BlockedPerson[] }> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = bulkTransferSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const d = parsed.data;
+  // refuse an empty or oversized selection before reading anyone
+  const sizeMessage = bulkCountMessage(d.ids.length, BULK_MAX);
+  if (sizeMessage) return validationError({ ids: sizeMessage });
+
+  const [found, toDepartment] = await Promise.all([
+    prisma.employee.findMany({ where: { id: { in: d.ids } }, include: { department: true } }),
+    prisma.department.findUnique({ where: { id: d.toDepartmentId } }),
+  ]);
+  if (found.length !== d.ids.length) {
+    return conflict("Someone in this selection no longer exists — reload and try again.");
+  }
+  // the order the operator ticked them in (the page's order), so the blocked list reads like the table
+  const byId = new Map(found.map((e) => [e.id, e]));
+  const people = d.ids.map((id) => byId.get(id)!);
+
+  const check = checkBulkTransfer(people, toDepartment, BULK_MAX);
+  if (!check.ok) {
+    if (check.message) return validationError({ ids: check.message });
+    return {
+      ...conflict(`${peopleCount(check.blocked.length)} can't be transferred`),
+      blocked: check.blocked,
+    };
+  }
+  // checkBulkTransfer blocks everyone when the destination is missing, so it is here
+  const dest = toDepartment!;
+
+  const effectiveAt = new Date(`${d.effectiveAt}T00:00:00Z`);
+  if (Number.isNaN(effectiveAt.getTime())) return validationError({ effectiveAt: "Use the date picker" });
+
+  try {
+    // Sequential per-person writes (3 round trips each, up to BULK_MAX people): the long-transaction budget the
+    // other bulk and batch writers use, not Prisma's 5 s default.
+    // Written in id order, not page order: two overlapping bulk transfers then take their row locks in the same
+    // order, so they queue rather than deadlock. (The blocked list above keeps the page order.)
+    const writeOrder = [...people].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    await prisma.$transaction(async (tx) => {
+      for (const employee of writeOrder) {
+        await recordTransfer(tx, {
+          employee, toDepartment: dest, toTitle: employee.title, effectiveAt, reason: d.note || null, actor: user,
+          raceMessage: `Someone else just transferred ${employee.name} — reload and try again.`,
+        });
+      }
+    }, { timeout: 60_000, maxWait: 10_000 });
+  } catch (e) {
+    if (e instanceof ActionFailure) return e.result;
+    throw e;
+  }
+
+  revalidateTransferred(people.map((p) => p.id));
+  return ok({ count: people.length });
 }

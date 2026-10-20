@@ -253,6 +253,9 @@ test.describe.serial("phase 40 — asset record, triage and the print confirmati
     await columns.click();
     const chooser = page.getByRole("dialog", { name: "Choose columns" });
     await expect(chooser.getByRole("checkbox", { name: "Registration", exact: true })).toHaveCount(1);
+    // Phase 45 (spec §2.3): a user who never chose sees Serial number, and Registration is off until chosen.
+    await expect(chooser.getByRole("checkbox", { name: "Serial number", exact: true })).toBeChecked();
+    await expect(chooser.getByRole("checkbox", { name: "Registration", exact: true })).not.toBeChecked();
     for (const box of await chooser.getByRole("checkbox").all()) {
       expect((await box.evaluate((el) => el.closest("label")?.textContent ?? "")).trim()).not.toBe("");
     }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "./supplier-list";
 import type { ListState } from "./url-state";
 
-const st = (over: Partial<ListState> = {}): ListState => ({ q: "", page: 1, sort: SUPPLIER_LIST_CONFIG.defaultSort, filters: {}, ...over });
+const st = (over: Partial<ListState> = {}): ListState => ({ q: "", page: 1, per: 25, sort: SUPPLIER_LIST_CONFIG.defaultSort, filters: {}, ...over });
 
 describe("buildSupplierWhere (spec §4.1)", () => {
   it("hides archived suppliers by default and shows only them under archived=1", () => {

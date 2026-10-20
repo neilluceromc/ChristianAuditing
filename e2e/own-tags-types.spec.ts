@@ -68,6 +68,21 @@ async function waitForHydration(target: Locator) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * Phase 45 (spec §2.2): on /inventory the Assigned facet (with Status, Type, Provenance, Registration and Purchased)
+ * lives inside the "More filters" popover, which renders its facets only while open. Idempotent (an open panel is
+ * left open — it stays open across a facet's Apply), and retried until the island has hydrated.
+ */
+async function openMoreFilters(page: Page): Promise<Locator> {
+  const more = page.getByRole("button", { name: /^More filters/ });
+  const panel = page.getByRole("dialog", { name: "More filters" });
+  await expect(async () => {
+    if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+    await expect(panel).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  return panel;
+}
+
 let seq = 0;
 const newTag = () => `OWN${Date.now().toString(36).slice(-6).toUpperCase()}-${++seq}`;
 
@@ -363,6 +378,7 @@ test.describe("own tags and real types — people", () => {
     await expect(held).toBeVisible({ timeout: 20_000 });
     await expect(spare).toBeVisible();
 
+    await openMoreFilters(page);
     const trigger = page.getByRole("button", { name: /^Assigned/ });
     await waitForHydration(trigger);
     await trigger.click();
@@ -372,21 +388,26 @@ test.describe("own tags and real types — people", () => {
     await expect(option).toBeVisible({ timeout: 15_000 });
     await option.check();
     await popover.getByRole("button", { name: "Apply", exact: true }).click();
+    await openMoreFilters(page); // the panel stays open across Apply; reopened if a render closed it
     await expect(page.getByRole("button", { name: "Assigned: 1", exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(held).toBeVisible();
     await expect(spare).toHaveCount(0);
 
     // The chip's x removes it.
+    await openMoreFilters(page);
     await page.getByRole("button", { name: "Assigned: 1", exact: true }).click();
     await page.getByRole("button", { name: `Remove ${holder.name}`, exact: true }).click();
     await page.getByRole("dialog", { name: "Filter by Assigned" }).getByRole("button", { name: "Apply", exact: true }).click();
+    await openMoreFilters(page); // the panel stays open across Apply; reopened if a render closed it
     await expect(page.getByRole("button", { name: "Assigned", exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(spare).toBeVisible();
 
     // Unassigned narrows to assets with no holder.
+    await openMoreFilters(page);
     await page.getByRole("button", { name: "Assigned", exact: true }).click();
     await page.getByRole("dialog", { name: "Filter by Assigned" }).getByRole("checkbox", { name: /Unassigned/ }).check();
     await page.getByRole("dialog", { name: "Filter by Assigned" }).getByRole("button", { name: "Apply", exact: true }).click();
+    await openMoreFilters(page); // the panel stays open across Apply; reopened if a render closed it
     await expect(page.getByRole("button", { name: "Assigned: 1", exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(spare).toBeVisible();
     await expect(held).toHaveCount(0);
@@ -396,6 +417,7 @@ test.describe("own tags and real types — people", () => {
     test.setTimeout(120_000);
     await login(page, IT);
     await page.goto("/inventory");
+    await openMoreFilters(page);
     const trigger = page.getByRole("button", { name: /^Assigned/ });
     await waitForHydration(trigger);
     await trigger.click();
@@ -413,6 +435,7 @@ test.describe("own tags and real types — viewer", () => {
     const holder = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/inventory");
+    await openMoreFilters(page);
     const trigger = page.getByRole("button", { name: /^Assigned/ });
     await waitForHydration(trigger);
     await trigger.click();

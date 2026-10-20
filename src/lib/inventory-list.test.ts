@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_STATUSES, assigneeWhere, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
+  ASSET_STATUSES, assigneeWhere, attentionFacetOption, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
   parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
 import { STATUSES_BY_CLASS } from "./asset-class";
+import { attentionWhere } from "./inventory-attention";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), INVENTORY_LIST_CONFIG);
 
@@ -44,7 +45,7 @@ describe("buildAssetWhere", () => {
     expect(buildAssetWhere(parse("status=HACKED")).status).toBeUndefined();
   });
   it("provenance facet ORs the derived shapes inside AND, displacing nothing", () => {
-    const w = buildAssetWhere({ q: "", page: 1, sort: [], filters: { provenance: ["DIRECT", "HISTORICAL"], status: ["SPARE"] } });
+    const w = buildAssetWhere({ q: "", page: 1, per: 25, sort: [], filters: { provenance: ["DIRECT", "HISTORICAL"], status: ["SPARE"] } });
     expect(w.status).toEqual({ in: ["SPARE"] });
     expect(w.AND).toEqual([{ OR: [
       { purchaseRequestId: null, importedAt: null },
@@ -52,7 +53,7 @@ describe("buildAssetWhere", () => {
     ] }]);
   });
   it("ignores an unknown provenance value", () => {
-    expect(buildAssetWhere({ q: "", page: 1, sort: [], filters: { provenance: ["nope"] } }).AND).toBeUndefined();
+    expect(buildAssetWhere({ q: "", page: 1, per: 25, sort: [], filters: { provenance: ["nope"] } }).AND).toBeUndefined();
   });
 });
 
@@ -192,7 +193,7 @@ describe("purchaseYearChips", () => {
 });
 
 describe("buildAssetWhere — class (Phase 13)", () => {
-  const empty = { q: "", page: 1, sort: [], filters: {} };
+  const empty = { q: "", page: 1, per: 25, sort: [], filters: {} };
   it("defaults to IT, so every pre-Phase-13 URL means what it used to", () => {
     expect(buildAssetWhere(empty).cls).toBe("IT");
     expect(buildAssetWhere(empty, null).cls).toBe("IT");
@@ -255,5 +256,29 @@ describe("the Attention sort key (spec §6.3, plan P-10)", () => {
   it("never reaches the SQL order, and alone falls back to the default order", () => {
     expect(buildAssetOrderBy([{ key: "attention", dir: "asc" }])).toEqual(buildAssetOrderBy([]));
     expect(buildAssetOrderBy([{ key: "attention", dir: "asc" }, { key: "model", dir: "desc" }])).toEqual([{ model: "desc" }, { id: "asc" }]);
+  });
+});
+
+describe("buildAssetWhere attention facet (Phase 45 §2.1)", () => {
+  const now = new Date("2026-10-20T00:00:00Z");
+  it("attention=1 ANDs attentionWhere(now)", () => {
+    const where = buildAssetWhere(parse("attention=1"), null, "IT", now);
+    expect(where.AND).toEqual([attentionWhere(now)]);
+  });
+  it("coexists with the other derived facets without dropping either", () => {
+    const where = buildAssetWhere(parse("attention=1&assignee=none"), null, "IT", now);
+    expect(where.AND).toEqual([{ assigneeId: null }, attentionWhere(now)]);
+  });
+  it("attention=0 or any value but 1 parses as absent", () => {
+    expect(parse("attention=0").filters.attention).toBeUndefined();
+    expect(parse("attention=yes").filters.attention).toBeUndefined();
+    expect(parse("attention=1").filters.attention).toEqual(["1"]);
+  });
+  it("the facet option reads Need attention, not 1", () => {
+    expect(attentionFacetOption(7)).toEqual({ value: "1", label: "Need attention", count: 7 });
+  });
+  it("is absent unless the value is 1", () => {
+    expect(buildAssetWhere(parse("attention=0"), null, "IT", now).AND).toBeUndefined();
+    expect(buildAssetWhere(parse(""), null, "IT", now).AND).toBeUndefined();
   });
 });

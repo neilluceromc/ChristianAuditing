@@ -3,16 +3,17 @@ import { Prisma, type AssetClass, type AssetStatus, type Role } from "@prisma/cl
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
-  buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
+  attentionFacetOption, buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, STATUS_LABEL, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
-import { COLUMN_PREF_KEYS } from "@/lib/column-prefs";
+import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY, resolveInventoryColumns } from "@/lib/column-prefs";
+import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
 import { TAG_SHAPE } from "@/lib/tag-key";
-import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { pageOf } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
@@ -24,6 +25,8 @@ import { attentionOf, attentionWhere, orderByAttention, type Attention } from "@
 export interface AssetRow {
   id: string;
   tag: string;
+  /** Phase 45 (spec §2.3): the serial number, null when none was recorded */
+  serial: string | null;
   model: string;
   category: string;
   status: string;
@@ -110,6 +113,7 @@ const LIST_INCLUDE = {
 function toRow(a: {
   id: string;
   tag: string;
+  serial: string | null;
   model: string;
   cls: AssetClass;
   status: AssetStatus;
@@ -142,6 +146,7 @@ function toRow(a: {
   return {
     id: a.id,
     tag: a.tag,
+    serial: a.serial,
     model: a.model,
     category: a.category.name,
     status: a.status,
@@ -200,6 +205,7 @@ export async function repairStageIds(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
   cls: AssetClass,
+  now: Date = new Date(),
 ): Promise<string[] | null> {
   const stages = (state.filters.stage ?? []).filter(isRepairStage);
   if (stages.length === 0) return null;
@@ -220,7 +226,7 @@ export async function repairStageIds(
     Object.entries(state.filters).some(([key, values]) => key !== "stage" && (values?.length ?? 0) > 0);
   if (!hasOtherFilters) return kept;
 
-  const where = buildAssetWhere(state, purchaseYear, cls);
+  const where = buildAssetWhere(state, purchaseYear, cls, now);
   const candidates = await prisma.asset.findMany({ where, select: { id: true } });
   const candidateIds = new Set(candidates.map((c) => c.id));
   return kept.filter((id) => candidateIds.has(id));
@@ -261,8 +267,8 @@ export async function listAssets(
   // pages that id set through the same count/skip/take snapshot as every other view. Until this
   // phase it loaded every candidate row with its includes and paged the array in memory.
   const where: Prisma.AssetWhereInput = stages.length > 0
-    ? { id: { in: (await repairStageIds(state, purchaseYear, cls)) ?? [] } }
-    : buildAssetWhere(state, purchaseYear, cls);
+    ? { id: { in: (await repairStageIds(state, purchaseYear, cls, now)) ?? [] } }
+    : buildAssetWhere(state, purchaseYear, cls, now);
 
   // Phase 30 (plan P-10): attentionWhere agrees with attentionOf boundary for boundary, so this
   // count and the markers on the rows cannot disagree.
@@ -275,7 +281,7 @@ export async function listAssets(
   const attentionSort = primarySortOf(state.sort, "attention");
   if (attentionSort) {
     const ordered = await attentionOrdered(where, orderBy, attentionSort.dir, now);
-    const pg = pageOf(ordered.length, state.page, ENTITY_PAGE_SIZE);
+    const pg = pageOf(ordered.length, state.page, state.per);
     return {
       rows: ordered.slice(pg.skip, pg.skip + pg.take),
       total: pg.total,
@@ -286,7 +292,7 @@ export async function listAssets(
   }
 
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
-    ENTITY_PAGE_SIZE,
+    state.per,
     state.page,
     (tx) => tx.asset.count({ where }),
     (tx, pg) =>
@@ -307,14 +313,45 @@ export async function listAssets(
   };
 }
 
-/** Visible hideable columns for this user; default = all. */
+/**
+ * Visible hideable columns for this user. Phase 45 (spec §2.3): nothing saved gives the defaults (Serial number,
+ * Category, Assigned); a saved set that lacks Serial number and was saved before it existed gets it once, by the
+ * "columns:inventory:seen" marker `saveColumns` writes.
+ */
 export async function getInventoryColumns(userId: string): Promise<string[]> {
   const allowed = COLUMN_PREF_KEYS["columns:inventory"] as readonly string[];
-  const pref = await prisma.userPreference.findUnique({
-    where: { userId_key: { userId, key: "columns:inventory" } },
+  const prefs = await prisma.userPreference.findMany({
+    where: { userId, key: { in: ["columns:inventory", INVENTORY_COLUMNS_SEEN_KEY] } },
   });
-  if (!pref || !Array.isArray(pref.value)) return [...allowed];
-  return (pref.value as string[]).filter((c) => allowed.includes(c));
+  const strings = (key: string): string[] | null => {
+    const value = prefs.find((p) => p.key === key)?.value;
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : null;
+  };
+  return resolveInventoryColumns(strings("columns:inventory"), strings(INVENTORY_COLUMNS_SEEN_KEY), allowed);
+}
+
+/**
+ * Phase 45 (spec §2.1): the count on each tile, keyed by TileSpec key - what clicking that tile shows. The scope is
+ * the class, search and every facet except status and attention, so the tiles read the same whichever one is pressed.
+ */
+export async function inventoryTileCounts(
+  state: ListState,
+  purchaseYear: PurchaseYearValue | null,
+  cls: AssetClass,
+  now: Date = new Date(),
+): Promise<Record<string, number>> {
+  const base = buildAssetWhere(
+    { ...state, filters: { ...state.filters, status: [], attention: [] } }, purchaseYear, cls, now,
+  );
+  const [byStatus, attention] = await Promise.all([
+    prisma.asset.groupBy({ by: ["status"], where: base, _count: { _all: true } }),
+    prisma.asset.count({ where: { AND: [base, attentionWhere(now)] } }),
+  ]);
+  const counts: Record<string, number> = {};
+  for (const spec of TILE_SPECS[cls]) {
+    counts[spec.key] = spec.attention ? attention : (byStatus.find((g) => g.status === spec.status)?._count._all ?? 0);
+  }
+  return counts;
 }
 
 export interface FacetOption {
@@ -337,6 +374,7 @@ export async function facetOptions(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
   cls: AssetClass,
+  now: Date = new Date(),
 ): Promise<Record<string, FacetOption[]>> {
   const without = (facet: string): ListState => ({
     ...state,
@@ -361,7 +399,7 @@ export async function facetOptions(
   // Phase 36 (spec sec. 4.3): the Assigned facet no longer lists every holder - only the CHOSEN people
   // (names + counts) and Unassigned; the rest is found by searching (`searchAssignees`).
   const chosenIds = (state.filters.assignee ?? []).filter((v) => v !== UNASSIGNED);
-  const [statusG, categoryG, typeG, assigneeG, categories, types, chosen, provenanceCounts, regCounts] = await Promise.all([
+  const [statusG, categoryG, typeG, assigneeG, categories, types, chosen, provenanceCounts, regCounts, attentionCount] = await Promise.all([
     prisma.asset.groupBy({ by: ["status"], where: buildAssetWhere(without("status"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["categoryId"], where: buildAssetWhere(without("category"), purchaseYear, cls), _count: true }),
     prisma.asset.groupBy({ by: ["typeId"], where: buildAssetWhere(without("type"), purchaseYear, cls), _count: true }),
@@ -386,6 +424,8 @@ export async function facetOptions(
         prisma.asset.count({ where: { AND: [buildAssetWhere(without("reg"), purchaseYear, cls), regWhere(r)] } }),
       ),
     ),
+    // the Need attention filter is derived too: the count is what turning it on would show
+    prisma.asset.count({ where: { AND: [buildAssetWhere(without("attention"), purchaseYear, cls, now), attentionWhere(now)] } }),
   ]);
 
   return {
@@ -407,6 +447,7 @@ export async function facetOptions(
     ],
     provenance: PROVENANCES.map((p, i) => ({ value: p, label: PROVENANCE_LABEL[p], count: provenanceCounts[i] })),
     reg: REG_STATES.map((r, i) => ({ value: r, label: REG_LABEL[r], count: regCounts[i] })),
+    attention: [attentionFacetOption(attentionCount)],
   };
 }
 

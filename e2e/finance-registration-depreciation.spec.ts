@@ -6,6 +6,7 @@ import { readSheet } from "read-excel-file/node";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { asOfMonth, depStartMonth, depreciate, manilaMonth, monthLabel, resolvePolicy, type MonthIndex } from "@/lib/depreciation";
 import { fmtMoneyExact } from "@/lib/format";
+import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
 
 /**
  * Phase 35, Task 12: registration review + Finance asset register + depreciation, twelve independent cases.
@@ -37,12 +38,37 @@ const DAY = 86_400_000;
 const CATEGORY_LIFE = 36;
 const CATEGORY_SALVAGE = 10;
 
-test.beforeAll(() => {
+test.beforeAll(async () => {
   execSync("npm run db:seed", { timeout: 120_000 });
+  await chooseRegistrationColumn(IT);
 });
 test.afterAll(async () => {
   await db.$disconnect();
 });
+
+/** The two preference rows the Columns chooser writes (saveColumns): the chosen set and the columns seen then. */
+const COLUMN_KEYS = ["columns:inventory", INVENTORY_COLUMNS_SEEN_KEY];
+
+/**
+ * Phase 45 (spec §2.3): Registration is off by default now, and most cases here read IT's list through that column
+ * ("With Finance", "Needs correction", Mark corrected…). So IT starts the file having chosen it, exactly as the
+ * Columns chooser saves it: the default set plus Registration, and the seen marker. Case 12 starts from the
+ * default instead and turns it on through the chooser itself. The next spec file's reseed drops both rows.
+ */
+async function chooseRegistrationColumn(email: string) {
+  const user = await db.user.findUniqueOrThrow({ where: { email } });
+  const rows: Array<[string, string[]]> = [
+    ["columns:inventory", ["serial", "category", "assigned", "registration"]],
+    [INVENTORY_COLUMNS_SEEN_KEY, [...COLUMN_PREF_KEYS["columns:inventory"]]],
+  ];
+  for (const [key, value] of rows) {
+    await db.userPreference.upsert({
+      where: { userId_key: { userId: user.id, key } },
+      create: { userId: user.id, key, value },
+      update: { value },
+    });
+  }
+}
 
 // Copied from e2e/queues-records-ux.spec.ts — house rule: never import helpers across spec files.
 async function login(page: Page, email: string) {
@@ -526,11 +552,24 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
   test("12. axe: IT's list with Registration, the register, and the asset page with the send-back dialog open", async ({ page }) => {
     const tag = "BR-HS-0510";
     const before = await snap(tag);
+    const itUser = await db.user.findUniqueOrThrow({ where: { email: IT } });
+    const prefsBefore = await db.userPreference.findMany({ where: { userId: itUser.id, key: { in: COLUMN_KEYS } } });
     try {
       await reset(tag);
+      // Phase 45 (spec §2.3): from the default columns, Registration is off until it is chosen in Columns.
+      await db.userPreference.deleteMany({ where: { userId: itUser.id, key: { in: COLUMN_KEYS } } });
       await login(page, IT);
       await page.goto("/inventory");
-      await expect(page.getByRole("columnheader", { name: "Registration" })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "Serial number" })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "Registration" })).toHaveCount(0);
+      const columns = page.getByRole("button", { name: "Columns", exact: true });
+      await waitForHydration(columns);
+      await columns.click();
+      const chooser = page.getByRole("dialog", { name: "Choose columns" });
+      await chooser.getByRole("checkbox", { name: "Registration", exact: true }).check();
+      await chooser.getByRole("button", { name: "Apply", exact: true }).click();
+      await expect(chooser).toBeHidden({ timeout: 15_000 });
+      await expect(page.getByRole("columnheader", { name: "Registration" })).toBeVisible({ timeout: 15_000 });
       await expectNoSeriousAxe(page);
 
       await login(page, FINANCE);
@@ -545,6 +584,11 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await expect(page.getByRole("dialog", { name: `Send ${tag} back to IT` })).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
+      // Put IT's column choice back exactly as it was (the file's starting choice, with Registration).
+      await db.userPreference.deleteMany({ where: { userId: itUser.id, key: { in: COLUMN_KEYS } } });
+      for (const p of prefsBefore) {
+        await db.userPreference.create({ data: { userId: p.userId, key: p.key, value: p.value as never } });
+      }
       await restore(tag, before);
     }
   });

@@ -7,14 +7,14 @@ import {
   consumptionGrid, expiryBuckets, groupRunsByCategory, manilaDayBounds, matchesSearch, monthKey, monthsBetween,
   topSubtotals, type ConsumptionCell, type ConsumptionGrid, type ExpiryTab,
 } from "@/lib/stock-reports";
-import { LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
+import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
 import { EXPORT_CAP } from "@/lib/export-columns";
 import type { ConsumptionExportRow, ExpiryExportRow, OnHandExportRow } from "@/lib/export-columns";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import type { ExpiringStatus } from "@/server/modules/stock/queries";
 
 /** P-4: a report page's Category facet with no other filter active — the same shape `parseListState(sp, STOCK_REPORT_LIST_CONFIG)` produces, usable as a default for a standalone call (the smoke test, or a report route with no query string yet). */
-const EMPTY_LIST_STATE: ListState = { q: "", page: 1, sort: [], filters: {} };
+const EMPTY_LIST_STATE: ListState = { q: "", page: 1, per: ENTITY_PAGE_SIZE, sort: [], filters: {} };
 
 const DAY_MS = 86_400_000;
 

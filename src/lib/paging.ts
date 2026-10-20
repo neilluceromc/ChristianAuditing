@@ -6,6 +6,15 @@
 export const ENTITY_PAGE_SIZE = 25;
 export const LOG_PAGE_SIZE = 50;
 
+/** Phase 45 (spec §4.4): the rows-per-page choices on the Inventory and Employees lists; the first is the default. */
+export const PER_PAGE_OPTIONS = [25, 50, 100] as const;
+
+/** The 1-based first and last row shown on `page` ("Rows 1–25 of 900"); 0–0 for an empty list. */
+export function rowsRange(page: number, per: number, total: number): { from: number; to: number } {
+  if (total <= 0) return { from: 0, to: 0 };
+  return { from: (page - 1) * per + 1, to: Math.min(page * per, total) };
+}
+
 export interface Page { page: number; pageCount: number; skip: number; take: number; total: number }
 
 export function pageOf(total: number, requested: number, size: number): Page {

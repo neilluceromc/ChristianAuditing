@@ -46,7 +46,7 @@ describe("reservation tabs (moved from the server module)", () => {
 });
 
 describe("the /reservations list config", () => {
-  const empty = { q: "", page: 1, sort: [], filters: {} };
+  const empty = { q: "", page: 1, per: 25, sort: [], filters: {} };
   it("declares the two facets and four sort keys, expiring-first by default", () => {
     expect(HOLDS_LIST_CONFIG).toEqual({ facets: ["employee", "department"], sortable: ["expiresAt", "createdAt", "employee", "tag"], defaultSort: [{ key: "expiresAt", dir: "asc" }] });
   });

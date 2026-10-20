@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildStockItemWhere, buildStockOrderBy, STOCK_LIST_CONFIG } from "./stock-list";
 import type { ListState } from "./url-state";
 
-const st = (over: Partial<ListState> = {}): ListState => ({ q: "", page: 1, sort: STOCK_LIST_CONFIG.defaultSort, filters: {}, ...over });
+const st = (over: Partial<ListState> = {}): ListState => ({ q: "", page: 1, per: 25, sort: STOCK_LIST_CONFIG.defaultSort, filters: {}, ...over });
 
 describe("buildStockItemWhere (spec §4.1-style list rules)", () => {
   it("hides archived items by default and shows only them under archived=1", () => {

@@ -143,32 +143,27 @@ test.describe.serial("directory", () => {
     expect(bettina.name).toBe("Bettina Reyes");
   });
 
-  test("3. /employees hides an OFFBOARDED leaver by default; Show leavers and ?employment=OFFBOARDED both reveal them", async ({ page }) => {
+  test("3. /employees hides an OFFBOARDED leaver by default; the leavers link and ?employment=OFFBOARDED both reveal them", async ({ page }) => {
     await login(page, IT);
     await page.goto("/employees");
     await expect(page.getByRole("row", { name: /EMP-0093/ })).toHaveCount(0);
 
-    // I-2 (final review): "Facet counts for employment keep counting all
-    // three values" (spec §5) — the employment groupBy forces the leavers
-    // toggle on internally, so the dropdown's own OFFBOARDED count must read
-    // the real number of leavers (the seed has exactly one, EMP-0093) even
-    // while the list itself still hides them by default. Checked BEFORE the
-    // "Show leavers" click below, on the exact default state the review's
-    // scenario named — this is the one moment a stale groupBy would have
-    // read 0 instead.
-    await page.getByRole("button", { name: "Employment" }).click();
-    const employmentDialog = page.getByRole("dialog", { name: "Filter by Employment" });
-    await expect(employmentDialog).toBeVisible();
-    const offboardedOption = employmentDialog.locator("label", { hasText: "OFFBOARDED" });
-    await expect(offboardedOption).toBeVisible();
-    await expect(offboardedOption.locator("span").last()).toHaveText("1");
-    await page.keyboard.press("Escape");
-    await expect(employmentDialog).toBeHidden();
+    // I-2 (final review): the hidden-leavers count must read the real number
+    // of leavers (the seed has exactly one, EMP-0093) while the list itself
+    // still hides them by default. Phase 45 (spec §3.2): the Employment facet
+    // left the toolbar, so the count that says so is the toolbar's own
+    // "· 1 leaver hidden" link — checked BEFORE the click below, on the exact
+    // default state, the one moment a stale count would read 0 (and the link
+    // would be missing).
+    const leaversLink = page.getByRole("link", { name: "1 leaver hidden", exact: true });
+    await expect(leaversLink).toBeVisible();
+    expect(await db.employee.count({ where: { employment: "OFFBOARDED" } })).toBe(1);
 
-    await page.getByRole("link", { name: "Show leavers" }).click();
+    await leaversLink.click();
     await expect(page).toHaveURL(/leavers=1/);
     await expect(page.getByRole("row", { name: /EMP-0093/ })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("link", { name: "Hide leavers" })).toBeVisible();
+    // "· leavers shown · Hide" — Hide takes the scope back off.
+    await expect(page.getByRole("link", { name: "Hide", exact: true })).toBeVisible();
 
     await page.goto("/employees?employment=OFFBOARDED");
     await expect(page.getByRole("row", { name: /EMP-0093/ })).toBeVisible({ timeout: 15_000 });
