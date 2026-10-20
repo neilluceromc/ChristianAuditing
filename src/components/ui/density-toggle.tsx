@@ -16,8 +16,13 @@ export function setDensity(d: Density) {
   document.cookie = `br.density=${d};path=/;max-age=31536000;samesite=lax`;
 }
 
+/** The live row size (html data-density), re-rendering on every change; comfortable on the server. */
+export function useDensity(): Density {
+  return useSyncExternalStore(subscribe, getDensity, (): Density => "comfortable");
+}
+
 export function DensityToggle() {
-  const density = useSyncExternalStore(subscribe, getDensity, (): Density => "comfortable");
+  const density = useDensity();
   const toggle = useCallback(() => {
     setDensity(topbarNext(getDensity()));
   }, []);
