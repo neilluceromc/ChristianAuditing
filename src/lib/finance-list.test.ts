@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { depreciate, type DepResult, type Policy } from "./depreciation";
 import {
-  categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, parseLife, parseSort, sortFinanceRows,
-  type LifeStage,
+  categoryTiles, clearFinanceFilters, financeClassHref, financeExportHref, financeListHref, finTabs, inFin, lifeStage,
+  matchesLife, monthCharge, parseFinanceListState, parseLife, parseSort, sortFinanceRows, withFinance,
+  type FinanceListState, type LifeStage,
 } from "./finance-list";
 
 const AS_OF = 2026 * 12 + 9; // October 2026
@@ -221,5 +222,47 @@ describe("finance-state tabs", () => {
     expect(inFin({ ...a, reg: "awaiting-it" }, "awaiting-it")).toBe(true);
     expect(inFin({ ...a, reg: "needs-correction" }, "needs-correction")).toBe(true);
     expect(inFin({ ...a, reg: "needs-correction" }, "approved")).toBe(false);
+  });
+});
+
+describe("Finance list URL state (spec §3: cls, category, status, fin, q, life, sort, page, per)", () => {
+  const sp = (qs: string) => new URLSearchParams(qs);
+  const DEFAULT: FinanceListState = {
+    cls: "IT", category: null, status: null, fin: null, q: "", life: null, sort: "book", page: 1, per: 25,
+  };
+  it("parses every param, and an empty URL is IT with nothing filtered", () => {
+    expect(parseFinanceListState(sp(""))).toEqual(DEFAULT);
+    expect(parseFinanceListState(sp("cls=PURCHASING&category=c1&status=STORED&fin=no-cost&q=%20desk%20&life=full&sort=tag&page=3&per=50")))
+      .toEqual({ cls: "PURCHASING", category: "c1", status: "STORED", fin: "no-cost", q: "desk", life: "full", sort: "tag", page: 3, per: 50 });
+  });
+  it("drops what does not belong: another class's status, Waiting for IT on Purchasing, odd sizes and sorts", () => {
+    expect(parseFinanceListState(sp("cls=PURCHASING&status=DEPLOYED&fin=awaiting-it"))).toMatchObject({ status: null, fin: null });
+    expect(parseFinanceListState(sp("fin=awaiting-it&status=DEPLOYED"))).toMatchObject({ status: "DEPLOYED", fin: "awaiting-it" });
+    expect(parseFinanceListState(sp("per=7&sort=odd&life=mid&page=-2&category="))).toMatchObject({ per: 25, sort: "book", life: null, page: 1, category: null });
+    expect(parseFinanceListState(sp(`q=${"x".repeat(150)}`)).q).toHaveLength(100);
+  });
+  it("writes only what differs from the defaults, in a fixed order", () => {
+    expect(financeListHref(DEFAULT)).toBe("/finance/assets");
+    expect(financeListHref({ ...DEFAULT, cls: "PURCHASING", category: "other", status: "STORED", fin: "approved", q: "a b", life: "soon", sort: "life", page: 2, per: 100 }))
+      .toBe("/finance/assets?cls=PURCHASING&category=other&status=STORED&fin=approved&q=a+b&life=soon&sort=life&page=2&per=100");
+  });
+  it("round-trips", () => {
+    const s: FinanceListState = { ...DEFAULT, category: "c9", fin: "with-finance", q: "IT-1", life: "notstarted", sort: "tag", page: 4, per: 50 };
+    expect(parseFinanceListState(new URL(financeListHref(s), "http://x").searchParams)).toEqual(s);
+  });
+  it("withFinance changes the given params and goes back to page 1", () => {
+    const s = { ...DEFAULT, page: 5, q: "dell" };
+    expect(withFinance(s, { category: "c2" })).toEqual({ ...s, category: "c2", page: 1 });
+    expect(withFinance(s, { life: null })).toEqual({ ...s, page: 1 });
+  });
+  it("switching class clears every filter but keeps the sort and the page size", () => {
+    const s: FinanceListState = { ...DEFAULT, category: "c1", status: "SPARE", fin: "approved", q: "x", life: "full", sort: "tag", page: 3, per: 50 };
+    expect(financeClassHref(s, "PURCHASING")).toBe("/finance/assets?cls=PURCHASING&sort=tag&per=50");
+    expect(clearFinanceFilters(s)).toEqual({ ...DEFAULT, sort: "tag", per: 50 });
+  });
+  it("the export carries every filter and the sort, never the page", () => {
+    const s: FinanceListState = { ...DEFAULT, category: "other", status: "SPARE", fin: "approved", q: "x", life: "full", sort: "tag", page: 3, per: 50 };
+    expect(financeExportHref(s)).toBe("/finance/assets/export?category=other&status=SPARE&fin=approved&q=x&life=full&sort=tag");
+    expect(financeExportHref(DEFAULT)).toBe("/finance/assets/export");
   });
 });

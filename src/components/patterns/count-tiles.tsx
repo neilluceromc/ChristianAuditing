@@ -17,6 +17,10 @@ export interface TileDef {
   href: string;
   /** pressed: this tile's filter is the one applied */
   on: boolean;
+  /** an optional line under the caption, e.g. Finance's book value of the tile's assets (Phase 47) */
+  detail?: string;
+  /** the detail's fuller wording on hover, e.g. the exact amount */
+  detailTitle?: string;
 }
 
 /** The 7 px family dot; closed is hollow, as in StatusDot. */
@@ -37,8 +41,8 @@ function FamilyDot({ family }: { family: StatusFamily }) {
 /**
  * Phase 45 (spec §2.1): a row of clickable count tiles. Each is a link (through the list's shared transition)
  * marked `aria-current="true"` while its filter is on; the row is a `nav` named by `label`. From 1280 px one
- * column per tile (IT has six, Purchasing five, so no empty slot), three from 768 px, two below; every tile in a
- * row is the same height.
+ * column per tile (IT has six, Purchasing five, so no empty slot; Finance's status tiles four or five), three from
+ * 768 px, two below; every tile in a row is the same height.
  */
 export function CountTiles({ tiles, label }: { tiles: TileDef[]; label: string }) {
   return (
@@ -47,7 +51,7 @@ export function CountTiles({ tiles, label }: { tiles: TileDef[]; label: string }
       className={cn(
         "grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3",
         // whole class names, so Tailwind sees both
-        tiles.length <= 5 ? "xl:grid-cols-5" : "xl:grid-cols-6",
+        tiles.length <= 4 ? "xl:grid-cols-4" : tiles.length === 5 ? "xl:grid-cols-5" : "xl:grid-cols-6",
       )}
     >
       {tiles.map((t) => (
@@ -74,6 +78,14 @@ export function CountTiles({ tiles, label }: { tiles: TileDef[]; label: string }
             {t.count.toLocaleString("en-US")}
           </span>
           <span className="truncate text-[12px] leading-4 text-fg-muted">{t.caption}</span>
+          {t.detail && (
+            <span
+              className={cn("truncate text-[12px] font-medium leading-4 tabular-nums", t.on ? "text-accent-soft-text" : "text-fg-secondary")}
+              title={t.detailTitle}
+            >
+              {t.detail}
+            </span>
+          )}
         </NavLink>
       ))}
     </nav>

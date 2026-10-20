@@ -41,6 +41,15 @@ describe("CountTiles", () => {
     expect(row(6)).toContain("xl:grid-cols-6");
     expect(row(5)).toContain("xl:grid-cols-5");
     expect(row(5)).not.toContain("xl:grid-cols-6");
+    // Phase 47: Finance's Purchasing status tiles are four
+    expect(row(4)).toContain("xl:grid-cols-4");
+    expect(row(4)).not.toContain("xl:grid-cols-5");
+  });
+  it("shows an optional detail line (Phase 47: book value) under the caption", () => {
+    const html = renderToStaticMarkup(<CountTiles label="t" tiles={[tile({ detail: "₱1,204", detailTitle: "Book value ₱1,204.00" })]} />);
+    expect(html.indexOf("₱1,204")).toBeGreaterThan(html.indexOf("Spare, ready to assign"));
+    expect(html).toContain('title="Book value ₱1,204.00"');
+    expect(renderToStaticMarkup(<CountTiles label="t" tiles={[tile({})]} />)).not.toContain("font-medium leading-4 tabular-nums");
   });
 });
 
@@ -60,6 +69,10 @@ describe("ListTabs", () => {
     expect(html).toContain("bg-(--st-attention-bg)");
     expect(html).toContain("bg-(--st-inflight-bg)");
     expect(html).toContain("bg-accent-soft");
+  });
+  it("has a red (fault) tone too (Phase 47: Sent back)", () => {
+    const red = renderToStaticMarkup(<ListTabs label="t" tabs={[{ key: "x", label: "Sent back", count: 2, href: "/x", on: false, tone: "fault" }]} />);
+    expect(red).toContain("bg-(--st-fault-bg) text-(--st-fault-text)");
   });
 });
 

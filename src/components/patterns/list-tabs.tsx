@@ -12,13 +12,14 @@ export interface TabDef {
   href: string;
   /** selected: this tab's filter is the one applied */
   on: boolean;
-  /** colours the count badge: "attention" (e.g. Missing kit) or "inflight" (e.g. Leaving) */
-  tone?: "attention" | "inflight";
+  /** colours the count badge: "attention" (amber, e.g. Missing kit), "inflight" (e.g. Leaving) or "fault" (red, e.g. Sent back) */
+  tone?: "attention" | "inflight" | "fault";
 }
 
 const BADGE_TONE: Record<NonNullable<TabDef["tone"]> | "neutral", string> = {
   attention: "bg-(--st-attention-bg) text-(--st-attention-text)",
   inflight: "bg-(--st-inflight-bg) text-(--st-inflight-text)",
+  fault: "bg-(--st-fault-bg) text-(--st-fault-text)",
   neutral: "bg-(--st-neutral-bg) text-(--st-neutral-text)",
 };
 

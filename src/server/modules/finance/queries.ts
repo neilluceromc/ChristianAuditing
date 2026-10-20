@@ -1,10 +1,9 @@
 import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtMoneyExact } from "@/lib/format";
 import { isStatusOf } from "@/lib/asset-class";
 import { asOfMonth, monthLabel } from "@/lib/depreciation";
 import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, pageOf } from "@/lib/paging";
-import { FIN_FILTERS, finWhere, regWhere, type FinFilter } from "@/lib/registration";
+import { finWhere, regWhere, type FinFilter } from "@/lib/registration";
 import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
   categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortFinanceRows,
@@ -67,17 +66,20 @@ export interface FinanceAssetsResult {
   rows: FinanceRow[]; total: number; page: number; pageCount: number; per: number;
   /** the category filter in force: a category id with assets in the class, "other", or null (anything else reads as null) */
   category: string | null;
+  /** that category's name ("Other" for the folded tile), for the Category select and the filter chip; null for All */
+  categoryLabel: string | null;
   kpis: FinanceKpis;
   categoryTiles: CategoryTile[];
   statusTiles: Array<{ status: AssetStatus; count: number; bookC: number }>;
   /** All, then the class's finance-state tabs in order (no awaiting-it on Purchasing) */
   finCounts: Array<{ key: FinFilter | "all"; count: number }>;
-  shown: { count: number; bookC: number };
-  /** Phase 35 shape, kept for the pre-Phase-47 page: every chip (awaiting-it is 0 on Purchasing) */
-  chips: Record<FinFilter | "all", number>;
-  /** Phase 35 footer over the shown rows */
-  totals: { count: number; costed: number; cost: string; depreciation: string; book: string; asOfLabel: string };
+  /** every matching row, across pages: the toolbar's "N assets shown" and the table's totals row (capitalised rows' figures) */
+  shown: { count: number; costedCount: number; costC: number; accC: number; bookC: number };
+  /** the month "as of today" counts through, e.g. "Oct 2026" */
+  asOfLabel: string;
 }
+
+type Computed = Omit<FinanceAssetsResult, "rows" | "total" | "page" | "pageCount" | "per"> & { sorted: FinanceRow[] };
 
 /**
  * Phase 47 (spec §3): Finance's register of one class. ONE read of the class's assets (depRows) — plus, with a search,
@@ -87,10 +89,10 @@ export interface FinanceAssetsResult {
  * - status tiles: the class and category;
  * - money totals: the class, category and status (the totals footer's rule: capitalised rows' depreciation results);
  * - finance-state counts: those plus search and life (not the finance state itself);
- * - the rows, `shown` and the footer totals: every filter. Sorted (spec ruling: book value high first replaces
- *   To review first) and paged by `per`.
+ * - the rows and `shown`: every filter. Sorted (spec ruling: book value high first replaces To review first);
+ *   `financeAssets` pages them by `per`, `financeExportRows` returns them all.
  */
-export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<FinanceAssetsResult> {
+async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed> {
   const asOf = asOfMonth(now);
   const q = p.q.trim();
   const [classRows, hits] = await Promise.all([
@@ -105,6 +107,10 @@ export async function financeAssets(p: FinanceListParams, now: Date = new Date()
   const tiles = categoryTiles(tileInput, p.category ?? null, 6);
   const kept = new Set(tiles.filter((t) => t.id !== "all" && t.id !== "other").map((t) => t.id));
   const category = tiles[0].on ? null : (p.category ?? null);
+  // a folded category keeps its own name (Task 3 review: the Category select shows it by name, Other's tile is lit)
+  const categoryLabel = category === null ? null
+    : category === "other" ? "Other"
+    : (rows.find((r) => r.categoryId === category)?.category ?? null);
   const inCategory = (r: FinanceRow) => category === null || (category === "other" ? !kept.has(r.categoryId) : r.categoryId === category);
 
   const tabs = finTabs(p.cls);
@@ -137,30 +143,40 @@ export async function financeAssets(p: FinanceListParams, now: Date = new Date()
     matching.push(r);
   }
 
-  const per = p.per !== undefined && (PER_PAGE_OPTIONS as readonly number[]).includes(p.per) ? p.per : ENTITY_PAGE_SIZE;
-  const pg = pageOf(matching.length, p.page, per);
-  const sorted = sortFinanceRows(matching, p.sort ?? "book");
-  let costC = 0, accC = 0, shownBookC = 0, costed = 0;
+  const shown = { count: matching.length, costedCount: 0, costC: 0, accC: 0, bookC: 0 };
   for (const r of matching) {
     if (!r.result) continue;
-    costed++; costC += r.result.cost; accC += r.result.accumulated; shownBookC += r.result.bookValue;
+    shown.costedCount++; shown.costC += r.result.cost; shown.accC += r.result.accumulated; shown.bookC += r.result.bookValue;
   }
-  const chips = Object.fromEntries([["all", 0], ...FIN_FILTERS.map((f) => [f, 0])]) as Record<FinFilter | "all", number>;
-  for (const [k, n] of counts) chips[k] = n;
   return {
-    rows: sorted.slice(pg.skip, pg.skip + pg.take), total: pg.total, page: pg.page, pageCount: pg.pageCount, per,
-    category, kpis, categoryTiles: tiles, statusTiles,
+    sorted: sortFinanceRows(matching, p.sort ?? "book"),
+    category, categoryLabel, kpis, categoryTiles: tiles, statusTiles,
     finCounts: [...counts].map(([key, count]) => ({ key, count })),
-    shown: { count: matching.length, bookC: shownBookC },
-    chips,
-    totals: {
-      count: matching.length, costed,
-      cost: fmtMoneyExact(costC / 100),
-      depreciation: fmtMoneyExact(accC / 100),
-      book: fmtMoneyExact(shownBookC / 100),
-      asOfLabel: monthLabel(asOf),
-    },
+    shown,
+    asOfLabel: monthLabel(asOf),
   };
+}
+
+/** Phase 47 (spec §3): one page of the list, with every aggregate the page shows. */
+export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<FinanceAssetsResult> {
+  const { sorted, ...rest } = await computeFinance(p, now);
+  const per = p.per !== undefined && (PER_PAGE_OPTIONS as readonly number[]).includes(p.per) ? p.per : ENTITY_PAGE_SIZE;
+  const pg = pageOf(sorted.length, p.page, per);
+  return { rows: sorted.slice(pg.skip, pg.skip + pg.take), total: pg.total, page: pg.page, pageCount: pg.pageCount, per, ...rest };
+}
+
+/** Phase 47 (Task 3 review): the Export's rows — exactly the list's matching rows, in its order, every page. */
+export async function financeExportRows(p: FinanceListParams, now: Date = new Date()): Promise<FinanceRow[]> {
+  return (await computeFinance(p, now)).sorted;
+}
+
+/** Spec §3 item 1: each class tab's asset count (every asset of the class, as the list's All shows with no filter). */
+export async function financeClassCounts(): Promise<Record<AssetClass, number>> {
+  const [it, purchasing] = await Promise.all([
+    prisma.asset.count({ where: financeListWhere({ cls: "IT", status: null, q: "" }) }),
+    prisma.asset.count({ where: financeListWhere({ cls: "PURCHASING", status: null, q: "" }) }),
+  ]);
+  return { IT: it, PURCHASING: purchasing };
 }
 
 /**

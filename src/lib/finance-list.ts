@@ -1,6 +1,8 @@
-import type { AssetClass } from "@prisma/client";
+import type { AssetClass, AssetStatus } from "@prisma/client";
 import { depreciate, monthLabel, type DepResult, type MonthIndex } from "./depreciation";
-import { FIN_FILTERS, type FinFilter, type RegState } from "./registration";
+import { FIN_FILTERS, parseFin, type FinFilter, type RegState } from "./registration";
+import { isStatusOf, parseCls } from "./asset-class";
+import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, parsePage } from "./paging";
 
 /**
  * Phase 47 (spec §3): the pure half of Finance → Assets — life stage per row, the Life filter, the sort, the category
@@ -16,6 +18,11 @@ export function parseLife(raw: string | null | undefined): LifeFilter | null {
   return raw && (LIFE_FILTERS as readonly string[]).includes(raw) ? (raw as LifeFilter) : null;
 }
 
+/** The Life select's words (spec §3 item 5). */
+export const LIFE_LABEL: Record<LifeFilter, string> = {
+  soon: "6 months or less left", full: "Fully depreciated", notstarted: "Not depreciating yet",
+};
+
 /** The Sort select: book value high first (default); life used, most first; tag. */
 export type FinanceSort = "book" | "life" | "tag";
 export const FINANCE_SORTS: readonly FinanceSort[] = ["book", "life", "tag"];
@@ -24,6 +31,11 @@ export const DEFAULT_FINANCE_SORT: FinanceSort = "book";
 export function parseSort(raw: string | null | undefined): FinanceSort {
   return raw && (FINANCE_SORTS as readonly string[]).includes(raw) ? (raw as FinanceSort) : DEFAULT_FINANCE_SORT;
 }
+
+/** The Sort select's words (spec §3 item 5). */
+export const SORT_LABEL: Record<FinanceSort, string> = {
+  book: "Book value, high first", life: "Life used, most first", tag: "Tag",
+};
 
 /** Months left at or below which a depreciating asset reads "soon" (the Life filter's "6 months or less left"). */
 export const SOON_MONTHS = 6;
@@ -167,4 +179,79 @@ export function inFin(a: { reg: RegState; notCapitalised: boolean; costC: number
     case "no-cost": return a.costC === null;
     default: return a.reg === f;
   }
+}
+
+/**
+ * Phase 47 (spec §3, "URL state"): Finance → Assets' whole view as its URL says it — `cls`, `category`, `status`,
+ * `fin`, `q`, `life`, `sort`, `page`, `per`. Parsed once (the page and its Export both read it here, so the download
+ * is exactly the list), and written back with only what differs from the defaults, in a fixed order.
+ */
+export interface FinanceListState {
+  cls: AssetClass;
+  /** a category id, "other", or null for All; the query decides whether it names a tile of the class */
+  category: string | null;
+  status: AssetStatus | null;
+  fin: FinFilter | null;
+  q: string;
+  life: LifeFilter | null;
+  sort: FinanceSort;
+  page: number;
+  per: number;
+}
+
+export const FINANCE_ASSETS_PATH = "/finance/assets";
+
+export function parseFinanceListState(sp: URLSearchParams): FinanceListState {
+  const cls = parseCls(sp.get("cls")) ?? "IT";
+  const status = sp.get("status");
+  const fin = parseFin(sp.get("fin"));
+  const category = (sp.get("category") ?? "").trim().slice(0, 64);
+  const per = Number(sp.get("per"));
+  return {
+    cls,
+    category: category || null,
+    status: status !== null && isStatusOf(cls, status) ? status : null,
+    fin: fin && finTabs(cls).includes(fin) ? fin : null,
+    q: (sp.get("q") ?? "").trim().slice(0, 100),
+    life: parseLife(sp.get("life")),
+    sort: parseSort(sp.get("sort")),
+    page: parsePage(sp),
+    per: (PER_PAGE_OPTIONS as readonly number[]).includes(per) ? per : ENTITY_PAGE_SIZE,
+  };
+}
+
+/** The list's URL for a state: only what differs from the defaults (IT, nothing filtered, book value, page 1, 25). */
+export function financeListHref(s: FinanceListState, base: string = FINANCE_ASSETS_PATH): string {
+  const qs = new URLSearchParams();
+  if (s.cls !== "IT") qs.set("cls", s.cls);
+  if (s.category) qs.set("category", s.category);
+  if (s.status) qs.set("status", s.status);
+  if (s.fin) qs.set("fin", s.fin);
+  if (s.q) qs.set("q", s.q);
+  if (s.life) qs.set("life", s.life);
+  if (s.sort !== DEFAULT_FINANCE_SORT) qs.set("sort", s.sort);
+  if (s.page > 1) qs.set("page", String(s.page));
+  if (s.per !== ENTITY_PAGE_SIZE) qs.set("per", String(s.per));
+  const out = qs.toString();
+  return out ? `${base}?${out}` : base;
+}
+
+/** A filter change: the given params, back to page 1. */
+export function withFinance(s: FinanceListState, patch: Partial<Omit<FinanceListState, "page">>): FinanceListState {
+  return { ...s, ...patch, page: 1 };
+}
+
+/** Clear all: every filter off; the class, the sort and the page size stay. */
+export function clearFinanceFilters(s: FinanceListState): FinanceListState {
+  return { cls: s.cls, category: null, status: null, fin: null, q: "", life: null, sort: s.sort, page: 1, per: s.per };
+}
+
+/** Spec §3 item 1: switching class clears every filter. */
+export function financeClassHref(s: FinanceListState, cls: AssetClass): string {
+  return financeListHref({ ...clearFinanceFilters(s), cls });
+}
+
+/** Export: every filter and the sort of the list, every page. */
+export function financeExportHref(s: FinanceListState): string {
+  return financeListHref({ ...s, page: 1, per: ENTITY_PAGE_SIZE }, `${FINANCE_ASSETS_PATH}/export`);
 }

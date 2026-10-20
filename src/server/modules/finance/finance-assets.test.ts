@@ -37,7 +37,7 @@ vi.mock("@/server/db/client", () => ({
   prisma: { asset: { findMany: h.findMany, count: h.count }, assetCategory: { findMany: h.catFindMany } },
 }));
 
-import { financeAssets, type FinanceListParams } from "./queries";
+import { financeAssets, financeClassCounts, financeExportRows, type FinanceListParams } from "./queries";
 import { bookValueTotals } from "./depreciation-queries";
 import { asOfMonth } from "@/lib/depreciation";
 import { monthCharge } from "@/lib/finance-list";
@@ -133,9 +133,10 @@ describe("financeAssets — money totals", () => {
     expect(narrowed.kpis).toEqual(all.kpis);
     expect(narrowed.rows.map((x) => x.tag)).toEqual(["IT-0004"]);
   });
-  it("shown is the count and book value of every matching row, across pages", async () => {
+  it("shown is the count and the cost, depreciation and book value of every matching row, across pages", async () => {
     const r = await financeAssets(base({ per: 25, fin: "approved" }), NOW);
-    expect(r.shown).toEqual({ count: r.rows.length, bookC: r.rows.reduce((a, x) => a + (x.result?.bookValue ?? 0), 0) });
+    const sum = sumRows(r.rows);
+    expect(r.shown).toEqual({ count: r.rows.length, costedCount: sum.costedCount, costC: sum.costC, accC: sum.accC, bookC: sum.bookC });
     const paged = await financeAssets(base({ per: 25, page: 1 }), NOW);
     expect(paged.shown.count).toBe(13);
   });
@@ -271,5 +272,35 @@ describe("financeAssets — rows", () => {
     expect(h.catFindMany).not.toHaveBeenCalled();
     await financeAssets(base(), NOW);
     expect(h.findMany).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("financeExportRows (Task 3 review: the export is exactly the list's rows, every page)", () => {
+  it("honours category (incl. other), status, fin, q, life and sort, unpaged", async () => {
+    for (const p of [
+      base({ sort: "tag" }),
+      base({ category: "lap", status: "SPARE", sort: "life" }),
+      base({ fin: "approved", life: "full" }),
+      base({ q: "person 1", sort: "tag" }),
+      base({ cls: "PURCHASING", fin: "with-finance" }),
+    ]) {
+      const list = await financeAssets({ ...p, per: 100 }, NOW);
+      const out = await financeExportRows({ ...p, page: 7, per: 25 }, NOW);
+      expect(out.map((x) => x.id)).toEqual(list.rows.map((x) => x.id));
+    }
+    h.categories.push(...["a", "b", "c", "d"].map((x) => ({ id: x, name: `Extra ${x}`, cls: "IT", life: 36, salvage: null })));
+    h.assets.push(asset("a"), asset("a"), asset("b"), asset("c"), asset("d"));
+    h.assets.push(...Array.from({ length: 30 }, () => asset("lap")));
+    const other = await financeExportRows(base({ category: "other", sort: "tag" }), NOW);
+    expect(other.map((x) => x.categoryId)).toEqual(["b", "c", "d"]);
+    const all = await financeExportRows(base({ per: 25 }), NOW);
+    expect(all).toHaveLength(48);
+  });
+});
+
+describe("financeClassCounts (spec §3 item 1: each class tab's asset count)", () => {
+  it("counts every asset of each class", async () => {
+    h.count.mockImplementation(async ({ where }: { where: Row }) => h.assets.filter((a) => matches(a, where)).length);
+    expect(await financeClassCounts()).toEqual({ IT: 13, PURCHASING: 4 });
   });
 });
