@@ -7,7 +7,8 @@ import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { CrisOrb } from "@/components/cris/orb";
 import { cn } from "@/lib/cn";
 import { SCENES, roomBubble } from "./scenes";
-import { useReducedMotion, type RoomLoop } from "./use-room-loop";
+import { useReducedMotion } from "@/components/ui/use-reduced-motion";
+import type { RoomLoop } from "./use-room-loop";
 import { useTypewriter } from "./use-typewriter";
 
 export function RoomScene({

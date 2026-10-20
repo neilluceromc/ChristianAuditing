@@ -53,6 +53,12 @@ async function login(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
+  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
+  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
+  await expect
+    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
+    .toBe(id);
 }
 
 /**
@@ -501,7 +507,9 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await page.goto(`/finance/assets?fin=awaiting-it&q=${tag}`);
     await expect(page.getByRole("row", { name: new RegExp(tag) })).toContainText("Waiting for IT");
     await page.goto(`/finance/assets/${id}`);
-    await expect(page.getByRole("heading", { name: "Money summary" })).toBeVisible();
+    // Phase 47 (spec §4.1): the asset page's left panel, its tag the h1
+    await expect(page.getByRole("heading", { name: tag, level: 1 })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Asset summary" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
   });

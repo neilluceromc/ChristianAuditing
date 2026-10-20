@@ -11,6 +11,7 @@ import {
 import { canAttachDocuments, canManageClass } from "@/lib/asset-class";
 import { isApprover } from "@/lib/approval-access";
 import { DOCUMENT_KINDS } from "@/lib/documents";
+import { ATTACHMENT_DOC_PREFIX } from "@/lib/asset-notes";
 import { BULK_MAX } from "@/lib/inventory-list";
 import { storeUpload, validateUpload } from "@/server/uploads";
 
@@ -47,7 +48,7 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
       data: {
         assetId, kind,
         fileName: stored.fileName,
-        path: stored.relPath, checksum: stored.checksum,
+        path: stored.relPath, checksum: stored.checksum, size: stored.size,
         uploadedById: user.id,
       },
     });
@@ -87,7 +88,7 @@ export async function uploadBatchDocument(formData: FormData): Promise<ActionRes
   const created = await prisma.$transaction(async (tx) => {
     for (const a of assets) {
       const doc = await tx.assetDocument.create({
-        data: { assetId: a.id, kind, fileName: stored.fileName, path: stored.relPath, checksum: stored.checksum, uploadedById: user.id },
+        data: { assetId: a.id, kind, fileName: stored.fileName, path: stored.relPath, checksum: stored.checksum, size: stored.size, uploadedById: user.id },
       });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: a.id,
@@ -118,6 +119,8 @@ export async function markDocumentSigned(input: { docId: string }): Promise<Acti
   });
   if (!doc) return conflict("That document no longer exists.");
   if (!canManageClass(user.role, doc.asset.cls)) return forbidden();
+  // Phase 47: an attachment (spec §4.4) is not a form; it is never signed, and its row is written only by uploadAttachment
+  if (doc.kind.startsWith(ATTACHMENT_DOC_PREFIX)) return conflict("Attachments can't be signed.");
   if (doc.signed) return ok(null);
 
   await prisma.$transaction(async (tx) => {

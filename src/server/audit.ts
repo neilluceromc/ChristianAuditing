@@ -15,6 +15,10 @@ export async function writeAudit(
     entityId: string;
     action: string;
     diff?: AuditDiff;
+    /** Phase 47: where the write came from. */
+    source?: "web" | "import" | "cris" | "system";
+    /** Phase 47: the note, comment or reason that came with the action; null when the action carries none. */
+    reason?: string | null;
   },
 ): Promise<void> {
   await tx.auditEntry.create({

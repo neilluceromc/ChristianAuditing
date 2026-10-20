@@ -62,7 +62,8 @@ export async function crisPrefsFor(userId: string): Promise<CrisPrefs> {
 
 /**
  * Spec §9, "This month: {n} questions, about {$ cost}" — totals only, across everyone, since the Manila month
- * began (spec §7: admins see totals, never chats). Questions are user messages; the cost prices each reply's
+ * began (spec §7: admins see totals, never chats). Chats cleared at sign-out (Phase 47) still count: their messages
+ * are kept, and nothing here filters on `clearedAt`. Questions are user messages; the cost prices each reply's
  * stored tokens at the model that served it. Two aggregate queries, so the page never grows with the data.
  * Admin-only: the caller (Settings › Cris) shows it only to admins.
  */

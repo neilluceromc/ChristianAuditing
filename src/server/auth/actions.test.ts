@@ -9,6 +9,14 @@ const h = vi.hoisted(() => ({
   userCreate: vi.fn(),
   auditCreate: vi.fn(),
   signIn: vi.fn(),
+  signOut: vi.fn(),
+  auth: vi.fn(),
+  requireUser: vi.fn(),
+  calls: [] as string[],
+  convUpdateMany: vi.fn(),
+  pendingDeleteMany: vi.fn(),
+  saveUiPref: vi.fn(),
+  cookieSet: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -16,10 +24,11 @@ vi.mock("next/navigation", () => ({
     throw new Error(`REDIRECT:${to}`);
   },
 }));
-vi.mock("next/headers", () => ({ cookies: async () => ({}) }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ set: h.cookieSet }) }));
 vi.mock("next-auth", () => ({ AuthError: class AuthError extends Error {} }));
-vi.mock("./index", () => ({ signIn: h.signIn, signOut: vi.fn() }));
-vi.mock("./guards", () => ({ requireUser: vi.fn() }));
+vi.mock("./index", () => ({ signIn: h.signIn, signOut: h.signOut, auth: h.auth }));
+vi.mock("./guards", () => ({ requireUser: h.requireUser }));
+vi.mock("@/server/ui-prefs", () => ({ saveUiPref: h.saveUiPref }));
 vi.mock("../db/client", () => ({
   prisma: {
     featureFlag: { findUnique: async () => null },
@@ -28,10 +37,13 @@ vi.mock("../db/client", () => ({
       create: h.userCreate,
     },
     auditEntry: { create: h.auditCreate },
+    crisConversation: { updateMany: h.convUpdateMany },
+    crisPendingAction: { deleteMany: h.pendingDeleteMany },
+    $transaction: async (ops: Array<Promise<unknown>>) => Promise.all(ops),
   },
 }));
 
-import { signUp } from "./actions";
+import { signOutAction, signUp, switchWorkspace } from "./actions";
 
 function form(): FormData {
   const f = new FormData();
@@ -102,5 +114,77 @@ describe("signUp when SIGNUP_REQUIRES_APPROVAL is unset or not 1", () => {
     expect(h.userCreate.mock.calls[0][0].data).not.toHaveProperty("disabled");
     expect(h.signIn).toHaveBeenCalledTimes(1);
     expect(r).toEqual({ created: true });
+  });
+});
+
+describe("signOutAction (Phase 47 spec §5.5, Review Focus #5: Cris chats cleared, TEMPORARY)", () => {
+  beforeEach(() => {
+    h.calls = [];
+    h.auth.mockReset().mockResolvedValue({ user: { id: "u1", role: "it_staff" } });
+    h.convUpdateMany.mockReset().mockImplementation(async () => { h.calls.push("clear"); return { count: 2 }; });
+    h.pendingDeleteMany.mockReset().mockImplementation(async () => { h.calls.push("pending"); return { count: 1 }; });
+    h.signOut.mockReset().mockImplementation(async () => { h.calls.push("signOut"); });
+  });
+
+  it("soft-clears the person's uncleared chats (rows kept for the usage counts), then signs out", async () => {
+    const before = Date.now();
+    await signOutAction();
+    expect(h.convUpdateMany).toHaveBeenCalledTimes(1);
+    const { where, data } = h.convUpdateMany.mock.calls[0][0];
+    expect(where).toEqual({ userId: "u1", clearedAt: null });
+    expect(data.clearedAt).toBeInstanceOf(Date);
+    expect(data.clearedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(Object.keys(data)).toEqual(["clearedAt"]);
+    expect(h.signOut).toHaveBeenCalledWith({ redirectTo: "/login" });
+    expect(h.calls.at(-1)).toBe("signOut");
+  });
+
+  it("deletes the person's pending Cris actions by userId (no foreign key)", async () => {
+    await signOutAction();
+    expect(h.pendingDeleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
+    expect(h.calls).toEqual(expect.arrayContaining(["clear", "pending"]));
+  });
+
+  it("still signs out with no session, or when the clear fails", async () => {
+    h.auth.mockResolvedValue(null);
+    await signOutAction();
+    expect(h.convUpdateMany).not.toHaveBeenCalled();
+    expect(h.signOut).toHaveBeenCalledTimes(1);
+
+    h.auth.mockResolvedValue({ user: { id: "u1", role: "it_staff" } });
+    h.convUpdateMany.mockRejectedValue(new Error("db down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await signOutAction();
+    expect(h.signOut).toHaveBeenCalledTimes(2);
+    err.mockRestore();
+  });
+});
+
+describe("switchWorkspace (Phase 47 spec §5.4: the workspace follows the person)", () => {
+  beforeEach(() => {
+    h.requireUser.mockReset().mockResolvedValue({ id: "u1", role: "admin" });
+    h.saveUiPref.mockReset().mockResolvedValue(null);
+    h.cookieSet.mockReset();
+  });
+
+  it("saves the choice to the person's prefs as well as the br.dept cookie", async () => {
+    await expect(switchWorkspace("finance")).rejects.toThrow("REDIRECT:/finance/assets");
+    expect(h.saveUiPref).toHaveBeenCalledWith({ workspace: "finance" });
+    expect(h.cookieSet).toHaveBeenCalledWith("br.dept", "finance", expect.objectContaining({ path: "/" }));
+  });
+
+  it("still switches when saving the preference fails", async () => {
+    h.saveUiPref.mockRejectedValue(new Error("db down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(switchWorkspace("finance")).rejects.toThrow("REDIRECT:/finance/assets");
+    expect(h.cookieSet).toHaveBeenCalledWith("br.dept", "finance", expect.objectContaining({ path: "/" }));
+    expect(err).toHaveBeenCalledTimes(1);
+    err.mockRestore();
+  });
+
+  it("saves nothing for a workspace the role can't open", async () => {
+    h.requireUser.mockResolvedValue({ id: "u1", role: "it_staff" });
+    await expect(switchWorkspace("finance")).rejects.toThrow("REDIRECT:/inventory");
+    expect(h.saveUiPref).not.toHaveBeenCalled();
   });
 });

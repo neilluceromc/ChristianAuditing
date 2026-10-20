@@ -26,4 +26,8 @@ describe("exportFilename", () => {
     const name = exportFilename("farewell EMP/0042;x", new Date("2026-08-21T00:00:00Z"));
     expect(name).toBe("farewellEMP0042x-2026-08-21.xlsx");
   });
+
+  it("a CSV download gets .csv, with the same prefix rule", () => {
+    expect(exportFilename('asset-IT"0001-history', new Date("2026-08-21T00:00:00Z"), "csv")).toBe("asset-IT0001-history-2026-08-21.csv");
+  });
 });

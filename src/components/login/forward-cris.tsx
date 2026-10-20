@@ -10,7 +10,7 @@ import { CrisOrb } from "@/components/cris/orb";
 import { cn } from "@/lib/cn";
 import type { CrisMood } from "@/lib/cris-mood";
 import { bubbleMaxWidth, focusBubble, type FocusLayout, type FocusPoint } from "./focus-layout";
-import { useReducedMotion } from "./use-room-loop";
+import { useReducedMotion } from "@/components/ui/use-reduced-motion";
 import { useTypewriter } from "./use-typewriter";
 
 /** The forward Cris types a little faster than the room Cris (34). */

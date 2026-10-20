@@ -34,8 +34,9 @@ const menuItems = (current: WorkspaceId, allowed: WorkspaceId[], meta: Workspace
  * accent dot and the label. One workspace: plain text, not a control. Several: a button opening the workspace
  * menu (✓ on the current one); its name keeps "{n} workspaces" for `auth-shell.spec`.
  *
- * Phase 46 spec §4.1: in the icon rail there is no room for the tag, so `variant="logo"` makes the BR mark itself
+ * Phase 46 spec §4.1: in the icon rail there is no room for the tag, so `variant="logo"` makes the brand mark itself
  * the switch (same name, same menu), with the accent dot on its corner; for one workspace it is the plain mark.
+ * Phase 47 spec §5.3: that mark is now the compact "CRIS" text (the BR logo is gone from the shell).
  */
 export function WorkspaceTag({
   current,
@@ -56,7 +57,7 @@ export function WorkspaceTag({
       <span className="truncate">{label}</span>
     </>
   );
-  // Narrow on purpose: "Purchasing" has to fit beside the logo and "Backroom IT" in a 236 px panel.
+  // Narrow on purpose: "Purchasing" has to fit beside "CRIS" in a 236 px panel.
   const shape = "flex min-w-0 items-center gap-1 rounded-(--radius-ctl) px-1 py-0.5 text-[11px] font-medium";
 
   if (allowed.length === 1) return <span className={cn(shape, "text-fg-secondary")}>{tag}</span>;
@@ -80,12 +81,12 @@ export function WorkspaceTag({
   );
 }
 
-/** The BR mark, as the sidebar's brand row draws it. */
-const MARK = "grid size-6 shrink-0 place-items-center rounded-[5px] bg-fg font-mono text-[11px] font-bold text-canvas";
+/** The rail's brand mark: the app name, compact. */
+const MARK = "shrink-0 text-[11px] font-bold leading-none tracking-[0.02em] text-fg";
 
 function LogoSwitch({ current, allowed, meta }: { current: WorkspaceId; allowed: WorkspaceId[]; meta: WorkspaceMeta }) {
   const label = meta[current].label;
-  if (allowed.length === 1) return <span className={MARK}>BR</span>;
+  if (allowed.length === 1) return <span className={MARK}>CRIS</span>;
   return (
     <Menu
       align="start"
@@ -95,9 +96,9 @@ function LogoSwitch({ current, allowed, meta }: { current: WorkspaceId; allowed:
           type="button"
           aria-label={`Switch workspace — ${label}, ${workspaceCountLabel(allowed.length)}`}
           title={`${label} workspace`}
-          className="relative grid size-9 place-items-center rounded-(--radius-ctl) hover:bg-surface-subtle"
+          className="relative grid h-9 w-11 place-items-center rounded-(--radius-ctl) hover:bg-surface-subtle"
         >
-          <span aria-hidden className={MARK}>BR</span>
+          <span aria-hidden className={MARK}>CRIS</span>
           <span aria-hidden className="absolute bottom-1 right-1 size-[6px] rounded-full bg-accent ring-2 ring-surface" />
         </button>
       )}

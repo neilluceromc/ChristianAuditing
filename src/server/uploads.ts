@@ -1,22 +1,11 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { checkUploadMeta, UPLOAD_TYPES } from "@/lib/upload-meta";
 import { writeObject } from "./storage";
 
-// Decimal 4 MB, just under the 4 MiB server-action body limit (next.config.ts), so the multipart
-// boundaries and form fields around a maximum-size file still fit.
-export const UPLOAD_MAX_BYTES = 4_000_000;
-export const UPLOAD_TYPES: Record<string, string> = {
-  ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-};
-
-/** Pure: the same three refusals uploadDocument has always made, in one place. */
-export function checkUploadMeta(meta: { name: string; type: string; size: number }): string | null {
-  if (meta.size === 0) return "Pick a file first";
-  if (meta.size > UPLOAD_MAX_BYTES) return "Too big — the cap is 4 MB";
-  const ext = path.extname(meta.name).toLowerCase();
-  if (!UPLOAD_TYPES[ext] || (meta.type && meta.type !== UPLOAD_TYPES[ext])) return "That type isn't allowed. Accepted: PDF, PNG, JPG.";
-  return null;
-}
+// The limits and the pure meta check live in src/lib (client-safe, so the browser pre-checks with the same rules);
+// re-exported here so server callers are unchanged.
+export { checkUploadMeta, UPLOAD_MAX_BYTES, UPLOAD_TYPES } from "@/lib/upload-meta";
 
 export function validateUpload(value: unknown): { ok: true; file: File } | { ok: false; error: string } {
   if (!(value instanceof File)) return { ok: false, error: "Pick a file first" };
@@ -30,18 +19,18 @@ export function validateUpload(value: unknown): { ok: true; file: File } | { ok:
  * CR/LF (header injection). Emit the RFC 6266 pair instead: an ASCII-safe
  * `filename` fallback plus a `filename*` carrying the real name.
  */
-export function contentDisposition(fileName: string): string {
+export function contentDisposition(fileName: string, disposition: "attachment" | "inline" = "attachment"): string {
   const ascii = fileName.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "");
   const encoded = encodeURIComponent(fileName.replace(/[\r\n\0]/g, ""));
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 /** Writes under uploads/<relDir>/<timestamp>-<safeName>; returns the relative posix path the row stores. */
-export async function storeUpload(relDir: string, file: File): Promise<{ relPath: string; checksum: string; fileName: string }> {
+export async function storeUpload(relDir: string, file: File): Promise<{ relPath: string; checksum: string; fileName: string; size: number }> {
   const bytes = Buffer.from(await file.arrayBuffer());
   const checksum = createHash("sha256").update(bytes).digest("hex");
   const safeName = path.basename(file.name).replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
   const relPath = path.posix.join(relDir, `${Date.now()}-${safeName}`);
   await writeObject(relPath, bytes, UPLOAD_TYPES[path.extname(safeName).toLowerCase()] ?? "application/octet-stream");
-  return { relPath, checksum, fileName: path.basename(file.name) };
+  return { relPath, checksum, fileName: path.basename(file.name), size: bytes.length };
 }

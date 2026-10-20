@@ -46,6 +46,11 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
+// Phase 47 (spec §5.4): settings follow the person — a collapse saved by one case (UserPreference ui:prefs) would be
+// restored on the next case's sign-in, so every case starts from each person's defaults.
+test.beforeEach(async () => {
+  await db.userPreference.deleteMany({ where: { key: "ui:prefs" } });
+});
 
 // Copied from e2e/phase-42-sidebar.spec.ts — house rule: never import helpers across spec files.
 async function login(page: Page, email: string) {
@@ -57,6 +62,12 @@ async function login(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
+  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
+  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
+  await expect
+    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
+    .toBe(id);
 }
 async function waitForHydration(target: Locator) {
   const el = target.first();
@@ -147,8 +158,8 @@ async function pageCount(page: Page): Promise<number> {
       // the active tab reads "Expiring (N)"
       return read(main.getByRole("navigation", { name: "Expiry status" }).locator('[aria-current="page"]'), /\(([\d,]+)\)$/);
     case "/finance/assets":
-      // the footer: "N assets · N with a cost · … at cost · …" — the whole filter's totals
-      return read(main.getByText(/^\d[\d,]* assets? · \d[\d,]* with a cost/), /^([\d,]+) assets? · /);
+      // Phase 47 (spec §3 item 5): the toolbar's "N assets shown · ₱… book value" — the whole filter, every page
+      return read(page.locator('p[aria-live="polite"]').filter({ hasText: /\d[\d,]* assets? shown\b/ }), /^([\d,]+) assets? shown\b/);
     case "/admin/webhooks/deliveries":
       return read(main.getByText(/· \d[\d,]* attempts$/), /· ([\d,]+) attempts$/, main.getByText("Nothing in this tab", { exact: true }));
     case "/admin/users":

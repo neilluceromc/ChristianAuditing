@@ -17,6 +17,8 @@ import { WorkspaceTag } from "./workspace-switcher";
  * Phase 46 spec §4.1: the panel collapses to a 72 px icon rail. Its width keys off the shell's `data-sidebar`
  * (SidebarShell, set from the `br.sidebar` cookie on the server); the brand row and the nav swap to their rail
  * forms, the account row keeps only the avatar and its menu, and "Collapse sidebar" sits above the account row.
+ * Phase 47 spec §5.1 / §5.3: the panel's width animates between the two (the `sidebar-panel` hook, globals.css, while
+ * the shell carries `data-sidebar-anim`), and the brand reads "CRIS" with no BR mark.
  * The column (sticky, so its own stacking context) keeps Phase 45's z-scale, under the Cris dock (z-30) and the
  * floating bulk bar (z-20), and is raised to z-40 only while a rail item is hovered or holds the focus, i.e. while
  * its flyout shows, so the flyout paints over the page's sticky list chrome (z-30).
@@ -44,14 +46,11 @@ export function Sidebar({
 }) {
   return (
     <aside aria-label="Primary" className={ASIDE}>
-      <div className="flex w-[236px] flex-col rounded-[14px] border border-border bg-surface group-data-[sidebar=rail]/shell:w-[72px]">
+      <div className="sidebar-panel flex w-[236px] flex-col rounded-[14px] border border-border bg-surface group-data-[sidebar=rail]/shell:w-[72px]">
         <SidebarVariant
           full={
             <div className="flex items-center gap-2 px-3 pb-2 pt-4">
-              <span className="grid size-6 shrink-0 place-items-center rounded-[5px] bg-fg font-mono text-[11px] font-bold text-canvas">
-                BR
-              </span>
-              <span className="shrink-0 text-[13px] font-semibold text-fg">Backroom IT</span>
+              <span className="shrink-0 text-[13px] font-semibold text-fg">CRIS</span>
               <span className="ml-auto flex min-w-0 justify-end">
                 <WorkspaceTag current={ws} allowed={allowed} meta={WORKSPACE_META} />
               </span>
@@ -70,7 +69,7 @@ export function Sidebar({
           <SidebarCollapseButton />
         </div>
         <div className="flex items-center gap-2.5 border-t border-border-faint px-4 py-3 group-data-[sidebar=rail]/shell:flex-col group-data-[sidebar=rail]/shell:gap-1 group-data-[sidebar=rail]/shell:px-0">
-          <Avatar name={user.name} size="lg" />
+          <Avatar name={user.name} size="lg" className="sidebar-keep" />
           <div className="min-w-0 flex-1 group-data-[sidebar=rail]/shell:sr-only">
             <p className="truncate text-xs font-medium text-fg">{user.name}</p>
             <p className="font-mono text-[9.5px] uppercase text-fg-muted">{user.role}</p>

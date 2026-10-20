@@ -6,7 +6,7 @@
 // the station animations restart) and the camera transform on the world, and the wall clock's hands. Everything
 // the components render (scene index, mood, line, travel state, the day-log clock) is React state. The only
 // per-frame work is the clock count during a travel (spec §9).
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { CrisMood } from "@/lib/cris-mood";
 import { DWELL_MS, SCENES, cameraX, clockAt, travelSeconds } from "./scenes";
 import { WORLD_H } from "./world";
@@ -51,20 +51,6 @@ export type RoomLoop = LoopState & {
   sceneRef: RefObject<HTMLDivElement | null>;
   worldRef: RefObject<HTMLDivElement | null>;
 };
-
-const reducedQuery = "(prefers-reduced-motion: reduce)";
-function subscribeReduced(cb: () => void) {
-  const m = window.matchMedia(reducedQuery);
-  m.addEventListener("change", cb);
-  return () => m.removeEventListener("change", cb);
-}
-const readReduced = () => window.matchMedia(reducedQuery).matches;
-const no = () => false;
-
-/** The person's reduced-motion setting (false on the server and during hydration). */
-export function useReducedMotion(): boolean {
-  return useSyncExternalStore(subscribeReduced, readReduced, no);
-}
 
 const wrap = (m: number) => ((m % 1440) + 1440) % 1440;
 const RESIZE_DEBOUNCE_MS = 80;

@@ -118,11 +118,3 @@ export function finWhere(f: FinFilter): Prisma.AssetWhereInput {
     default: return regWhere(f);
   }
 }
-
-/** Plan P-10: one page of `firstCount` rows of group A followed by group B, as two (skip, take) windows. */
-export function pageAcross(firstCount: number, skip: number, take: number) {
-  const firstSkip = Math.min(skip, firstCount);
-  const firstTake = Math.max(0, Math.min(take, firstCount - skip));
-  const restSkip = Math.max(0, skip - firstCount);
-  return { first: { skip: firstTake ? firstSkip : 0, take: firstTake }, rest: { skip: restSkip, take: take - firstTake } };
-}

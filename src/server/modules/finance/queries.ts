@@ -1,20 +1,27 @@
 import { Prisma, type AssetClass, type AssetStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtMoneyExact } from "@/lib/format";
-import { isStatusOf } from "@/lib/asset-class";
-import { monthLabel } from "@/lib/depreciation";
-import { ENTITY_PAGE_SIZE, pageOf } from "@/lib/paging";
-import { FIN_FILTERS, finWhere, pageAcross, regWhere, type FinFilter } from "@/lib/registration";
-import { CAPITALISED, bookValueTotals, depRows, type DepAssetRow } from "./depreciation-queries";
+import { asOfMonth, monthLabel } from "@/lib/depreciation";
+import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, pageOf } from "@/lib/paging";
+import { finWhere, regWhere, type FinFilter } from "@/lib/registration";
+import { TILE_SPECS } from "@/lib/inventory-tiles";
+import {
+  categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortFinanceRows,
+  type CategoryTile, type FinanceSort, type LifeFilter, type LifeStage,
+} from "@/lib/finance-list";
+import { depRows, type DepAssetRow } from "./depreciation-queries";
 
-export function parseAssetStatus(raw: string | null | undefined, cls: AssetClass): AssetStatus | null {
-  return raw != null && isStatusOf(cls, raw) ? raw : null;
+export interface FinanceListParams {
+  cls: AssetClass; status: AssetStatus | null; fin: FinFilter | null; q: string; page: number;
+  /** Phase 47 (spec §3): `?category=` — a category id of the class, or "other" (every category not on its own tile) */
+  category?: string | null;
+  life?: LifeFilter | null;
+  sort?: FinanceSort;
+  /** rows per page, one of PER_PAGE_OPTIONS; anything else is the default */
+  per?: number;
 }
 
-export interface FinanceListParams { cls: AssetClass; status: AssetStatus | null; fin: FinFilter | null; q: string; page: number }
-
 /** Phase 35 (spec 4.1): every asset of the class — no cost filter and no IT gate. */
-export function financeListWhere(p: Omit<FinanceListParams, "page" | "fin">): Prisma.AssetWhereInput {
+export function financeListWhere(p: Pick<FinanceListParams, "cls" | "status" | "q">): Prisma.AssetWhereInput {
   const q = p.q.trim();
   return {
     cls: p.cls,
@@ -32,64 +39,138 @@ export function financeListWhere(p: Omit<FinanceListParams, "page" | "fin">): Pr
 
 /**
  * Phase 46: `/finance/assets?fin=<f>` (with `cls=PURCHASING` for that class) and nothing else filtered — the page's own
- * registration-chip count for that filter (financeAssets counts `AND [financeListWhere, finWhere(f)]`). The Finance
+ * registration-chip count for that filter (financeAssets counts the same rows in memory with `inFin`, which mirrors finWhere). The Finance
  * overview's To confirm tile, its snapshot and the sidebar's To confirm views all count this where.
  */
 export function financeViewWhere(cls: AssetClass, fin: FinFilter): Prisma.AssetWhereInput {
   return { AND: [financeListWhere({ cls, status: null, q: "" }), finWhere(fin)] };
 }
 
-const BY_COST: Prisma.AssetOrderByWithRelationInput[] = [{ cost: { sort: "desc", nulls: "last" } }, { tag: "asc" }, { id: "asc" }];
-const BY_AGE: Prisma.AssetOrderByWithRelationInput[] = [{ createdAt: "asc" }, { id: "asc" }];
+export type FinanceRow = DepAssetRow & { lifeStage: LifeStage };
 
 /**
- * Phase 35 (spec 4.1): Finance's register of every asset of a class, with the registration chips, a page of
- * rows (To review first on All, plan P-10) and totals over EVERY matching capitalised row (plan P-4).
- * Status is shown on every row, and can also be filtered (the optional status filter); Finance cares that a P55,000 laptop currently reads DEFECTIVE.
+ * Spec §3 item 2: the four money cards. Cost, accumulated and book value follow the totals footer's rule (capitalised
+ * rows); `costedCount` is how many assets those cover ("N assets with a cost"), `count` every asset in scope.
  */
-export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<{
-  rows: DepAssetRow[]; total: number; page: number; pageCount: number;
-  chips: Record<FinFilter | "all", number>;
-  totals: { count: number; costed: number; cost: string; depreciation: string; book: string; asOfLabel: string };
-}> {
-  const where = financeListWhere(p);
-  const scoped: Prisma.AssetWhereInput = p.fin ? { AND: [where, finWhere(p.fin)] } : where;
-  const [all, ...counts] = await Promise.all([
-    prisma.asset.count({ where }),
-    ...FIN_FILTERS.map((f) => prisma.asset.count({ where: { AND: [where, finWhere(f)] } })),
-  ]);
-  const chips = { all } as Record<FinFilter | "all", number>;
-  FIN_FILTERS.forEach((f, i) => { chips[f] = counts[i]; });
+export interface FinanceKpis {
+  costC: number; accC: number; bookC: number; monthC: number;
+  count: number; costedCount: number; depreciatingCount: number;
+}
 
-  const total = p.fin ? chips[p.fin] : all;
-  const pg = pageOf(total, p.page, ENTITY_PAGE_SIZE);
-  let rows: DepAssetRow[];
-  if (p.fin) {
-    rows = await depRows(scoped, now, { orderBy: BY_COST, skip: pg.skip, take: pg.take });
-  } else {
-    const w = pageAcross(chips["with-finance"], pg.skip, pg.take);
-    const review = finWhere("with-finance");
-    const [first, rest] = await Promise.all([
-      w.first.take ? depRows({ AND: [where, review] }, now, { orderBy: BY_AGE, ...w.first }) : Promise.resolve([]),
-      w.rest.take ? depRows({ AND: [where, { NOT: review }] }, now, { orderBy: BY_COST, ...w.rest }) : Promise.resolve([]),
-    ]);
-    rows = [...first, ...rest];
+export interface FinanceAssetsResult {
+  rows: FinanceRow[]; total: number; page: number; pageCount: number; per: number;
+  /** the category filter in force: a category id with assets in the class, "other", or null (anything else reads as null) */
+  category: string | null;
+  /** that category's name ("Other" for the folded tile), for the Category select and the filter chip; null for All */
+  categoryLabel: string | null;
+  kpis: FinanceKpis;
+  categoryTiles: CategoryTile[];
+  statusTiles: Array<{ status: AssetStatus; count: number; bookC: number }>;
+  /** All, then the class's finance-state tabs in order (no awaiting-it on Purchasing) */
+  finCounts: Array<{ key: FinFilter | "all"; count: number }>;
+  /** every matching row, across pages: the toolbar's "N assets shown" and the table's totals row (capitalised rows' figures) */
+  shown: { count: number; costedCount: number; costC: number; accC: number; bookC: number };
+  /** the month "as of today" counts through, e.g. "Oct 2026" */
+  asOfLabel: string;
+}
+
+type Computed = Omit<FinanceAssetsResult, "rows" | "total" | "page" | "pageCount" | "per"> & { sorted: FinanceRow[] };
+
+/**
+ * Phase 47 (spec §3): Finance's register of one class. ONE read of the class's assets (depRows) — plus, with a search,
+ * one id-only read so the search stays SQL's — the category tiles computed once, and every other aggregate in one
+ * in-memory pass:
+ * - category tiles: the class (folded to whole rows; "other" means every category not on its own tile);
+ * - status tiles: the class and category;
+ * - money totals: the class, category and status (the totals footer's rule: capitalised rows' depreciation results);
+ * - finance-state counts: those plus search and life (not the finance state itself);
+ * - the rows and `shown`: every filter. Sorted (spec ruling: book value high first replaces To review first);
+ *   `financeAssets` pages them by `per`, `financeExportRows` returns them all.
+ */
+async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed> {
+  const asOf = asOfMonth(now);
+  const q = p.q.trim();
+  const [classRows, hits] = await Promise.all([
+    depRows({ cls: p.cls }, now),
+    q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: { id: true } }) : null,
+  ]);
+  const rows: FinanceRow[] = classRows.map((r) => ({ ...r, lifeStage: lifeStage(r.result, r.reg, r.notCapitalised, r.costC, r.category) }));
+  const found = hits ? new Set(hits.map((h) => h.id)) : null;
+
+  const tileInput = rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.category, costC: r.result?.cost ?? null, bookC: r.result?.bookValue ?? null }));
+  // categoryTiles validates the selection: All is lit for an unknown id, or for "other" when nothing folds.
+  const tiles = categoryTiles(tileInput, p.category ?? null, 6);
+  const kept = new Set(tiles.filter((t) => t.id !== "all" && t.id !== "other").map((t) => t.id));
+  const category = tiles[0].on ? null : (p.category ?? null);
+  // a folded category keeps its own name (Task 3 review: the Category select shows it by name, Other's tile is lit)
+  const categoryLabel = category === null ? null
+    : category === "other" ? "Other"
+    : (rows.find((r) => r.categoryId === category)?.category ?? null);
+  const inCategory = (r: FinanceRow) => category === null || (category === "other" ? !kept.has(r.categoryId) : r.categoryId === category);
+
+  const tabs = finTabs(p.cls);
+  const fin = p.fin && tabs.includes(p.fin) ? p.fin : null;
+  const life = p.life ?? null;
+  const kpis: FinanceKpis = { costC: 0, accC: 0, bookC: 0, monthC: 0, count: 0, costedCount: 0, depreciatingCount: 0 };
+  const statusTiles = TILE_SPECS[p.cls].flatMap((s) => (s.status ? [{ status: s.status as AssetStatus, count: 0, bookC: 0 }] : []));
+  const byStatus = new Map(statusTiles.map((t) => [t.status, t]));
+  const counts = new Map<FinFilter | "all", number>([["all", 0], ...tabs.map((f): [FinFilter, number] => [f, 0])]);
+  const matching: FinanceRow[] = [];
+  for (const r of rows) {
+    if (!inCategory(r)) continue;
+    const bookC = r.result?.bookValue ?? 0;
+    const tile = byStatus.get(r.status);
+    if (tile) { tile.count++; tile.bookC += bookC; }
+    if (p.status && r.status !== p.status) continue;
+    kpis.count++;
+    if (r.result) {
+      kpis.costedCount++;
+      kpis.costC += r.result.cost;
+      kpis.accC += r.result.accumulated;
+      kpis.bookC += bookC;
+      const charge = monthCharge(r.result, asOf);
+      if (charge > 0) { kpis.monthC += charge; kpis.depreciatingCount++; }
+    }
+    if ((found && !found.has(r.id)) || !matchesLife(r, life)) continue;
+    counts.set("all", counts.get("all")! + 1);
+    for (const f of tabs) if (inFin(r, f)) counts.set(f, counts.get(f)! + 1);
+    if (fin && !inFin(r, fin)) continue;
+    matching.push(r);
   }
 
-  const [sums, costed] = await Promise.all([
-    bookValueTotals(scoped, now),
-    prisma.asset.count({ where: { AND: [scoped, CAPITALISED] } }),
-  ]);
+  const shown = { count: matching.length, costedCount: 0, costC: 0, accC: 0, bookC: 0 };
+  for (const r of matching) {
+    if (!r.result) continue;
+    shown.costedCount++; shown.costC += r.result.cost; shown.accC += r.result.accumulated; shown.bookC += r.result.bookValue;
+  }
   return {
-    rows, total: pg.total, page: pg.page, pageCount: pg.pageCount, chips,
-    totals: {
-      count: total, costed,
-      cost: fmtMoneyExact(sums.costC / 100),
-      depreciation: fmtMoneyExact(sums.accumulatedC / 100),
-      book: fmtMoneyExact(sums.bookC / 100),
-      asOfLabel: monthLabel(sums.asOf),
-    },
+    sorted: sortFinanceRows(matching, p.sort ?? "book"),
+    category, categoryLabel, kpis, categoryTiles: tiles, statusTiles,
+    finCounts: [...counts].map(([key, count]) => ({ key, count })),
+    shown,
+    asOfLabel: monthLabel(asOf),
   };
+}
+
+/** Phase 47 (spec §3): one page of the list, with every aggregate the page shows. */
+export async function financeAssets(p: FinanceListParams, now: Date = new Date()): Promise<FinanceAssetsResult> {
+  const { sorted, ...rest } = await computeFinance(p, now);
+  const per = p.per !== undefined && (PER_PAGE_OPTIONS as readonly number[]).includes(p.per) ? p.per : ENTITY_PAGE_SIZE;
+  const pg = pageOf(sorted.length, p.page, per);
+  return { rows: sorted.slice(pg.skip, pg.skip + pg.take), total: pg.total, page: pg.page, pageCount: pg.pageCount, per, ...rest };
+}
+
+/** Phase 47 (Task 3 review): the Export's rows — exactly the list's matching rows, in its order, every page. */
+export async function financeExportRows(p: FinanceListParams, now: Date = new Date()): Promise<FinanceRow[]> {
+  return (await computeFinance(p, now)).sorted;
+}
+
+/**
+ * Spec §3 item 1: one class tab's asset count (every asset of the class, as the list's All shows with no filter). The
+ * page counts only the class it is not showing: the shown class's count is its All categories tile.
+ */
+export async function financeClassCount(cls: AssetClass): Promise<number> {
+  return prisma.asset.count({ where: financeListWhere({ cls, status: null, q: "" }) });
 }
 
 /**

@@ -13,6 +13,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("status=SPARE"),
 }));
 vi.mock("@/server/auth/actions", () => ({ switchWorkspace: vi.fn(), signOutAction: vi.fn() }));
+vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn(async () => null) }));
 
 const user = { id: "u1", name: "Jo Santos", role: "it_staff" } as User;
 const badges: NavBadges = { approvals: { open: 2, overdue: 1 }, counts: { approvals: 2, worklist: 15 } };
@@ -55,5 +56,28 @@ describe("Sidebar stacking (Phase 45's z-scale kept)", () => {
     const html = render("full");
     expect(html.indexOf('aria-label="Collapse sidebar"')).toBeGreaterThan(html.indexOf('aria-label="Workspace"'));
     expect(html.indexOf('aria-label="Collapse sidebar"')).toBeLessThan(html.indexOf('aria-label="Account menu"'));
+  });
+});
+
+describe("Phase 47 spec §5.3: the brand reads CRIS, with no BR mark", () => {
+  it("shows CRIS in the full brand row and no BR logo", () => {
+    const html = render("full");
+    expect(html).toMatch(/<span class="[^"]*font-semibold[^"]*">CRIS<\/span>/);
+    expect(html).not.toContain(">BR<");
+    expect(html).not.toContain("Backroom IT");
+  });
+
+  it("shows the compact CRIS mark in the rail", () => {
+    const html = render("rail");
+    expect(html).toContain(">CRIS<");
+    expect(html).not.toContain(">BR<");
+  });
+});
+
+describe("Phase 47 spec §5.1: the panel animates its width", () => {
+  it("carries the sidebar-panel hook the collapse animation keys off, in both states", () => {
+    for (const state of ["full", "rail"] as const) {
+      expect(render(state)).toMatch(/<div class="sidebar-panel [^"]*w-\[236px\][^"]*group-data-\[sidebar=rail\]\/shell:w-\[72px\]/);
+    }
   });
 });

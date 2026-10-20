@@ -18,6 +18,7 @@ import { RecordActions } from "@/components/inventory/record-actions";
 import { LoanLine } from "@/components/inventory/loan-due-control";
 import { ReleaseHoldButton } from "@/components/inventory/release-hold-button";
 import { recentPeopleOptions } from "@/server/modules/employees/queries";
+import { recordTabCounts } from "@/server/modules/inventory/record-counts";
 
 export default async function AssetRecordLayout({
   params,
@@ -65,7 +66,12 @@ export default async function AssetRecordLayout({
   // showing "Last change" from before that queued change would read as
   // stale/misleading next to it, so the line is withheld until nothing is
   // pending.
-  const last = pending ? null : await lastLifecycleChange(asset.id);
+  // Phase 47 (spec §4.2a): the Notes and Attachments tab badges (counts only — the record never shows money here),
+  // read in parallel with the last change
+  const [last, counts] = await Promise.all([
+    pending ? Promise.resolve(null) : lastLifecycleChange(asset.id),
+    recordTabCounts(asset.id),
+  ]);
 
   return (
     <>
@@ -164,6 +170,7 @@ export default async function AssetRecordLayout({
         assetId={asset.id}
         cls={asset.cls}
         showSecrets={asset.cls === "IT" && (user.role === "admin" || user.role === "it_staff" || user.role === "viewer")}
+        counts={counts}
       />
       <div className="pt-4">{children}</div>
     </>

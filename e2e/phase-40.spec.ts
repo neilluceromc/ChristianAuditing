@@ -47,6 +47,12 @@ async function login(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
+  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
+  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
+  await expect
+    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
+    .toBe(id);
 }
 async function expectNoSeriousAxe(page: Page) {
   await page.mouse.move(0, 0);
@@ -376,20 +382,20 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     await expect(search).toHaveValue("BR/LT");
   });
 
-  test("8. every page is titled \"{Page} · Backroom IT\" — records by their tag or name", async ({ page }) => {
+  test("8. every page is titled \"{Page} · CRIS\" — records by their tag or name", async ({ page }) => {
     await login(page, IT);
     await page.goto("/inventory");
-    await expect(page).toHaveTitle("Inventory · Backroom IT");
+    await expect(page).toHaveTitle("Inventory · CRIS");
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" }, select: { id: true } });
     await page.goto(`/inventory/${asset.id}`);
-    await expect(page).toHaveTitle("BR-LT-0148 · Backroom IT");
+    await expect(page).toHaveTitle("BR-LT-0148 · CRIS");
     await page.goto(`/inventory/${asset.id}/history`);
-    await expect(page).toHaveTitle("History · BR-LT-0148 · Backroom IT");
+    await expect(page).toHaveTitle("History · BR-LT-0148 · CRIS");
     const person = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" }, select: { id: true } });
     await page.goto(`/employees/${person.id}`);
-    await expect(page).toHaveTitle("Marites Bautista · Backroom IT");
+    await expect(page).toHaveTitle("Marites Bautista · CRIS");
     await page.goto("/approvals");
-    await expect(page).toHaveTitle("Approvals · Backroom IT");
+    await expect(page).toHaveTitle("Approvals · CRIS");
   });
 
   test("9. an error toast stays until Dismiss; a success toast leaves on its own", async ({ page }) => {

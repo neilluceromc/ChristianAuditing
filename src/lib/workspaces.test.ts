@@ -269,7 +269,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       ["Activity", "Setup"],
     ]);
     expect(labels("finance", "finance_staff")).toEqual([
-      ["Home", "Assets", "Depreciation", "Approvals", "Purchases", "Suppliers", "Stock"],
+      ["Home", "Assets", "Disposal", "Depreciation", "Approvals", "Purchases", "Suppliers", "Stock"],
       ["Reports"],
       ["Activity"],
     ]);
@@ -369,6 +369,19 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("purchasing", "purchasing_staff", "Assets").views.map((v) => [v.label, v.href])).toEqual([
       ["Purchasing assets", "/inventory?cls=PURCHASING"], ["IT inventory", "/inventory?cls=IT"], ["Register assets", "/inventory/register"],
     ]);
+  });
+  it("Phase 47 spec §5.2: Disposal is Finance's only, a plain link after Assets, at /finance/disposal", () => {
+    const finance = filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff").flatMap((s) => s.items).map((i) => i.label);
+    expect(finance.indexOf("Disposal")).toBe(finance.indexOf("Assets") + 1);
+    expect(item("finance", "finance_staff", "Disposal")).toMatchObject({ href: "/finance/disposal", views: [], badge: [] });
+    expect(item("finance", "finance_staff", "Disposal").icon).toBe("disposal");
+    expect(item("finance", "admin", "Disposal")).toMatchObject({ href: "/finance/disposal" });
+    for (const ws of ["it", "purchasing", "admin"] as const) {
+      for (const role of ROLES) expect(hrefs(ws, role), `${role} ${ws}`).not.toContain("/finance/disposal");
+    }
+    expect(pathAllowedForRole("/finance/disposal", "finance_staff")).toBe(true);
+    expect(pathAllowedForRole("/finance/disposal", "admin")).toBe(true);
+    for (const role of ["it_staff", "purchasing_staff", "viewer"] as const) expect(pathAllowedForRole("/finance/disposal", role)).toBe(false);
   });
   it("Purchasing Suppliers and Setup; Finance Purchases and its plain links", () => {
     expect(item("purchasing", "purchasing_staff", "Suppliers").views.map((v) => v.href)).toEqual([

@@ -17,7 +17,8 @@ type Row = {
   id: string; conversationId: string; role: string; content: unknown;
   inputTokens: number | null; outputTokens: number | null; model: string | null; createdAt: Date;
 };
-type Conv = { id: string; userId: string; picks: unknown; updatedAt: Date };
+/** `clearedAt`: Phase 47, set by sign-out; the box never lists or resumes such a conversation. */
+type Conv = { id: string; userId: string; picks: unknown; updatedAt: Date; clearedAt?: Date | null };
 type Reply = { content: Anthropic.ContentBlock[]; stop: string; model: string; usage: { input: number; output: number } };
 type ToolCall = { ctx: Record<string, unknown>; name: string; input: unknown };
 
@@ -55,7 +56,10 @@ function whereRow(r: Row, w: Record<string, unknown>): boolean {
   for (const [k, v] of Object.entries(w)) {
     if (k === "conversation") {
       const conv = h.convs.find((c) => c.id === r.conversationId);
-      if (!conv || conv.userId !== (v as { userId: string }).userId) return false;
+      const cw = v as { userId: string; clearedAt?: null };
+      if (!conv || conv.userId !== cw.userId) return false;
+      // Honoured so a count that wrongly filters out cleared chats would fail the tests below.
+      if ("clearedAt" in cw && cw.clearedAt === null && conv.clearedAt) return false;
     } else if (k === "OR") {
       if (!(v as Record<string, unknown>[]).some((o) => whereRow(r, o))) return false;
     } else if (k === "createdAt") {
@@ -81,8 +85,9 @@ vi.mock("@/server/db/client", () => {
   const nextId = (p: string) => `${p}${String(++h.seq).padStart(4, "0")}`;
   const db = {
     crisConversation: {
-      findFirst: async ({ where }: { where: { id?: string; userId: string } }) => {
-        const mine = h.convs.filter((c) => c.userId === where.userId && (where.id === undefined || c.id === where.id));
+      findFirst: async ({ where }: { where: { id?: string; userId: string; clearedAt?: null } }) => {
+        const mine = h.convs.filter((c) => c.userId === where.userId && (where.id === undefined || c.id === where.id)
+          && !("clearedAt" in where && where.clearedAt === null && c.clearedAt));
         mine.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
         return mine[0] ? { id: mine[0].id, picks: mine[0].picks } : null;
       },
@@ -176,7 +181,7 @@ vi.mock("./model", async (importOriginal) => {
 });
 
 const {
-  crisTurn, crisHistoryFor, crisNewChatFor, CRIS_ROUNDS_TEXT, CRIS_OFF_SWITCH, CRIS_PREVIEW_ONLY_CHAT, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
+  crisTurn, crisHistoryFor, crisNewChatFor, latestConversationId, usedToday, CRIS_ROUNDS_TEXT, CRIS_OFF_SWITCH, CRIS_PREVIEW_ONLY_CHAT, CRIS_RATE_TEXT, CRIS_MAX_ROUNDS, CRIS_BUSY_TEXT,
   CRIS_TOO_LONG_TEXT, CRIS_FRESH_TEXT, CRIS_MAX_TURNS,
 } = await import("./turn-core");
 const { CrisProviderError } = await import("./model");
@@ -725,5 +730,50 @@ describe("crisHistory", () => {
     expect(page3.ok && page3.data.more).toBe(false);
     const other = await crisHistoryFor({ ...user, id: "u2" } as User, { conversationId: "c1" });
     expect(other).toMatchObject({ ok: false, kind: "forbidden" });
+  });
+});
+
+describe("chats cleared on sign-out (Phase 47 spec §5.5, Review Focus #5)", () => {
+  const CLEARED = new Date(NOW.getTime() - 30_000);
+
+  it("the box never resumes a cleared conversation: none open, so a question starts a new one", async () => {
+    seedUserRows(3, new Date(NOW.getTime() - 60_000));
+    h.convs[0].clearedAt = CLEARED;
+    expect(await latestConversationId(user.id)).toBeNull();
+    h.replies.push(text("ok"));
+    const r = await send();
+    expect(r.ok && r.data.conversationId).not.toBe("conv-old");
+    expect(h.rows.filter((x) => x.conversationId === "conv-old")).toHaveLength(3); // kept, never deleted
+  });
+
+  it("a cleared conversation's id sent by a stale tab is not used: the answer lands in a new one", async () => {
+    seedUserRows(3, new Date(NOW.getTime() - 60_000));
+    h.convs[0].clearedAt = CLEARED;
+    h.replies.push(text("ok"));
+    const r = await send({ conversationId: "conv-old" });
+    expect(r.ok && r.data.conversationId).not.toBe("conv-old");
+    expect(h.rows.filter((x) => x.conversationId === "conv-old")).toHaveLength(3);
+  });
+
+  it("the latest uncleared conversation is the one resumed, even when a cleared one is newer", async () => {
+    h.convs.push({ id: "kept", userId: user.id, picks: {}, updatedAt: new Date(1000) });
+    h.convs.push({ id: "gone", userId: user.id, picks: {}, updatedAt: new Date(2000), clearedAt: CLEARED });
+    expect(await latestConversationId(user.id)).toBe("kept");
+  });
+
+  it("a cleared conversation's history is not shown", async () => {
+    h.convs.push({ id: "c1", userId: user.id, picks: {}, updatedAt: new Date(0), clearedAt: CLEARED });
+    h.rows.push({ id: "m1", conversationId: "c1", role: "user", content: { text: "hi" }, inputTokens: null, outputTokens: null, model: null, createdAt: new Date(1) });
+    expect(await crisHistoryFor(user, { conversationId: "c1" })).toMatchObject({ ok: false, kind: "forbidden" });
+  });
+
+  it("the daily limit still counts today's questions in cleared conversations: signing out never resets it", async () => {
+    seedUserRows(100, new Date(NOW.getTime() - 60_000));
+    h.convs[0].clearedAt = CLEARED;
+    expect(await usedToday(user.id, NOW)).toBe(100);
+    const r = await send();
+    expect(r.ok && r.data).toMatchObject({ left: 0, mood: "sad" });
+    expect(r.ok && r.data.messages.map((m) => m.text)).toEqual([CRIS_DAILY_LIMIT_TEXT]);
+    expect(h.requests).toHaveLength(0);
   });
 });

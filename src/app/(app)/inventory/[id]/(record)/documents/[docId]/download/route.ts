@@ -12,8 +12,12 @@ const TYPES: Record<string, string> = {
   ".jpeg": "image/jpeg",
 };
 
+/**
+ * Phase 47 (spec §4.4): `?inline=1` sends `Content-Disposition: inline` so the asset page can preview a PDF in an
+ * iframe or an image in an <img> — for exactly the types above (PDF, PNG, JPG); anything else still downloads.
+ */
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string; docId: string }> },
 ) {
   const user = await requireUser();
@@ -28,10 +32,13 @@ export async function GET(
   const bytes = await readUpload(doc.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });
 
+  const type = TYPES[path.extname(doc.fileName).toLowerCase()];
+  const inline = type !== undefined && new URL(req.url).searchParams.get("inline") === "1";
   return new Response(new Uint8Array(bytes), {
     headers: {
-      "content-type": TYPES[path.extname(doc.fileName).toLowerCase()] ?? "application/octet-stream",
-      "content-disposition": contentDisposition(doc.fileName),
+      "content-type": type ?? "application/octet-stream",
+      "content-disposition": contentDisposition(doc.fileName, inline ? "inline" : "attachment"),
+      "x-content-type-options": "nosniff",
     },
   });
 }

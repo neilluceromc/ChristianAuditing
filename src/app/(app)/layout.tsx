@@ -17,6 +17,8 @@ import { StuckNavGuard } from "@/components/shell/stuck-nav-guard";
 import { PageSearchShortcut } from "@/components/shell/page-search-shortcut";
 import { SidebarShell } from "@/components/shell/sidebar-collapse";
 import { parseSidebar, SIDEBAR_COOKIE } from "@/lib/sidebar-state";
+import { UI_UID_COOKIE } from "@/lib/ui-prefs";
+import { UiPrefsSync } from "@/components/shell/ui-prefs-sync";
 import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
 import { defaultClassFor } from "@/lib/asset-class";
 import { getApprovalsBadge, readNavCounts } from "@/server/modules/home/nav-counts";
@@ -88,6 +90,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {reviewer && <CrisOrbDefs />}
       {cris && <CrisWidget {...cris} />}
       <PageSearchShortcut />
+      {/* Phase 47 spec §5.4: settings follow the person; rewrites the cookies when they are someone else's. */}
+      <UiPrefsSync userId={user.id} cookieUid={jar.get(UI_UID_COOKIE)?.value} />
       <Suspense fallback={null}><NavigationTracker /></Suspense>
       {/* Same-page filter links that never commit in production fall back to an ordinary load (src/lib/stuck-nav.ts). */}
       <StuckNavGuard />

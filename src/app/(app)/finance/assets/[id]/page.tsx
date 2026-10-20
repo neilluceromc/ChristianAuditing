@@ -1,25 +1,36 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { pageTitle } from "@/lib/page-title";
 import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { financeAssetDetail } from "@/server/modules/finance/asset-detail";
+import { assetAttachments, assetNotes } from "@/server/modules/assets/queries";
 import { CLASS_LABEL, STATUS_LABEL } from "@/lib/asset-class";
+import { asOfMonth } from "@/lib/depreciation";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { coveredByLabel } from "@/lib/purchase-summary";
-import { fmtDate, fmtDateTime, fmtMoneyExact } from "@/lib/format";
+import { fmtDate, fmtMoneyExact } from "@/lib/format";
+import { toSearchParams } from "@/lib/url-state";
+import { pathAllowedForRole } from "@/lib/workspaces";
+import { canPostOnAsset } from "@/lib/asset-notes";
+import { defaultLedgerYear, ledgerMonths, ledgerYears } from "@/lib/finance-ledger";
+import { assetHistory, assetPageHref, lifeSummary, noScheduleReason, parseAssetPageState } from "@/lib/finance-asset-page";
 import { PageHeader } from "@/components/ui/page-header";
-import { StatusPill } from "@/components/ui/status";
 import { ButtonLink } from "@/components/ui/button-link";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { DescriptionList } from "@/components/ui/description-list";
-import { ProgressBar } from "@/components/ui/progress-bar";
 import { ReviewBox } from "@/components/finance/review-box";
+import { ListNavigationProvider, ListPendingRegion } from "@/components/patterns/list-navigation";
+import { AssetPanel } from "@/components/finance/asset/asset-panel";
+import { AssetTabs } from "@/components/finance/asset/asset-tabs";
+import { LedgerCards, LedgerTab } from "@/components/finance/asset/ledger-tab";
+import { HistoryTab } from "@/components/finance/asset/history-tab";
+import { NotesTab } from "@/components/assets/notes-tab";
+import { AttachmentsTab } from "@/components/assets/attachments-tab";
+import { DocPreview } from "@/components/assets/doc-preview";
 import { SettingsButton } from "./settings-button";
-import { YearSchedule } from "./year-schedule";
 
-const peso = (c: number | null) => (c === null ? "Not recorded" : fmtMoneyExact(c / 100));
+const peso = (c: number | null | undefined) => (c === null || c === undefined ? "Not recorded" : fmtMoneyExact(c / 100));
 const text = (v: string | null | undefined) => (v ? v : "Not recorded");
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -27,19 +38,40 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: pageTitle((await assetTagFor(id)) ?? "Asset") };
 }
 
-export default async function FinanceAssetPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireRole("admin", "finance_staff");
+/**
+ * Phase 47 (spec §4, mockup Option B · Ledger): the Finance asset page. The left panel (identity, life, Asset and
+ * Documents cards) and the main column — a document preview when one is open, then four underlined tabs: the
+ * Depreciation ledger (with the Purchase, Cost breakdown and Depreciation cards), Notes, Attachments and Financial
+ * history. Every tab, year, filter, page and preview is in the URL (`parseAssetPageState`); the hrefs are built here.
+ */
+export default async function FinanceAssetPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const user = await requireRole("admin", "finance_staff");
   const { id } = await params;
-  const d = await financeAssetDetail(id);
+  const state = parseAssetPageState(toSearchParams(await searchParams));
+  // one clock for the whole page: the detail, the ledger's "this month" and the history agree across a month boundary
+  const now = new Date();
+  const d = await financeAssetDetail(id, now);
   if (!d) notFound();
 
-  const extra = await prisma.asset.findUnique({
-    where: { id },
-    select: {
-      depreciationNote: true,
-      category: { select: { depreciationLifeMonths: true, depreciationSalvagePercent: true } },
-    },
-  });
+  // Only the open tab's shared notes or attachments are read; the badges come from the detail's counts.
+  const [extra, threads, attachments] = await Promise.all([
+    prisma.asset.findUnique({
+      where: { id },
+      select: {
+        depreciationNote: true,
+        category: { select: { depreciationLifeMonths: true, depreciationSalvagePercent: true } },
+        assignee: { select: { id: true, department: { select: { name: true } } } },
+      },
+    }),
+    state.tab === "notes" ? assetNotes(id) : Promise.resolve([]),
+    state.tab === "files" ? assetAttachments(id) : Promise.resolve([]),
+  ]);
   const catLife = extra?.category.depreciationLifeMonths ?? null;
   const catPct = extra?.category.depreciationSalvagePercent === null || extra?.category.depreciationSalvagePercent === undefined
     ? null
@@ -48,16 +80,33 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
   const dept = CLASS_LABEL[d.cls];
   const hasCost = d.costC !== null;
   const capitalised = d.result !== null;
-  const subtitle = [d.model, d.category, dept, d.serial ? `S/N ${d.serial}` : null, d.holder].filter(Boolean).join(" · ");
   const crumbHref = d.cls === "PURCHASING" ? "/finance/assets?cls=PURCHASING" : "/finance/assets";
-  const policyLabel = d.custom
-    ? "Custom override"
-    : d.lifeMonths !== null ? "Category policy" : "No policy";
+  const canPost = canPostOnAsset(user.role, d.cls);
+
+  // ledger (spec §4.2): read from the engine's lifeYears through finance-ledger.ts
+  const asOf = asOfMonth(now);
+  const years = ledgerYears(d.years, asOf);
+  const selected: number | "all" = state.year === "all"
+    ? "all"
+    : state.year !== null && years.some((y) => y.year === state.year)
+      ? state.year
+      : defaultLedgerYear(d.years, asOf) ?? "all";
+  const lifeYear = selected === "all" ? null : d.years.find((y) => y.year === selected) ?? null;
+  const months = lifeYear ? ledgerMonths(lifeYear, d.years, asOf) : null;
+  const emptyReason = years.length ? null : noScheduleReason({ notCapitalised: d.notCapitalised, costC: d.costC, approvedAt: d.approvedAt, note: d.note });
+
+  // the document open in the preview: only one of this asset's own document slots
+  const openDoc = state.doc ? d.docs.find((x) => x.file?.id === state.doc) ?? null : null;
+  const holderId = extra?.assignee?.id ?? null;
+
+  // history (spec §4.5): an unknown `?hw=` reads as Everyone, so the select and the list agree
+  const history = state.tab === "history"
+    ? assetHistory(d.audit, d.depLines, state, { assetTag: d.tag, categoryName: d.category, purchaseUnits: d.purchaseUnits, names: d.historyNames })
+    : null;
 
   return (
     <>
       <PageHeader
-        title={d.tag}
         breadcrumb={[{ label: "Assets", href: crumbHref }, { label: d.tag }]}
         actions={
           <>
@@ -77,154 +126,129 @@ export default async function FinanceAssetPage({ params }: { params: Promise<{ i
           </>
         }
       />
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg-secondary">
-          <span>{subtitle}</span>
-          <StatusPill value={d.status} label={STATUS_LABEL[d.status]} />
-          {d.reg === "registered" && d.notCapitalised ? (
-            <span className="text-xs text-fg-secondary">Not capitalised</span>
+
+      {(d.reg === "with-finance" || d.reg === "needs-correction") && (
+        <div className="mb-4">
+          {d.reg === "with-finance" ? (
+            <ReviewBox id={d.id} tag={d.tag} hasCost={hasCost} reply={d.resubmitNote} deptLabel={dept} />
           ) : (
-            <StatusPill ns="registration" value={d.reg} label={d.regFinanceLabel} />
+            <p className="text-[13px] text-fg-secondary">
+              Sent back to {dept}
+              {d.returnSummary.items.length > 0 ? `: ${d.returnSummary.items.join(", ")}` : ""}
+              {d.returnSummary.note ? ` — “${d.returnSummary.note}”` : ""}
+            </p>
           )}
         </div>
+      )}
 
-        {d.reg === "with-finance" && (
-          <ReviewBox id={d.id} tag={d.tag} hasCost={hasCost} reply={d.resubmitNote} deptLabel={dept} />
-        )}
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <AssetPanel
+          id={d.id}
+          state={state}
+          tag={d.tag}
+          model={d.model}
+          category={d.category}
+          serial={d.serial}
+          status={d.status}
+          statusLabel={STATUS_LABEL[d.status]}
+          reg={d.reg}
+          regLabel={d.regFinanceLabel}
+          notCapitalised={d.notCapitalised}
+          life={lifeSummary(d.result, d.monthsUsed)}
+          costC={d.costC}
+          lifeNote={emptyReason ?? d.note}
+          holder={d.holder ? { name: d.holder, href: holderId && pathAllowedForRole("/employees", user.role) ? `/employees/${holderId}` : null } : null}
+          worksFor={extra?.assignee?.department.name ?? null}
+          docs={d.docs}
+        />
 
-        {d.reg === "needs-correction" && (
-          <p className="text-[13px] text-fg-secondary">
-            Sent back to {dept}
-            {d.returnSummary.items.length > 0 ? `: ${d.returnSummary.items.join(", ")}` : ""}
-            {d.returnSummary.note ? ` — “${d.returnSummary.note}”` : ""}
-          </p>
-        )}
-
-        <Card>
-          <CardHeader title="Money summary" />
-          <CardBody>
-            {!capitalised ? (
-              <p className="text-[13px] text-fg-secondary">{d.note}</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <DescriptionList
-                  items={[
-                    { label: "Cost", value: peso(d.costC), mono: true },
-                    { label: "Depreciation to date", value: peso(d.result!.accumulated), mono: true },
-                    { label: "Book value", value: peso(d.result!.bookValue), mono: true },
-                    { label: "Monthly amount", value: d.result!.monthly === null ? "—" : peso(d.result!.monthly), mono: true },
-                    { label: "Salvage", value: d.salvageC === null ? "—" : peso(d.salvageC), mono: true },
-                  ]}
+        <ListNavigationProvider>
+          <div className="flex min-w-0 flex-col gap-4">
+            {openDoc?.file && (
+              <DocPreview
+                assetId={d.id}
+                doc={openDoc.file}
+                title={openDoc.title}
+                closeHref={assetPageHref(d.id, state, { doc: null })}
+              />
+            )}
+            <AssetTabs
+              id={d.id}
+              state={state}
+              lifeMonths={years.length ? d.lifeMonths : null}
+              noteCount={d.noteCount}
+              openNoteCount={d.openNoteCount}
+              attachmentCount={d.attachmentCount}
+              historyCount={d.audit.length + d.depLines.length}
+            />
+            <ListPendingRegion className="flex flex-col gap-4">
+              {state.tab === "ledger" && (
+                <>
+                  <LedgerTab id={d.id} state={state} years={years} selected={selected} months={months} emptyReason={emptyReason} />
+                  <LedgerCards
+                    purchase={[
+                      {
+                        label: "Purchase request",
+                        value: d.purchase.pr
+                          ? <Link href={`/purchases/${d.purchase.pr.id}`} className="text-accent hover:underline">{d.purchase.pr.refNo}</Link>
+                          : "Not recorded",
+                      },
+                      { label: "Requested by", value: text(d.purchase.requestedBy) },
+                      { label: "Supplier", value: text(d.purchase.supplier) },
+                      { label: "Invoice no.", value: text(d.purchase.invoiceRef) },
+                      { label: "OR no.", value: text(d.purchase.receiptRef) },
+                      { label: "Purchase date", value: d.purchase.purchasedAt ? fmtDate(d.purchase.purchasedAt) : "Not recorded" },
+                      { label: "Warranty until", value: d.purchase.warrantyUntil ? fmtDate(d.purchase.warrantyUntil) : "Not recorded" },
+                      { label: "Covered by", value: text(d.purchase.coveredBy && coveredByLabel(d.purchase.coveredBy)) },
+                    ]}
+                    cost={[
+                      { label: "Purchase price", value: peso(d.cost.priceC), mono: true },
+                      {
+                        label: "Delivery and fees",
+                        value: d.cost.feesC === null
+                          ? "Not recorded"
+                          : `${fmtMoneyExact(d.cost.feesC / 100)}${d.cost.feesUnits !== null && d.cost.feesUnits > 1 ? ` for the whole delivery of ${d.cost.feesUnits}` : ""}`,
+                        mono: true,
+                      },
+                      { label: "Salvage value", value: d.cost.salvageC === null ? "—" : peso(d.cost.salvageC), mono: true },
+                      { label: "Depreciable base", value: d.cost.baseC === null ? "—" : peso(d.cost.baseC), mono: true },
+                    ]}
+                    depreciation={[
+                      { label: "Method", value: "Straight-line" },
+                      { label: "Policy", value: d.policyText },
+                      { label: "Useful life", value: d.lifeMonths !== null ? lifeLabel(d.lifeMonths) : "—" },
+                      { label: "Starts", value: d.startLabel ?? "—" },
+                      { label: "Ends", value: d.endLabel ?? "—" },
+                      { label: "Per month", value: d.result?.monthly ? peso(d.result.monthly) : "—", mono: true },
+                      {
+                        label: "Override",
+                        value: d.custom && d.lifeMonths !== null && d.salvageC !== null
+                          ? `${lifeLabel(d.lifeMonths)}, ${fmtMoneyExact(d.salvageC / 100)} salvage${extra?.depreciationNote ? ` — ${extra.depreciationNote}` : ""}`
+                          : "None",
+                      },
+                      {
+                        label: "Approved",
+                        value: d.approvedAt ? `${d.approvedBy ?? "Unknown"} on ${fmtDate(d.approvedAt)}` : "Not yet approved",
+                      },
+                    ]}
+                  />
+                </>
+              )}
+              {state.tab === "notes" && <NotesTab assetId={d.id} threads={threads} canPost={canPost} />}
+              {state.tab === "files" && (
+                <AttachmentsTab
+                  assetId={d.id}
+                  attachments={attachments}
+                  canUpload={canPost}
+                  kind={state.ak}
+                  selectedId={state.att}
+                  hrefFor={(patch) => assetPageHref(d.id, state, { tab: "files", ...patch })}
                 />
-                {d.note && <p className="text-xs text-fg-muted">{d.note}</p>}
-                {d.monthsUsed !== null && d.lifeMonths !== null && (
-                  <div className="flex flex-col gap-1.5">
-                    <ProgressBar value={d.monthsUsed} max={d.lifeMonths} label="Months used" />
-                    <p className="font-mono text-[11px] text-fg-muted">
-                      {d.monthsUsed} of {d.lifeMonths} months · {d.startLabel} → {d.endLabel} · as of today ({d.asOfLabel} counted)
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Purchase" />
-          <CardBody>
-            <DescriptionList
-              items={[
-                {
-                  label: "Purchase request",
-                  value: d.pr ? (
-                    <a href={`/purchases/${d.pr.id}`} className="text-accent hover:underline">
-                      {d.pr.refNo} · {fmtMoneyExact(d.pr.totalC / 100)}
-                    </a>
-                  ) : "Not recorded",
-                },
-                { label: "Requested by", value: text(d.pr?.requester) },
-                { label: "Vendor", value: text(d.vendor) },
-                { label: "Invoice no.", value: text(d.invoiceRef) },
-                { label: "OR no.", value: text(d.receiptRef) },
-                { label: "Purchase date", value: d.purchasedAt ? fmtDate(d.purchasedAt) : "Not recorded" },
-                { label: "Delivery and fees", value: peso(d.feesC) },
-                { label: "Warranty until", value: d.warrantyUntil ? fmtDate(d.warrantyUntil) : "Not recorded" },
-                { label: "Covered by", value: text(d.coveredBy && coveredByLabel(d.coveredBy)) },
-                { label: "Who to call", value: text(d.contact) },
-              ]}
-            />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Capitalization & depreciation" />
-          <CardBody>
-            <DescriptionList
-              items={[
-                {
-                  label: "Approved by",
-                  value: d.approvedAt ? `${d.approvedBy ?? "Unknown"} on ${fmtDate(d.approvedAt)}` : "Not yet approved",
-                },
-                { label: "Starts", value: d.startLabel ?? "—" },
-                { label: "Ends", value: d.endLabel ?? "—" },
-                { label: "Method", value: "Straight-line" },
-                { label: "Basis", value: capitalised ? `${policyLabel} — ${d.policyText}` : d.policyText },
-                {
-                  label: "Override",
-                  value: d.custom && d.lifeMonths !== null && d.salvageC !== null
-                    ? `${lifeLabel(d.lifeMonths)}, ${fmtMoneyExact(d.salvageC / 100)} salvage${extra?.depreciationNote ? ` — ${extra.depreciationNote}` : ""}`
-                    : "None",
-                },
-              ]}
-            />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Documents" />
-          <CardBody>
-            <ul className="flex flex-col gap-1.5">
-              {d.docs.map((doc, i) => (
-                <li key={`${doc.kind}-${i}`} className="flex items-baseline gap-3 text-[13px]">
-                  <span className="w-[140px] shrink-0 text-[11px] text-fg-muted">{doc.title}</span>
-                  {doc.file ? (
-                    <a href={`/inventory/${d.id}/documents/${doc.file.id}/download`} className="text-accent hover:underline">
-                      {doc.file.fileName}
-                    </a>
-                  ) : (
-                    <span className="text-fg-muted">Not uploaded</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </CardBody>
-        </Card>
-
-        {capitalised && d.years.length > 0 && (
-          <section className="flex flex-col gap-2">
-            <h2 className="text-[15px] font-semibold text-fg">Depreciation schedule</h2>
-            <YearSchedule years={d.years} />
-          </section>
-        )}
-
-        <Card>
-          <CardHeader title="Financial history" />
-          <CardBody>
-            {d.history.length === 0 ? (
-              <p className="text-[13px] text-fg-muted">Nothing recorded yet.</p>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {d.history.map((h, i) => (
-                  <li key={i} className="flex items-baseline gap-3 text-[13px] text-fg-secondary">
-                    <span className="w-[130px] shrink-0 font-mono text-[11px] text-fg-muted">{fmtDateTime(h.at)}</span>
-                    <span>{h.sentence}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
+              )}
+              {history && <HistoryTab id={d.id} state={{ ...state, hw: history.hw }} history={history.history} />}
+            </ListPendingRegion>
+          </div>
+        </ListNavigationProvider>
       </div>
     </>
   );

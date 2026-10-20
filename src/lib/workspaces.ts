@@ -368,6 +368,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
             { label: "Capitalized", href: "/finance/assets?fin=approved", match: { cls: "IT", fin: "approved" } },
           ],
         },
+        // Phase 47 spec §5.2: a placeholder page for now, a plain link.
+        { label: "Disposal", href: "/finance/disposal", icon: "disposal" },
         {
           // The page's own two tabs.
           label: "Depreciation",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import { saveUiPref } from "@/server/ui-prefs";
 
 function subscribe(cb: () => void) {
   const obs = new MutationObserver(cb);
@@ -15,6 +16,8 @@ export function ThemeToggle() {
     const next = getTheme() === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     document.cookie = `br.theme=${next};path=/;max-age=31536000;samesite=lax`;
+    // Phase 47 spec §5.4: the cookie is this browser's copy for the next paint; the person's own is saved too.
+    void saveUiPref({ theme: next }).catch(() => {});
   }, []);
   return (
     <button

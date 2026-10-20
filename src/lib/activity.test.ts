@@ -535,3 +535,22 @@ describe("Phase 41 — a change made through Cris says so", () => {
     expect(auditPhrase(e)).toBe("changed the Cris settings");
   });
 });
+
+describe("Phase 47 — the shared asset notes and attachments read as sentences", () => {
+  const s = (action: string, diff: unknown, opts?: { omitEntity?: boolean }) =>
+    auditSentence({ actorLabel: "Ana Cruz", action, diff, entityLabel: "BR-LT-0042" }, opts);
+  it("notes", () => {
+    expect(s("note.posted", { note: { from: null, to: "Paid by cheque" } })).toBe("Ana Cruz added a note on BR-LT-0042");
+    expect(s("note.replied", { note: { from: null, to: "Checked" } })).toBe("Ana Cruz replied to a note on BR-LT-0042");
+    expect(s("note.resolved", { note: { from: "open", to: "resolved" } })).toBe("Ana Cruz marked a note resolved on BR-LT-0042");
+    expect(s("note.reopened", { note: { from: "resolved", to: "open" } }, { omitEntity: true })).toBe("Ana Cruz reopened a note");
+  });
+  it("attachments name the file", () => {
+    expect(s("attachment.uploaded", { attachment: { from: null, to: "quote.pdf" } })).toBe("Ana Cruz attached quote.pdf to BR-LT-0042");
+    expect(s("attachment.uploaded", null, { omitEntity: true })).toBe("Ana Cruz attached an attachment");
+  });
+  it("the Action facet words", () => {
+    expect(actionLabel("note.posted")).toBe("Note posted");
+    expect(actionLabel("attachment.uploaded")).toBe("Attachment added");
+  });
+});

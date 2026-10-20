@@ -5,7 +5,16 @@ export interface FilterChip {
   removeHref: string;
 }
 
-export function ChipFilterRow({ chips, clearHref }: { chips: FilterChip[]; clearHref: string }) {
+/** `clearLabel`: the clear link's words ("Clear filters"; Finance → Assets says "Clear all", spec §3 item 5). */
+export function ChipFilterRow({
+  chips,
+  clearHref,
+  clearLabel = "Clear filters",
+}: {
+  chips: FilterChip[];
+  clearHref: string;
+  clearLabel?: string;
+}) {
   if (chips.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 py-2">
@@ -21,7 +30,7 @@ export function ChipFilterRow({ chips, clearHref }: { chips: FilterChip[]; clear
         </Link>
       ))}
       <Link href={clearHref} className="px-1 text-[11px] text-fg-muted underline-offset-2 hover:underline">
-        Clear filters
+        {clearLabel}
       </Link>
     </div>
   );
