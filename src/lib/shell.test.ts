@@ -184,6 +184,11 @@ describe("navDestinations and matchDestinations (the command palette's Go to lis
     ]);
     // Within a workspace whose views never repeat a name, nothing changes.
     expect(navDestinations(RAW, "admin").find((d) => d.href === "/inventory")!.also).toEqual(["All"]);
+    // A view named like another link is named under its own link (Phase 46: Finance's Stock › Reports).
+    expect(matchDestinations(navDestinations(WORKSPACE_NAV.finance, "finance_staff"), "reports")).toEqual([
+      { label: "Stock › Reports", href: "/stock/reports" },
+      { label: "Reports", href: "/equipment-by-client" },
+    ]);
     // No two rows of any workspace's full list read the same.
     for (const ws of ["it", "purchasing", "finance", "admin"] as const) {
       const labels = matchDestinations(navDestinations(WORKSPACE_NAV[ws], "admin"), "").map((d) => d.label);

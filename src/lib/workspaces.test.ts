@@ -273,7 +273,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       ["Reports"],
       ["Activity"],
     ]);
-    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & roles"], ["Webhooks", "Feature flags"]]);
+    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & roles"], ["Webhooks", "Feature flags"], ["Audit log"]]);
   });
   it("an admin sees the same links as each workspace's own staff", () => {
     expect(labels("it", "admin")).toEqual(labels("it", "it_staff"));
@@ -292,7 +292,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("it", "it_staff", "Approvals").views.map((v) => v.href)).toEqual(["/approvals", "/approvals?tab=mine", "/purchases?state=SUBMITTED", "/approvals?tab=closed"]);
     expect(item("it", "it_staff", "Setup").href).toBe("/admin/asset-categories");
     expect(item("purchasing", "purchasing_staff", "Requests").views.map((v) => v.label)).toEqual(["All", "My drafts", "Awaiting IT", "Awaiting finance", "Completed", "Register purchase"]);
-    expect(item("purchasing", "purchasing_staff", "Stock").views.map((v) => v.href)).toEqual(["/stock", "/stock/receive", "/stock/issue", "/stock/stocktakes", "/stock/reports", "/stock/import"]);
+    expect(item("purchasing", "purchasing_staff", "Stock").views.map((v) => v.href)).toEqual(["/stock", "/stock?low=1", "/stock/receive", "/stock/issue", "/stock/stocktakes", "/stock/reports", "/stock/import"]);
   });
   it("the rest of the IT views, hrefs verbatim", () => {
     expect(item("it", "it_staff", "Inventory").views.map((v) => v.href)).toEqual([
@@ -334,6 +334,15 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(counts("it", "Approvals")).toEqual({ Open: "approvals", "Purchase reviews": "purchaseReviews" });
     expect(counts("purchasing", "Requests")).toEqual({ "My drafts": "prDraft", "Awaiting IT": "prSubmitted", "Awaiting finance": "prItReviewed" });
     expect(counts("finance", "Purchases")).toEqual({ "Awaiting finance": "prItReviewed" });
+    // Phase 46 spec §4.3
+    expect(counts("purchasing", "Suppliers")).toEqual({ "Renewing soon": "suppliersRenewing" });
+    expect(counts("purchasing", "Stock")).toEqual({ "Below reorder": "stockLow", Stocktakes: "stocktakesOverdue" });
+    expect(counts("purchasing", "Approvals")).toEqual({ Open: "approvals" });
+    expect(counts("finance", "Assets")).toEqual({ "To confirm · IT": "finToConfirmIt", "To confirm · Purchasing": "finToConfirmPurchasing" });
+    expect(counts("finance", "Approvals")).toEqual({ Open: "approvals" });
+    expect(counts("admin", "Users & roles")).toEqual({ Disabled: "usersDisabled" });
+    expect(counts("admin", "Webhooks")).toEqual({ "Failed deliveries": "deadDeliveries" });
+    expect(counts("admin", "Feature flags")).toEqual({ Unavailable: "flagsUnavailable" });
   });
   it("badges sit on the spec §3 links", () => {
     expect(item("it", "it_staff", "Worklist").badge).toEqual(["worklist"]);
@@ -342,6 +351,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("finance", "finance_staff", "Approvals").badge).toEqual(["approvals"]);
     expect(item("finance", "finance_staff", "Purchases").badge).toEqual(["prItReviewed"]);
     expect(item("it", "it_staff", "Inventory").badge).toEqual([]);
+    // Phase 46: failed deliveries are waiting work (a replay), so the closed Webhooks link keeps their red count.
+    expect(item("admin", "admin", "Webhooks").badge).toEqual(["deadDeliveries"]);
   });
   it("icons: Inventory and the Assets links reuse inventory, Employees employee, Approvals approval", () => {
     expect(item("it", "it_staff", "Inventory").icon).toBe("inventory");
@@ -361,7 +372,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   });
   it("Purchasing Suppliers and Setup; Finance Purchases and its plain links", () => {
     expect(item("purchasing", "purchasing_staff", "Suppliers").views.map((v) => v.href)).toEqual([
-      "/purchases/suppliers", "/purchases/suppliers/new", "/purchases/suppliers/import",
+      "/purchases/suppliers", "/purchases/suppliers?renewing=30", "/purchases/suppliers/new", "/purchases/suppliers/import",
     ]);
     expect(item("purchasing", "purchasing_staff", "Setup")).toMatchObject({ href: "/admin/asset-categories" });
     expect(item("purchasing", "purchasing_staff", "Setup").views.map((v) => v.href)).toEqual([
@@ -372,12 +383,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       ["Approved", "/purchases?state=COMPLETED"], ["Cancelled", "/purchases?state=CANCELLED"],
     ]);
     expect(item("finance", "finance_staff", "Reports").views).toEqual(item("it", "it_staff", "Reports").views);
-    for (const [label, href] of [
-      ["Assets", "/finance/assets"], ["Depreciation", "/finance/depreciation"], ["Approvals", "/approvals"],
-      ["Suppliers", "/purchases/suppliers"], ["Stock", "/stock"], ["Activity", "/finance/activity"],
-    ]) {
-      expect(item("finance", "finance_staff", label), label).toMatchObject({ href, views: [] });
-    }
+    expect(item("finance", "finance_staff", "Activity")).toMatchObject({ href: "/finance/activity", views: [] });
   });
   it("a viewer: no write views, Setup goes straight to Equipment policies", () => {
     expect(item("it", "viewer", "Inventory").views.map((v) => v.label)).toEqual(["All", "Spare", "Repairs", "Missing"]);
@@ -429,7 +435,92 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       "/approvals": { tab: "open" },
       "/reservations": { state: "ACTIVE" },
       "/equipment-by-client": { tab: "client" },
+      "/finance/assets": { cls: "IT" },
+      "/finance/depreciation": { tab: "schedule" },
+      "/admin/webhooks/deliveries": { state: "ALL" },
     });
+  });
+});
+
+describe("Phase 46 spec §4.3: the same style everywhere", () => {
+  const views = (ws: WorkspaceId, role: Role, label: string) => item(ws, role, label).views.map((v) => [v.label, v.href]);
+
+  it("Purchasing: Renewing soon, Below reorder, Approvals and Employees views", () => {
+    expect(views("purchasing", "purchasing_staff", "Suppliers")).toEqual([
+      ["All suppliers", "/purchases/suppliers"], ["Renewing soon", "/purchases/suppliers?renewing=30"],
+      ["New supplier", "/purchases/suppliers/new"], ["Import suppliers", "/purchases/suppliers/import"],
+    ]);
+    expect(views("purchasing", "purchasing_staff", "Stock")).toEqual([
+      ["Items", "/stock"], ["Below reorder", "/stock?low=1"], ["Receive stock", "/stock/receive"],
+      ["Issue stock", "/stock/issue"], ["Stocktakes", "/stock/stocktakes"], ["Reports", "/stock/reports"],
+      ["Import items", "/stock/import"],
+    ]);
+    expect(views("purchasing", "purchasing_staff", "Approvals")).toEqual([
+      ["Open", "/approvals"], ["Mine", "/approvals?tab=mine"], ["Closed", "/approvals?tab=closed"],
+    ]);
+    expect(item("purchasing", "purchasing_staff", "Approvals").badge).toEqual(["approvals"]);
+    expect(views("purchasing", "purchasing_staff", "Employees")).toEqual([
+      ["Everyone", "/employees"], ["Client staff", "/employees?kind=CLIENT"], ["Internal staff", "/employees?kind=INTERNAL"],
+    ]);
+  });
+
+  it("Finance: Assets, Depreciation, Approvals, Suppliers and Stock views", () => {
+    expect(views("finance", "finance_staff", "Assets")).toEqual([
+      ["All assets", "/finance/assets"],
+      ["To confirm · IT", "/finance/assets?fin=with-finance"],
+      ["To confirm · Purchasing", "/finance/assets?cls=PURCHASING&fin=with-finance"],
+      ["Capitalized", "/finance/assets?fin=approved"],
+    ]);
+    expect(views("finance", "finance_staff", "Depreciation")).toEqual([
+      ["Schedule", "/finance/depreciation"], ["Policies", "/finance/depreciation?tab=policies"],
+    ]);
+    expect(views("finance", "finance_staff", "Approvals")).toEqual([
+      ["Open", "/approvals"], ["Mine", "/approvals?tab=mine"], ["Closed", "/approvals?tab=closed"],
+    ]);
+    expect(views("finance", "finance_staff", "Suppliers")).toEqual([
+      ["All suppliers", "/purchases/suppliers"], ["Active contracts", "/purchases/suppliers?contract=ACTIVE"],
+      ["Expired contracts", "/purchases/suppliers?contract=EXPIRED"],
+    ]);
+    expect(views("finance", "finance_staff", "Stock")).toEqual([
+      ["Items", "/stock"], ["Stocktakes", "/stock/stocktakes"], ["Reports", "/stock/reports"],
+    ]);
+  });
+
+  it("the IT-class finance views name their class through the page default, so a Purchasing URL never lights them", () => {
+    const assets = item("finance", "finance_staff", "Assets").views;
+    expect(Object.fromEntries(assets.filter((v) => v.match).map((v) => [v.label, v.match]))).toEqual({
+      "To confirm · IT": { cls: "IT", fin: "with-finance" },
+      Capitalized: { cls: "IT", fin: "approved" },
+    });
+  });
+
+  it("Admin: Users & roles, Webhooks and Feature flags views, and Audit log under records", () => {
+    expect(views("admin", "admin", "Users & roles")).toEqual([
+      ["All users", "/admin/users"], ["Disabled", "/admin/users?disabled=1"],
+    ]);
+    expect(views("admin", "admin", "Webhooks")).toEqual([
+      ["Endpoints", "/admin/webhooks"], ["Failed deliveries", "/admin/webhooks/deliveries?state=DEAD"],
+      ["All deliveries", "/admin/webhooks/deliveries"],
+    ]);
+    expect(views("admin", "admin", "Feature flags")).toEqual([
+      ["All flags", "/admin/flags"], ["Unavailable", "/admin/flags?state=unavailable"],
+    ]);
+    const records = filterSectionsForRole(WORKSPACE_NAV.admin, "admin").find((s) => s.heading === "records")!;
+    expect(records.items).toEqual([{ label: "Audit log", href: "/audit", icon: "audit", badge: [], views: [] }]);
+    expect(pathAllowedForRole("/audit", "admin")).toBe(true);
+  });
+
+  it("the new views pass pathAllowedForRole for the roles that see them; the admin pages stay admin's", () => {
+    for (const ws of ["purchasing", "finance", "admin"] as const) {
+      for (const role of ROLES.filter((r) => ROLE_WORKSPACES[r].includes(ws))) {
+        for (const href of hrefs(ws, role)) expect(pathAllowedForRole(href.split("?")[0], role), `${role} ${href}`).toBe(true);
+      }
+    }
+    for (const role of ROLES.filter((r) => r !== "admin")) {
+      for (const path of ["/admin/users", "/admin/webhooks/deliveries", "/admin/flags"]) {
+        expect(pathAllowedForRole(path, role), `${role} ${path}`).toBe(false);
+      }
+    }
   });
 });
 

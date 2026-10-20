@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { filterSectionsForRole, WORKSPACE_NAV, type VisibleItem } from "./workspaces";
 import { countBadge, itemBadge, navCountKeys, type NavBadges } from "./nav-badges";
+import { RENEWING_DAYS } from "./supplier-list";
 
 const b: NavBadges = { approvals: { open: 0, overdue: 0 }, counts: {} };
 
@@ -19,6 +20,22 @@ describe("countBadge", () => {
     expect(countBadge("leaving", 2, b)?.label).toBe("2 leaving");
     expect(countBadge("prSubmitted", 5, b)?.label).toBe("5 awaiting IT");
     expect(countBadge("prItReviewed", 6, b)?.label).toBe("6 awaiting finance");
+  });
+
+  it("labels the Phase 46 counts", () => {
+    expect(countBadge("stockLow", 3, b)?.label).toBe("3 below reorder level");
+    expect(countBadge("stocktakesOverdue", 1, b)?.label).toBe("1 overdue");
+    expect(countBadge("suppliersRenewing", 2, b)?.label).toBe(`2 renewing within ${RENEWING_DAYS} days`);
+    expect(countBadge("finToConfirmIt", 5, b)?.label).toBe("5 IT registrations to confirm");
+    expect(countBadge("finToConfirmPurchasing", 6, b)?.label).toBe("6 Purchasing registrations to confirm");
+    expect(countBadge("usersDisabled", 4, b)?.label).toBe("4 disabled");
+    expect(countBadge("flagsUnavailable", 1, b)?.label).toBe("1 unavailable");
+  });
+
+  it("draws failed deliveries red with a dot (spec §4.3), and none when there are none", () => {
+    expect(countBadge("deadDeliveries", 7, b)).toEqual({ n: 7, label: "7 failed deliveries", fault: true });
+    expect(countBadge("deadDeliveries", 0, b)).toBeNull();
+    expect(countBadge("usersDisabled", 4, b)?.fault).toBe(false);
   });
 
   it("keeps today's approvals wording, red only while any approval is overdue", () => {
@@ -75,9 +92,10 @@ describe("navCountKeys", () => {
 
   it("covers the other workspaces", () => {
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.purchasing, "purchasing_staff")).sort())
-      .toEqual(["approvals", "prDraft", "prItReviewed", "prSubmitted"]);
+      .toEqual(["approvals", "prDraft", "prItReviewed", "prSubmitted", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff")).sort())
-      .toEqual(["approvals", "prItReviewed"]);
-    expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin"))).toEqual([]);
+      .toEqual(["approvals", "finToConfirmIt", "finToConfirmPurchasing", "prItReviewed"]);
+    expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin")).sort())
+      .toEqual(["deadDeliveries", "flagsUnavailable", "usersDisabled"]);
   });
 });

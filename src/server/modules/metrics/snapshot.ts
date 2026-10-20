@@ -5,13 +5,12 @@ import { manilaDay, SNAPSHOT_KEYS, type SnapshotKey } from "@/lib/snapshot";
 import { toCentavos } from "@/lib/depreciation";
 import { tabWhere } from "@/lib/approvals-list";
 import type { ApprovalClassKey } from "@/lib/approval-access";
-import { finWhere } from "@/lib/registration";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState } from "@/lib/url-state";
 import { inventoryTileCounts } from "@/server/modules/inventory/queries";
 import { stateCounts } from "@/server/modules/purchases/queries";
 import { stockHomeSignals } from "@/server/modules/stock/queries";
-import { financeListWhere } from "@/server/modules/finance/queries";
+import { financeViewWhere } from "@/server/modules/finance/queries";
 import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
 import { adminHome } from "@/server/modules/admin/queries";
 import { financeWaitingRows, unitsValue } from "@/server/modules/home/queries";
@@ -44,7 +43,7 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     });
   // /finance/assets?fin=with-finance (and &cls=PURCHASING): the page's own "To review" chip predicate.
   const toConfirm = (cls: "IT" | "PURCHASING") =>
-    prisma.asset.count({ where: { AND: [financeListWhere({ cls, status: null, q: "" }), finWhere("with-finance")] } });
+    prisma.asset.count({ where: financeViewWhere(cls, "with-finance") });
 
   const [
     tiles, openIt, openPurchasing, openNone, pastIt, pastPurchasing, pastNone,

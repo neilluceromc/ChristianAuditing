@@ -58,7 +58,10 @@ export function navDestinations(sections: NavSection[], role: Role): NavDestinat
   const byLabel = new Map(items.map((i) => [i.label, i]));
   const uses = new Map<string, number>();
   for (const view of items.flatMap((i) => i.views ?? [])) uses.set(view.label, (uses.get(view.label) ?? 0) + 1);
-  const viewName = (link: string, view: string) => ((uses.get(view) ?? 0) > 1 ? `${link} › ${view}` : view);
+  // A view is named under its link when its name repeats across the views, or is another link's name (Phase 46:
+  // Finance's Stock › Reports beside the Reports link).
+  const viewName = (link: string, view: string) =>
+    (uses.get(view) ?? 0) > 1 || (view !== link && byLabel.has(view)) ? `${link} › ${view}` : view;
   const byHref = new Map<string, NavDestination>();
   const add = (label: string, href: string) => {
     const d = byHref.get(href);

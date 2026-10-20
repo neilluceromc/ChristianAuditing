@@ -16,7 +16,11 @@ const badges: NavBadges = {
 };
 
 const render = (current: NavCurrent) =>
-  renderToStaticMarkup(<NavTree sections={sections} current={current} badges={badges} />);
+  renderToStaticMarkup(<NavTree workspace="it" sections={sections} current={current} badges={badges} />);
+
+/** Every `<button …>` opening tag in the markup. */
+const buttons = (html: string) => [...html.matchAll(/<button [^>]*>/g)].map((m) => m[0]);
+const attr = (tag: string, name: string) => new RegExp(` ${name}="([^"]*)"`).exec(tag)?.[1];
 
 /** Every link in the markup: its href, its opening `<a …>` tag, and the markup up to its closing `</a>`. */
 function links(html: string): Array<{ href: string; tag: string; body: string }> {
@@ -133,6 +137,43 @@ describe("NavTree", () => {
   it("gives the links without views no chevron", () => {
     const html = render({ item: null, view: null });
     for (const href of ["/", "/inventory/work"]) expect(link(html, href).body).not.toContain(CHEVRON);
+  });
+
+  describe("click to open (Phase 46 spec §4.2)", () => {
+    const html = render({ item: "Inventory", view: "Spare" });
+
+    it("makes each chevron a toggle button of its own, outside the link, named for the link's views", () => {
+      const toggles = buttons(html);
+      // Inventory, Employees, Approvals, Offboarding, Reservations, Reports, Activity, Setup
+      expect(toggles).toHaveLength(8);
+      expect(toggles.map((b) => attr(b, "aria-label"))).toEqual([
+        "Inventory views", "Employees views", "Approvals views", "Offboarding views", "Reservations views",
+        "Reports views", "Activity views", "Setup views",
+      ]);
+      for (const b of toggles) expect(attr(b, "type")).toBe("button");
+      for (const l of links(html)) expect(l.body).not.toContain("<button");
+      for (const l of links(html)) expect(l.body).not.toContain(CHEVRON);
+    });
+
+    it("says the current link is expanded and controls its views list; every other link is collapsed", () => {
+      const [inventory, ...rest] = buttons(html);
+      expect(attr(inventory, "aria-expanded")).toBe("true");
+      const id = attr(inventory, "aria-controls")!;
+      expect(id).toBeTruthy();
+      expect(html).toContain(`<ul id="${id}"`);
+      for (const b of rest) {
+        expect(attr(b, "aria-expanded")).toBe("false");
+        // the id is still named; its list is not drawn while closed, so Tab never passes through hidden views
+        expect(html).not.toContain(`id="${attr(b, "aria-controls")}"`);
+      }
+      expect(new Set(buttons(html).map((b) => attr(b, "aria-controls"))).size).toBe(8);
+    });
+
+    it("opens nothing by itself on a page with no current link", () => {
+      const none = render({ item: null, view: null });
+      expect(buttons(none).every((b) => attr(b, "aria-expanded") === "false")).toBe(true);
+      expect(none.match(/<ul/g)).toHaveLength(sections.length);
+    });
   });
 });
 

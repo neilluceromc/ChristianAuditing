@@ -5,12 +5,14 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
 import type { NavBadges } from "@/lib/nav-badges";
 import { currentNav } from "@/lib/nav-match";
-import type { VisibleSection } from "@/lib/workspaces";
+import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { NavRail } from "./nav-rail";
 import { NavTree } from "./nav-tree";
 import { useSidebar } from "./sidebar-collapse";
 
 interface NavListProps {
+  /** the workspace whose links these are: the full tree remembers its opened links per workspace */
+  workspace: WorkspaceId;
   sections: VisibleSection[];
   badges: NavBadges;
   /** the viewer's default asset class: `/inventory` drops `cls` from its URLs when it is this (spec §4.2) */
@@ -47,6 +49,7 @@ function PathOnlyNav(props: NavListProps) {
 }
 
 function ScrolledNav({
+  workspace,
   sections,
   badges,
   defaultCls,
@@ -74,7 +77,7 @@ function ScrolledNav({
       {rail ? (
         <NavRail sections={sections} current={current} badges={badges} />
       ) : (
-        <NavTree sections={sections} current={current} badges={badges} onNavigate={onNavigate} />
+        <NavTree workspace={workspace} sections={sections} current={current} badges={badges} onNavigate={onNavigate} />
       )}
     </div>
   );

@@ -33,7 +33,20 @@ const LABEL: Record<CountKey, (n: number) => string> = {
   prDraft: (n) => `${n} drafts`,
   prSubmitted: (n) => `${n} awaiting IT`,
   prItReviewed: (n) => `${n} awaiting finance`,
+  // Phase 46 spec §4.3
+  stockLow: (n) => `${n} below reorder level`,
+  stocktakesOverdue: (n) => `${n} overdue`,
+  // RENEWING_DAYS (supplier-list.ts), spelled out: importing it would pull the supplier schema into the shell bundle.
+  suppliersRenewing: (n) => `${n} renewing within 30 days`,
+  finToConfirmIt: (n) => `${n} IT registration${n === 1 ? "" : "s"} to confirm`,
+  finToConfirmPurchasing: (n) => `${n} Purchasing registration${n === 1 ? "" : "s"} to confirm`,
+  usersDisabled: (n) => `${n} disabled`,
+  deadDeliveries: (n) => `${n} failed deliver${n === 1 ? "y" : "ies"}`,
+  flagsUnavailable: (n) => `${n} unavailable`,
 };
+
+/** Counts drawn red with a dot whenever they show (spec §4.3): failed webhook deliveries wait on a replay. */
+const ALWAYS_URGENT: ReadonlySet<CountKey> = new Set<CountKey>(["deadDeliveries"]);
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -47,11 +60,11 @@ export function navCountKeys(sections: VisibleSection[]): CountKey[] {
   return [...keys];
 }
 
-/** One count as a badge; null when there is nothing to show. Red only for approvals with any overdue. */
+/** One count as a badge; null when there is nothing to show. Red for approvals with any overdue, and failed deliveries. */
 export function countBadge(key: CountKey, n: number, badges: NavBadges): BadgeView | null {
   if (n <= 0) return null;
   const overdue = key === "approvals" && badges.approvals.overdue > 0;
-  return { n, label: LABEL[key](n) + (overdue ? ", some past SLA" : ""), fault: overdue };
+  return { n, label: LABEL[key](n) + (overdue ? ", some past SLA" : ""), fault: overdue || ALWAYS_URGENT.has(key) };
 }
 
 /**

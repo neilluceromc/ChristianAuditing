@@ -62,7 +62,7 @@ export function MobileNav({
         <Drawer open onClose={() => setOpen(false)} title={workspaceLabel} side="left" width={280}>
           <div className="flex min-h-full flex-col gap-3">
             <WorkspaceOptions current={ws} allowed={allowed} meta={meta} onSwitch={() => setOpen(false)} />
-            <NavList sections={sections} badges={badges} defaultCls={defaultCls} onNavigate={() => setOpen(false)} />
+            <NavList workspace={ws} sections={sections} badges={badges} defaultCls={defaultCls} onNavigate={() => setOpen(false)} />
             <div className="mt-auto flex flex-col gap-2 border-t border-border-faint pt-3">
               {/* Spec §9: Settings › Cris, for the roles that have Cris — the sidebar's account menu offers the same. */}
               {hasCris(user.role) && (

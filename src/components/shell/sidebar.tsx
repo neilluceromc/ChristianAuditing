@@ -64,7 +64,7 @@ export function Sidebar({
           }
         />
         <div className="nav-scroll-shadows min-h-0 flex-1 overflow-y-auto group-data-[sidebar=rail]/shell:[scrollbar-width:none]">
-          <NavList sections={sections} badges={badges} defaultCls={defaultCls} followRail />
+          <NavList workspace={ws} sections={sections} badges={badges} defaultCls={defaultCls} followRail />
         </div>
         <div className="px-2 py-1.5">
           <SidebarCollapseButton />

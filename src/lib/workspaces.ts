@@ -32,7 +32,11 @@ export const WORKSPACE_META: Record<WorkspaceId, { label: string; landing: strin
 export type CountKey =
   | "worklist" | "approvals" | "purchaseReviews"
   | "itSpare" | "itDefective" | "itMissing" | "leaving"
-  | "prDraft" | "prSubmitted" | "prItReviewed";
+  | "prDraft" | "prSubmitted" | "prItReviewed"
+  // Phase 46 spec §4.3
+  | "stockLow" | "stocktakesOverdue" | "suppliersRenewing"
+  | "finToConfirmIt" | "finToConfirmPurchasing"
+  | "usersDisabled" | "deadDeliveries" | "flagsUnavailable";
 
 /**
  * What a view matches on, param by param: a string is the param's exact value; a list matches when any of the
@@ -40,7 +44,7 @@ export type CountKey =
  */
 export type NavMatch = Record<string, string | readonly string[]>;
 
-/** One view under a link: shown only while that link is the current one (spec §4.2). */
+/** One view under a link: shown while that link is the current one, or its toggle opened it (Phase 46 spec §4.2). */
 export interface NavView {
   label: string;
   href: string;
@@ -90,15 +94,28 @@ export interface VisibleSection {
 /**
  * A param value equal to the page's own default is treated as absent when matching views (spec §4.2), so the
  * param-less view still wins: `tab=open` on /approvals, `state=ACTIVE` on /reservations, `tab=client` on
- * /equipment-by-client.
+ * /equipment-by-client. Phase 46: `cls=IT` on /finance/assets (its IT views match on it, so a Purchasing URL lights
+ * none of them), `tab=schedule` on /finance/depreciation (the schedule's own links carry it), `state=ALL` on
+ * /admin/webhooks/deliveries.
  */
 export const PAGE_DEFAULTS: Record<string, Record<string, string>> = {
   "/approvals": { tab: "open" },
   "/reservations": { state: "ACTIVE" },
   "/equipment-by-client": { tab: "client" },
+  "/finance/assets": { cls: "IT" },
+  "/finance/depreciation": { tab: "schedule" },
+  "/admin/webhooks/deliveries": { state: "ALL" },
 };
 
 const HOME: NavItem = { label: "Home", href: "/", icon: "home" };
+
+// Phase 46 spec §4.3: the Approvals page's three tabs, under Purchasing's and Finance's Approvals (IT's adds
+// Purchase reviews between Mine and Closed).
+const APPROVAL_VIEWS: NavView[] = [
+  { label: "Open", href: "/approvals", count: "approvals" },
+  { label: "Mine", href: "/approvals?tab=mine" },
+  { label: "Closed", href: "/approvals?tab=closed" },
+];
 
 // IT and Finance share the Phase 38 report and its two tabs (spec §3.3).
 const REPORTS: NavItem = {
@@ -256,6 +273,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           icon: "suppliers",
           views: [
             { label: "All suppliers", href: "/purchases/suppliers" },
+            // Phase 46: contracts ending within 30 days (supplier-list.ts, RENEWING_DAYS).
+            { label: "Renewing soon", href: "/purchases/suppliers?renewing=30", count: "suppliersRenewing" },
             { label: "New supplier", href: "/purchases/suppliers/new", roles: ["admin", "purchasing_staff"] },
             { label: "Import suppliers", href: "/purchases/suppliers/import", roles: ["admin", "purchasing_staff"] },
           ],
@@ -268,9 +287,12 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           icon: "stock",
           views: [
             { label: "Items", href: "/stock" },
+            { label: "Below reorder", href: "/stock?low=1", count: "stockLow" },
             { label: "Receive stock", href: "/stock/receive", roles: ["admin", "purchasing_staff"] },
             { label: "Issue stock", href: "/stock/issue", roles: ["admin", "purchasing_staff"] },
-            { label: "Stocktakes", href: "/stock/stocktakes" },
+            // The count is how many are overdue; the page lists every stocktake (no overdue filter exists), so the
+            // count is exempt from equalling its rows (NAV_COUNT_UNFILTERED in nav-counts.ts).
+            { label: "Stocktakes", href: "/stock/stocktakes", count: "stocktakesOverdue" },
             { label: "Reports", href: "/stock/reports" },
             { label: "Import items", href: "/stock/import", roles: ["admin", "purchasing_staff"] },
           ],
@@ -287,8 +309,17 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           ],
         },
         // Phase 14: Purchasing approves lifecycle changes on its own class and reads the directory.
-        { label: "Approvals", href: "/approvals", icon: "approval", badge: ["approvals"] },
-        { label: "Employees", href: "/employees", icon: "employee" },
+        { label: "Approvals", href: "/approvals", icon: "approval", badge: ["approvals"], views: APPROVAL_VIEWS },
+        {
+          label: "Employees",
+          href: "/employees",
+          icon: "employee",
+          views: [
+            { label: "Everyone", href: "/employees" },
+            { label: "Client staff", href: "/employees?kind=CLIENT" },
+            { label: "Internal staff", href: "/employees?kind=INTERNAL" },
+          ],
+        },
       ],
     },
     {
@@ -313,9 +344,39 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "work",
       items: [
         HOME,
-        { label: "Assets", href: "/finance/assets", icon: "inventory" },
-        { label: "Depreciation", href: "/finance/depreciation", icon: "depreciation" },
-        { label: "Approvals", href: "/approvals", icon: "approval", badge: ["approvals"] },
+        {
+          // Phase 46 spec §4.3: the page shows one class at a time, so To confirm has a view per class. The IT views
+          // match on the page's default class (PAGE_DEFAULTS), so a Purchasing URL never lights them.
+          label: "Assets",
+          href: "/finance/assets",
+          icon: "inventory",
+          views: [
+            { label: "All assets", href: "/finance/assets" },
+            {
+              label: "To confirm · IT",
+              href: "/finance/assets?fin=with-finance",
+              count: "finToConfirmIt",
+              match: { cls: "IT", fin: "with-finance" },
+            },
+            {
+              label: "To confirm · Purchasing",
+              href: "/finance/assets?cls=PURCHASING&fin=with-finance",
+              count: "finToConfirmPurchasing",
+            },
+            { label: "Capitalized", href: "/finance/assets?fin=approved", match: { cls: "IT", fin: "approved" } },
+          ],
+        },
+        {
+          // The page's own two tabs.
+          label: "Depreciation",
+          href: "/finance/depreciation",
+          icon: "depreciation",
+          views: [
+            { label: "Schedule", href: "/finance/depreciation" },
+            { label: "Policies", href: "/finance/depreciation?tab=policies" },
+          ],
+        },
+        { label: "Approvals", href: "/approvals", icon: "approval", badge: ["approvals"], views: APPROVAL_VIEWS },
         {
           label: "Purchases",
           href: "/purchases",
@@ -328,8 +389,28 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
             { label: "Cancelled", href: "/purchases?state=CANCELLED" },
           ],
         },
-        { label: "Suppliers", href: "/purchases/suppliers", icon: "suppliers" },
-        { label: "Stock", href: "/stock", icon: "stock" },
+        {
+          // Spec §4.3 ruling: there is no "verified" field for bank details, so the views are the contract facet's.
+          label: "Suppliers",
+          href: "/purchases/suppliers",
+          icon: "suppliers",
+          views: [
+            { label: "All suppliers", href: "/purchases/suppliers" },
+            { label: "Active contracts", href: "/purchases/suppliers?contract=ACTIVE" },
+            { label: "Expired contracts", href: "/purchases/suppliers?contract=EXPIRED" },
+          ],
+        },
+        {
+          // The read surfaces only: Finance never receives, issues or imports stock.
+          label: "Stock",
+          href: "/stock",
+          icon: "stock",
+          views: [
+            { label: "Items", href: "/stock" },
+            { label: "Stocktakes", href: "/stock/stocktakes" },
+            { label: "Reports", href: "/stock/reports" },
+          ],
+        },
       ],
     },
     { heading: "reports", items: [REPORTS] },
@@ -337,14 +418,48 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
   ],
   admin: [
     { heading: "start", items: [HOME] },
-    { heading: "access", items: [{ label: "Users & roles", href: "/admin/users", icon: "users" }] },
+    {
+      heading: "access",
+      items: [
+        {
+          label: "Users & roles",
+          href: "/admin/users",
+          icon: "users",
+          views: [
+            { label: "All users", href: "/admin/users" },
+            { label: "Disabled", href: "/admin/users?disabled=1", count: "usersDisabled" },
+          ],
+        },
+      ],
+    },
     {
       heading: "integrations",
       items: [
-        { label: "Webhooks", href: "/admin/webhooks", icon: "webhooks" },
-        { label: "Feature flags", href: "/admin/flags", icon: "flags" },
+        {
+          label: "Webhooks",
+          href: "/admin/webhooks",
+          icon: "webhooks",
+          // Failed deliveries wait on a replay, so the closed link keeps their (red) count, as Approvals does.
+          badge: ["deadDeliveries"],
+          views: [
+            { label: "Endpoints", href: "/admin/webhooks" },
+            { label: "Failed deliveries", href: "/admin/webhooks/deliveries?state=DEAD", count: "deadDeliveries" },
+            { label: "All deliveries", href: "/admin/webhooks/deliveries" },
+          ],
+        },
+        {
+          label: "Feature flags",
+          href: "/admin/flags",
+          icon: "flags",
+          views: [
+            { label: "All flags", href: "/admin/flags" },
+            { label: "Unavailable", href: "/admin/flags?state=unavailable", count: "flagsUnavailable" },
+          ],
+        },
       ],
     },
+    // Phase 46: the audit log, which admin reads through the IT workspace's path rule (admin holds every workspace).
+    { heading: "records", items: [{ label: "Audit log", href: "/audit", icon: "audit" }] },
   ],
 };
 

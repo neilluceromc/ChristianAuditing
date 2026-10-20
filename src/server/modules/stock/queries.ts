@@ -694,6 +694,16 @@ export async function stockExportRows(state: ListState, today: string = localDat
   };
 }
 
+/**
+ * Phase 46 (spec §4.3, the Below reorder view's count): how many items `/stock` lists under `state` with `low=1` —
+ * `listStockItems`'s own `lowCount`: the low filter is derived, so the candidates are the page's where without it, and
+ * the low ones among them are counted (one candidate pass, one balances groupBy).
+ */
+export async function stockLowCount(state: ListState): Promise<number> {
+  const candidates = await candidateBalances(buildStockItemWhere({ ...state, filters: { ...state.filters, low: [] } }));
+  return candidates.filter((c) => isLow(c.balance, c.reorderLevel)).length;
+}
+
 /** OPEN stocktakes whose close-by day is before today (Manila): the Home count and the Overview's Needs-you rows. */
 export function stocktakesOverdueWhere(today: string): Prisma.StocktakeWhereInput {
   return { state: "OPEN", dueAt: { lt: manilaDayBounds(today, today).start } };

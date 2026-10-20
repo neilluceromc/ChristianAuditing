@@ -15,7 +15,6 @@ import {
   type ItMove, type KpiTile, type MoveEntry, type Overview, type TrendSeries,
 } from "@/lib/overview";
 import { PURCHASE_TABS, type PurchaseTabId } from "@/lib/purchases-list";
-import { finWhere } from "@/lib/registration";
 import { HISTORY_POINTS, type SnapshotKey } from "@/lib/snapshot";
 import { DEFAULT_EXPIRY_WINDOW } from "@/lib/stock-allocation";
 import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
@@ -26,7 +25,7 @@ import { inventoryTileCounts } from "@/server/modules/inventory/queries";
 import { kitGapsByGroup } from "@/server/modules/employees/queries";
 import { stateCounts } from "@/server/modules/purchases/queries";
 import { overdueStocktakes, stockHomeSignals } from "@/server/modules/stock/queries";
-import { financeListWhere } from "@/server/modules/finance/queries";
+import { financeViewWhere } from "@/server/modules/finance/queries";
 import { bookValueByCategory, capitalizedSince } from "@/server/modules/finance/depreciation-queries";
 import { adminHome, deliveriesByStatus, disabledAdmins, failingEndpoints } from "@/server/modules/admin/queries";
 import {
@@ -356,7 +355,7 @@ const TREND_MONTHS = 12;
 
 /** /finance/assets?fin=with-finance (and &cls=PURCHASING): the page's own "To review" chip count. */
 function toConfirmCount(cls: AssetClass): Promise<number> {
-  return prisma.asset.count({ where: { AND: [financeListWhere({ cls, status: null, q: "" }), finWhere("with-finance")] } });
+  return prisma.asset.count({ where: financeViewWhere(cls, "with-finance") });
 }
 
 const FINANCE_KEYS = [
