@@ -275,9 +275,9 @@ test.describe.serial("Finance → one asset", () => {
     const thisYear = String(Math.floor(asOf / 12));
     await expect(years(page).getByRole("link")).toHaveText([...lifeYears.map((y) => new RegExp(`^${y}`)), "All years"]);
     await expect(years(page).getByRole("link", { name: new RegExp(`^${thisYear}`) })).toHaveAttribute("aria-current", "true");
-    // "2 mo" must not match "12 mo"
-    const mo = (n: number) => new RegExp(`(^|\\D)${n} mo`);
-    await expect(years(page).getByRole("link", { name: new RegExp(`^${firstYear}`) })).toContainText(mo(12 - (start % 12)));
+    // The tab reads "2024" then "2 mo · …" with nothing between, so the year anchors the count ("2 mo" ≠ "12 mo")
+    await expect(years(page).getByRole("link", { name: new RegExp(`^${firstYear}`) }))
+      .toContainText(new RegExp(`^${firstYear}${12 - (start % 12)} mo`));
     await expect(main(page).getByText("Opening book value", { exact: true })).toBeVisible();
     const months = page.getByRole("table", { name: `Depreciation by month, ${thisYear}` });
     await expect(months.getByRole("row", { name: new RegExp(`^${monthLabel(asOf)}`) })).toContainText("This month");
