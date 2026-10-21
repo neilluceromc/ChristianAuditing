@@ -32,6 +32,11 @@ describe("SearchBox", () => {
     expect(source).not.toMatch(/defaultValue=/);
     expect(source).toMatch(/value=\{text\}/);
   });
+  it("keeps a fallback reload's note up to date while typing, and prefers text typed before hydration (final review I2)", () => {
+    const source = readFileSync(new URL("./search-box.tsx", import.meta.url), "utf8");
+    expect(source).toMatch(/followPageSearch\(e\.currentTarget\)/);
+    expect(source).toMatch(/pickRestoredSearch\(note, el, value\)/);
+  });
   it("hands its callers the debounced search and whether Enter sent it", () => {
     const source = readFileSync(new URL("./search-box.tsx", import.meta.url), "utf8");
     expect(source).toMatch(/debounceMs = SEARCH_DEBOUNCE_MS/);

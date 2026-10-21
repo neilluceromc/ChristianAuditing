@@ -120,15 +120,41 @@ describe("createLiveSearch — the URL catching up keeps the box (focus and care
     const s = make();
     s.input("a");
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(s.onValue("a")).toBe(false);
     s.input("");
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(s.onValue("")).toBe(false);
     s.input("b");
     vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
-    expect(s.onValue("a")).toBe(false);
-    expect(s.onValue("")).toBe(false);
     expect(s.onValue("b")).toBe(false);
     // now Clear filters sets q="" — not an echo any more
     expect(s.onValue("")).toBe(true);
+  });
+
+  it("a search dropped before it landed is not taken for an echo later (final review M2: Back shows the right text)", () => {
+    // q is "", the box sends "a", then the person deletes it and "" is sent before "a" landed. The URL never changes
+    // (the router drops the superseded "a"), so neither comes back. A later Back to ?q=a is a change from elsewhere.
+    const s = make();
+    s.input("a");
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    s.input("");
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    expect(submit.mock.calls).toEqual([["a", { enter: false }], ["", { enter: false }]]);
+    expect(s.onValue("a")).toBe(true);
+    // and the same through Clear ×, and back to a non-empty search the URL already shows
+    const t = make("Carlo");
+    t.input("Carlos");
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    t.input("Carlo");
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS); // back to the search the URL shows: sent, superseding "Carlos"
+    expect(submit).toHaveBeenLastCalledWith("Carlo", { enter: false });
+    expect(t.onValue("Carlos")).toBe(true);
+    const u = make("x");
+    u.input("xy");
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    u.clear();
+    expect(u.onValue("")).toBe(false); // Clear's own search landing
+    expect(u.onValue("xy")).toBe(true);
   });
 
   it("is idempotent for a value it has already seen", () => {
@@ -147,6 +173,33 @@ describe("createLiveSearch — a keystroke stops an older search's reload (Task 
     s.input("Ca");
     expect(onInput).toHaveBeenCalledTimes(2);
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("calls onInput on Enter and Clear × too, before they send (final review M1)", () => {
+    const calls: string[] = [];
+    submit.mockImplementation((q: string) => void calls.push(`submit:${q}`));
+    const s = createLiveSearch({ initial: "", debounceMs: SEARCH_DEBOUNCE_MS, submit, onInput: () => void calls.push("input") });
+    s.enter("BR-LT-0148");
+    s.clear();
+    expect(calls).toEqual(["input", "submit:BR-LT-0148", "input", "submit:"]);
+  });
+
+  it("wired to cancelStuckNavWatch, Enter cancels the pending fallback of the live search before it", () => {
+    // type a tag, pause (the live replace starts a watch), then Enter: the exact-tag lookup may outlast the watch
+    const loc = { origin: "https://app.example", pathname: "/inventory", search: "" };
+    const replace = vi.fn();
+    watchSamePageNav(new URL("https://app.example/inventory?q=BR-LT-0148"), {
+      enabled: true, location: loc, history: "replace", replace, now: () => 0,
+      getResourceEntries: () => [{ name: "https://app.example/inventory?q=BR-LT-0148&_rsc=1", startTime: 1 }],
+      beforeFallback: () => {},
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+    });
+    const s = createLiveSearch({ initial: "", debounceMs: SEARCH_DEBOUNCE_MS, submit, onInput: cancelStuckNavWatch });
+    s.enter("BR-LT-0148");
+    vi.advanceTimersByTime(STUCK_NAV_MS * 3);
+    expect(replace).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledWith("BR-LT-0148", { enter: true });
   });
 
   it("wired to cancelStuckNavWatch, typing on cancels the pending fallback of the search before", () => {

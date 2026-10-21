@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
 import { SEARCH_DEBOUNCE_MS, createLiveSearch } from "@/lib/live-search";
-import { takePageSearch } from "@/lib/search-restore";
+import { followPageSearch, pickRestoredSearch, takePageSearch } from "@/lib/search-restore";
 import { cancelStuckNavWatch } from "@/lib/stuck-nav";
 
 /** How a search was sent: `enter` for the Enter key (Inventory's scanner contract opens an exact tag only then). */
@@ -29,6 +29,10 @@ export interface SearchSubmit { enter: boolean }
  * does happen while the box has focus, `stuck-nav` notes the text and caret (`rememberPageSearch`) and the reloaded
  * box takes the note once on mount (`takePageSearch`): focus, text and caret come back, and a search the reload
  * missed goes out.
+ *
+ * Final review I2: the note follows the old page's typing until it unloads (`followPageSearch` on every keystroke,
+ * and pagehide / beforeunload), and text typed into the reloaded page before hydration wins over the note
+ * (`pickRestoredSearch`).
  */
 export function SearchBox({
   value, ariaLabel, placeholder, onSubmit, className, inputClassName, debounceMs = SEARCH_DEBOUNCE_MS,
@@ -51,17 +55,21 @@ export function SearchBox({
   // a caret to put back once a restored text has rendered
   const pendingCaret = useRef<number | null>(null);
   useEffect(() => {
-    const restored = takePageSearch();
     const el = inputRef.current;
-    if (!restored || !el) return;
+    const note = takePageSearch();
+    if (!note || !el) return;
+    // Final review I2: text typed into the server-rendered field before hydration is newer than the note: it wins.
+    const restored = pickRestoredSearch(note, el, value);
+    if (!restored) return;
     el.focus();
-    if (restored.text === el.value) {
-      el.setSelectionRange(restored.caret, restored.caret);
-      return;
+    if (restored.text === el.value) el.setSelectionRange(restored.caret, restored.caret);
+    else pendingCaret.current = restored.caret;
+    if (restored.text !== value) {
+      setText(restored.text);
+      live.input(restored.text); // the reload showed the older search: the typed one goes out after the usual pause
     }
-    pendingCaret.current = restored.caret;
-    setText(restored.text);
-    live.input(restored.text); // the reload showed the older search: the typed one goes out after the usual pause
+    // mount only: `value` here is what the server rendered
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live]);
   useEffect(() => {
     const el = inputRef.current;
@@ -89,6 +97,7 @@ export function SearchBox({
         className={cn("pl-8 pr-7", inputClassName)}
         onChange={(e) => {
           setText(e.currentTarget.value);
+          followPageSearch(e.currentTarget); // a fallback reload under way: its note keeps up with the typing
           live.input(e.currentTarget.value);
         }}
         onKeyDown={(e) => {

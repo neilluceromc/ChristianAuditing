@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { pushGuarded, replaceGuarded } from "@/lib/stuck-nav";
+import { liveSearchReplace, pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * Phase 30 (spec §6.2, Doherty): every list navigation the inventory page makes in code — a search,
@@ -18,7 +18,9 @@ interface ListNavigation {
   /** `router.push(href)` inside the shared transition, with the stuck same-page navigation fallback (`pushGuarded`) */
   navigate: (href: string) => void;
   /**
-   * The same, as `router.replace` (spec §7.2): the search box's live search, so typing never floods the history.
+   * The same, as `router.replace` (spec §7.2): the search box's live search, so typing never floods the history. A
+   * stuck one is retried once as a soft navigation before the page is loaded the ordinary way (`liveSearchReplace`,
+   * final review I1). Only the search boxes use it.
    */
   replace: (href: string) => void;
 }
@@ -33,7 +35,7 @@ export function ListNavigationProvider({ children }: { children: React.ReactNode
     [router],
   );
   const replace = useCallback(
-    (href: string) => startTransition(() => replaceGuarded(router, href)),
+    (href: string) => startTransition(() => liveSearchReplace(router, href)),
     [router],
   );
   const value = useMemo(() => ({ pending, navigate, replace }), [pending, navigate, replace]);
@@ -49,7 +51,7 @@ export function useListNavigation(): ListNavigation {
   const ctx = useContext(ListNavigationContext);
   const router = useRouter();
   const fallback = useMemo<ListNavigation>(
-    () => ({ pending: false, navigate: (href) => pushGuarded(router, href), replace: (href) => replaceGuarded(router, href) }),
+    () => ({ pending: false, navigate: (href) => pushGuarded(router, href), replace: (href) => liveSearchReplace(router, href) }),
     [router],
   );
   return ctx ?? fallback;

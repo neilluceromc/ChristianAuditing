@@ -29,8 +29,9 @@ export function createLiveSearch(opts: {
   debounceMs: number;
   submit: (q: string, how: { enter: boolean }) => void;
   /**
-   * Every keystroke, before the debounce. SearchBox passes `cancelStuckNavWatch` (Task 6 review I2): an earlier live
-   * search's stuck-navigation fallback must not reload the page over newer typing; the next search starts its own.
+   * Every keystroke (before the debounce), Enter and Clear ×. SearchBox passes `cancelStuckNavWatch` (Task 6 review
+   * I2, final review M1): an earlier live search's stuck-navigation fallback must not reload the page over newer
+   * typing or an Enter; the next search starts its own.
    */
   onInput?: () => void;
   setTimeout?: (fn: () => void, ms: number) => unknown;
@@ -51,7 +52,11 @@ export function createLiveSearch(opts: {
   /** the search that will be in force once everything sent has landed */
   const latest = () => inFlight[inFlight.length - 1] ?? known;
   const send = (q: string, enter: boolean) => {
-    if (q !== latest()) inFlight.push(q);
+    // Final review M2: back to the search the URL already shows (typed "a", then deleted it before "a" landed). The
+    // URL won't change, so nothing sent before can be "seen come back" any more: dropping them keeps a later Back to
+    // one of them (say ?q=a) from passing for this box's own echo, which would leave the box's text out of step.
+    if (q === known) inFlight = [];
+    else if (q !== latest()) inFlight.push(q);
     opts.submit(q, { enter });
   };
 
@@ -66,10 +71,14 @@ export function createLiveSearch(opts: {
       }, opts.debounceMs);
     },
     enter(text) {
+      // Final review M1: Enter supersedes a pending stuck-navigation watch too (Inventory's exact-tag lookup can take
+      // longer than the watch has left); the navigation it starts gets its own.
+      opts.onInput?.();
       cancel();
       send(text.trim(), true);
     },
     clear() {
+      opts.onInput?.();
       cancel();
       if (latest() !== "") send("", false);
     },

@@ -10,9 +10,15 @@
  * navigation started from, and the browser recorded a request for the target after the navigation began (so the
  * router really set off, and the app didn't cancel the click), load the target the ordinary way. A working click
  * stays instant; a stuck one recovers in about a second and a half.
+ *
+ * Live search (final review I1, 2026-10-21): the search box sends a same-page query navigation after every pause in
+ * typing, so a full load there is far more visible than after a filter click. For those only (`liveSearchReplace`)
+ * the watch first retries the soft navigation once (`router.replace` to the same target) and loads the page the
+ * ordinary way only if the retry hasn't committed either within another `STUCK_NAV_MS`. Every other navigation keeps
+ * the single watch and the direct fallback. Whether the retry commits in the production build is checked there.
  */
 
-import { rememberPageSearch } from "./search-restore";
+import { rememberPageSearchUntilUnload } from "./search-restore";
 
 /** How long a same-page query navigation gets to commit before the page is loaded the ordinary way. */
 export const STUCK_NAV_MS = 1200;
@@ -55,17 +61,25 @@ export interface WatchDeps {
   /** The browser's recorded requests (performance.getEntriesByType("resource")). */
   getResourceEntries?: () => ReadonlyArray<ResourceEntryLike>;
   /**
-   * Runs just before the ordinary load. Defaults to `rememberPageSearch` (spec §7.2): when the page's search box has
-   * focus, its text and caret survive the reload.
+   * Runs just before the ordinary load. Defaults to `rememberPageSearchUntilUnload` (spec §7.2; final review I2): when
+   * the page's search box has focus, its text and caret survive the reload, including what is typed while the old
+   * page is still unloading.
    */
   beforeFallback?: () => void;
+  /**
+   * Live search only (`liveSearchReplace`): the first time the watch finds the navigation stuck, call this (the same
+   * soft navigation again) and watch once more; the ordinary load happens only if that also hasn't committed.
+   */
+  retry?: () => void;
 }
 
 /**
- * Query parameters a page consumes and then strips with a redirect: Inventory's `go=1` (spec §7.2), which only direct
- * links and e2e send now — the search box's Enter opens a scanned tag through `findExactTag` instead. A navigation to a
- * URL carrying one has committed once the address bar shows that URL without it, even when that is the page it
- * started from.
+ * Query parameters a page consumes and then strips with a redirect: Inventory's `go=1` (spec §7.2). DIRECT LINKS ONLY:
+ * nothing in the app sends `go=1` through the router any more (the search box's Enter opens a scanned tag through
+ * `findExactTag`), and a typed, bookmarked or e2e `?go=1` URL is a full document load, which is never watched. So
+ * `landedStripped` cannot fire today; it stays as a harmless guard should an in-app `go=1` navigation ever return: a
+ * navigation to a URL carrying one has committed once the address bar shows that URL without it, even when that is
+ * the page it started from.
  */
 export const ONE_SHOT_PARAMS: readonly string[] = ["go"];
 
@@ -125,7 +139,8 @@ let latestWatch: { token: number; from: string; to: string; since: number } | nu
 /**
  * After a same-page query navigation has been started, check back in `STUCK_NAV_MS`: if the address bar is still
  * on the page it started from (not the target, not anywhere else the operator went meanwhile) and no newer watch
- * has started, load `target` the ordinary way. Returns a cancel function.
+ * has started, load `target` the ordinary way — or, given `retry`, first retry the soft navigation once and check
+ * again after another `STUCK_NAV_MS`. Returns a cancel function (it stops the retry's check too).
  */
 export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void {
   const enabled = deps.enabled ?? process.env.NODE_ENV === "production";
@@ -140,7 +155,7 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
 
   const now = deps.now ?? (() => window.performance.now());
   const getEntries = deps.getResourceEntries ?? (() => window.performance.getEntriesByType("resource"));
-  const beforeFallback = deps.beforeFallback ?? (() => rememberPageSearch());
+  const beforeFallback = deps.beforeFallback ?? (() => rememberPageSearchUntilUnload());
 
   const from = deps.from ?? pathAndSearch(loc);
   const to = pathAndSearch(target);
@@ -153,20 +168,32 @@ export function watchSamePageNav(target: URL, deps: WatchDeps = {}): () => void 
   const token = ++latestToken;
   latestWatch = { token, from, to, since };
   let done = false;
-  const id = set(() => {
+  let retried = false;
+  const finish = () => {
     done = true;
     if (latestWatch?.token === token) latestWatch = null;
-    if (token !== latestToken) return;
+  };
+  const check = () => {
+    if (token !== latestToken) return finish();
     const here = pathAndSearch(loc);
     // Committed (here === to, or `to` minus a one-shot param the page stripped), or the operator has gone somewhere
     // else meanwhile (here !== from): leave it alone.
-    if (here === to || landedStripped(loc, target) || here !== from) return;
+    if (here === to || landedStripped(loc, target) || here !== from) return finish();
     // Self-protection: only a navigation the router actually started can be stuck. A click the app cancelled
     // (without calling cancelStuckNavWatch) never fetched the target, and reloading would throw away its work.
-    if (!requestedSince(target, since, getEntries())) return;
+    if (!requestedSince(target, since, getEntries())) return finish();
+    // Live search: one more soft try first, watched for the same window (cancel and newer watches still stop it).
+    if (deps.retry && !retried) {
+      retried = true;
+      id = set(check, STUCK_NAV_MS);
+      deps.retry();
+      return;
+    }
+    finish();
     beforeFallback();
     fallback(target.href);
-  }, STUCK_NAV_MS);
+  };
+  let id = set(check, STUCK_NAV_MS);
   const cancel = () => {
     if (done) return;
     done = true;
@@ -206,6 +233,7 @@ function guarded(
   href: string,
   options: { scroll?: boolean } | undefined,
   history: "push" | "replace",
+  retrySoft = false,
 ): void {
   // Read before the router call: the start point is the page the navigation leaves.
   const target = typeof window === "undefined" ? null : new URL(href, window.location.href);
@@ -218,7 +246,10 @@ function guarded(
   const since = watch ? window.performance.now() : undefined;
   if (history === "replace") router.replace(href, options);
   else router.push(href, options);
-  if (watch && target) watchSamePageNav(target, { history, from, since });
+  if (!watch || !target) return;
+  // the same soft navigation again (only `liveSearchReplace` asks for it, so it is always a replace)
+  const retry = retrySoft ? () => router.replace(href, options) : undefined;
+  watchSamePageNav(target, { history, from, since, retry });
 }
 
 /** `router.push(href)`, plus the stuck-navigation fallback when `href` is this page with a different query. */
@@ -229,6 +260,14 @@ export function pushGuarded(router: RouterLike, href: string, options?: { scroll
 /** `router.replace(href)`, plus the stuck-navigation fallback when `href` is this page with a different query. */
 export function replaceGuarded(router: RouterLike, href: string, options?: { scroll?: boolean }): void {
   guarded(router, href, options, "replace");
+}
+
+/**
+ * The search box's live search (the list navigation's `replace`): `replaceGuarded`, except that a stuck navigation
+ * is first retried once as the same `router.replace` before the page is loaded the ordinary way (final review I1).
+ */
+export function liveSearchReplace(router: RouterLike, href: string, options?: { scroll?: boolean }): void {
+  guarded(router, href, options, "replace", true);
 }
 
 /** The parts of a click event `clickGuardTarget` reads. */
