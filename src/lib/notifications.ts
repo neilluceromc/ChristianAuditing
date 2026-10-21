@@ -19,9 +19,6 @@ export type NotificationTab = (typeof NOTIFICATION_TABS)[number]["id"];
 export const BELL_ITEMS = 8;
 export const NOTIFICATIONS_PAGE = 30;
 
-/** The bell's count poll while the tab is visible (spec §9: navigation plus a slow interval, cheap on Hobby/Free). */
-export const BELL_POLL_MS = 60_000;
-
 export const TEAMS: readonly Team[] = ["PURCHASING", "IT", "FINANCE"];
 export const TEAM_LABEL: Record<Team, string> = { IT: "IT", PURCHASING: "Purchasing", FINANCE: "Finance" };
 

@@ -6,8 +6,9 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { fmtDateTime } from "@/lib/format";
 import {
-  arrivalText, BELL_POLL_MS, bellLabel, NOTIFICATION_TABS, notificationsHref, type NotificationTab, type NotificationView,
+  arrivalText, bellLabel, NOTIFICATION_TABS, notificationsHref, type NotificationTab, type NotificationView,
 } from "@/lib/notifications";
+import { BELL_POLL_MS, bellPollStep, initialBellPollState, type BellPollEvent, type BellPollState } from "@/lib/bell-poll";
 import { bellCount, bellItems, markRead } from "@/server/notifications/actions";
 import { Icon } from "@/components/ui/icon";
 import { useOverlayLayer } from "@/components/ui/use-focus-trap";
@@ -16,8 +17,10 @@ import { useOverlayLayer } from "@/components/ui/use-focus-trap";
  * Task 7 (spec §7): the team bell in the top bar, on every page. A real button named "Notifications, N unread"; its
  * panel (a non-modal dialog right after it in the DOM; opening it moves focus to its selected tab) has the tabs Sent back · To check ·
  * Changed · All, the newest 8 of each, and "See all". Opening an item marks it read — for this person only — and goes
- * to it. The count is polled on every route change and every 60 s while the tab is visible; a polite live region says
- * "1 new notification" only when the count goes up. Admins are never rung: their panel points at the full page.
+ * to it. The count is polled as bellPollStep decides (every 2 minutes while the tab is visible and the person is
+ * active, on window focus, on a route change at most once per 30 s; nothing after 10 idle minutes until the next
+ * input) — cheap on Vercel Hobby. A polite live region says "1 new notification" only when the count goes up, from a
+ * poll or from a layout re-render. Admins are never rung: their panel points at the full page.
  */
 export function NotificationBell({ initialCount, admin }: { initialCount: number; admin: boolean }) {
   const pathname = usePathname();
@@ -29,12 +32,6 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
 
   const [count, setCount] = useState(initialCount);
   const countRef = useRef(initialCount);
-  // A server render with a new count (a revalidation re-rendered the layout) wins over what this copy last saw.
-  const [serverCount, setServerCount] = useState(initialCount);
-  if (initialCount !== serverCount) {
-    setServerCount(initialCount);
-    setCount(initialCount);
-  }
   useEffect(() => {
     countRef.current = count;
   }, [count]);
@@ -54,6 +51,7 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
   }
 
   /** The new count; announced only when it went up (an arrival), never when it dropped (read here or elsewhere). */
+  const announceTimer = useRef<number | undefined>(undefined);
   const applyCount = useCallback((next: number, announce: boolean) => {
     const text = announce ? arrivalText(countRef.current, next) : null;
     countRef.current = next;
@@ -61,31 +59,50 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
     if (text) {
       // Cleared first, so the same words ("1 new notification" twice) are announced again.
       setAnnouncement("");
-      window.setTimeout(() => setAnnouncement(text), 100);
+      window.clearTimeout(announceTimer.current);
+      announceTimer.current = window.setTimeout(() => setAnnouncement(text), 100);
     }
   }, []);
+  useEffect(() => () => window.clearTimeout(announceTimer.current), []);
 
-  const poll = useCallback(async () => {
+  // A server render with a new count (a revalidation re-rendered the layout) wins over what this copy last saw, and
+  // is announced like a poll's when it went up.
+  const lastInitial = useRef(initialCount);
+  useEffect(() => {
+    if (initialCount === lastInitial.current) return;
+    lastInitial.current = initialCount;
+    applyCount(initialCount, true);
+  }, [initialCount, applyCount]);
+
+  // When to ask the server (bellPollStep). The layout's render counts as the first poll.
+  const schedule = useRef<BellPollState | null>(null);
+  const step = useCallback(async (event: BellPollEvent) => {
+    const now = Date.now();
+    const r = bellPollStep(schedule.current ?? initialBellPollState(now), event, now);
+    schedule.current = r.state;
+    if (!r.poll) return;
     try {
-      const r = await bellCount();
-      applyCount(r.count, true);
+      const res = await bellCount();
+      applyCount(res.count, true);
     } catch {
       // offline or signed out mid-poll: keep the last count
     }
   }, [applyCount]);
 
-  // Every route change (the first render already has the layout's count).
+  // A route change (the first render already has the layout's count), at most one poll per 30 s.
   const firstPath = useRef(true);
   useEffect(() => {
     if (admin) return;
     if (firstPath.current) {
       firstPath.current = false;
+      schedule.current ??= initialBellPollState(Date.now());
       return;
     }
-    void poll();
-  }, [pathname, admin, poll]);
+    void step("route");
+  }, [pathname, admin, step]);
 
-  // Every 60 s while this tab is visible; coming back to the tab polls at once.
+  // The interval while this tab is visible; window focus or coming back to the tab polls; pointer and key input keep
+  // the person active (the first input after 10 idle minutes polls at once).
   useEffect(() => {
     if (admin) return;
     let timer: number | undefined;
@@ -95,23 +112,33 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
     };
     const start = () => {
       stop();
-      timer = window.setInterval(() => void poll(), BELL_POLL_MS);
+      timer = window.setInterval(() => void step("interval"), BELL_POLL_MS);
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        void poll();
+        void step("focus");
         start();
       } else {
         stop();
       }
     };
+    const onFocus = () => void step("focus");
+    const onInput = () => void step("input");
     if (document.visibilityState === "visible") start();
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pointerdown", onInput, { passive: true });
+    window.addEventListener("pointermove", onInput, { passive: true });
+    window.addEventListener("keydown", onInput);
     return () => {
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pointerdown", onInput);
+      window.removeEventListener("pointermove", onInput);
+      window.removeEventListener("keydown", onInput);
     };
-  }, [admin, poll]);
+  }, [admin, step]);
 
   // The open tab's items.
   useEffect(() => {
