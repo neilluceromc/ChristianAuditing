@@ -145,7 +145,7 @@ beforeEach(() => {
   h.spendSince = [];
   h.capitalizedSince = [];
   h.directSince = [];
-  h.nav = { poSentBack: 4, poToRegister: 17 };
+  h.nav = { poSentBack: 4, assetsSentBackPurchasing: 1, poToRegister: 17 };
   h.navKeys = [];
 });
 
@@ -162,7 +162,7 @@ describe("purchasingOverview", () => {
     ]);
     // Task 7: pr.itReviewed snapshots this same To register count again, so the tile has its history back
     expect(h.historyKeys).toEqual(["pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
-    expect(h.navKeys).toEqual([["poSentBack", "poToRegister"]]);
+    expect(h.navKeys).toEqual([["poSentBack", "assetsSentBackPurchasing", "poToRegister"]]);
   });
 
   it("To register: the spark ends at the live value, with pr.itReviewed's history", async () => {
@@ -193,8 +193,9 @@ describe("purchasingOverview", () => {
   it("needs-you, trend, make-up and breakdown", async () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(o.needsYou.map((n) => [n.tone, n.title, n.href])).toEqual([
-      // Task 7 (spec §7): the team's card, from state
-      ["bad", "4 sent back to you", "/purchases?state=SENT_BACK"],
+      // Task 7 (spec §7; fix round 1): the team's two Sent back cards, from state
+      ["bad", "4 purchase orders sent back to you", "/purchases?state=SENT_BACK"],
+      ["bad", "1 asset sent back to you", "/inventory?reg=needs-correction&to=PURCHASING"],
       ["bad", "STK-0003 · Pantry", "/stock/stocktakes/s1"],
       ["warn", "31 items below reorder level", "/stock?low=1"],
       ["warn", "PR-2 · came back from Ina", "/purchases/p2"],
@@ -213,6 +214,17 @@ describe("purchasingOverview", () => {
     expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Acme", value: 1050.1 }, { label: "No supplier", value: 500 }] });
     expect(o.breakdown.rows).toHaveLength(2);
     expect(o.breakdown.rows.every((r) => r.href === undefined)).toBe(true); // ruling: supplier rows are not links
+  });
+});
+
+describe("purchasingOverview: the Sent back cards (Task 7 fix round 1)", () => {
+  it("one card per tab, each left out at 0, singular at 1", async () => {
+    h.nav = { poSentBack: 0, assetsSentBackPurchasing: 3, poToRegister: 0 };
+    let o = await purchasingOverview(user("purchasing_staff"), NOW);
+    expect(o.needsYou.filter((n) => n.title.includes("sent back to you")).map((n) => n.title)).toEqual(["3 assets sent back to you"]);
+    h.nav = { poSentBack: 1, assetsSentBackPurchasing: 0, poToRegister: 0 };
+    o = await purchasingOverview(user("purchasing_staff"), NOW);
+    expect(o.needsYou.filter((n) => n.title.includes("sent back to you")).map((n) => n.title)).toEqual(["1 purchase order sent back to you"]);
   });
 });
 

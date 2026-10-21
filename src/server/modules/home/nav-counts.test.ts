@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
   user: vi.fn(),
   delivery: vi.fn(),
   purchaseFind: vi.fn(),
+  poFind: vi.fn(),
   // Task 7: the in-memory rows the state test below writes through a real action
   assetFind: vi.fn(),
   assetUpdate: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock("@/server/db/client", () => {
   const prisma = {
     asset: { count: h.asset, groupBy: h.assetGroup, findUnique: h.assetFind, updateMany: h.assetUpdate },
     employee: { count: h.employee },
-    purchaseOrder: { count: h.purchase, findMany: h.purchaseFind },
+    purchaseOrder: { count: h.purchase, findMany: h.purchaseFind, findUnique: h.poFind },
     approval: { count: h.approval },
     stockItem: { findMany: h.stockItems },
     stockMovement: { groupBy: h.stockSums },
@@ -289,42 +290,59 @@ describe("readNavCounts: the Phase 46 counts (spec §4.3), each the page's own p
 
 describe("readNavCounts: the Sent back and To register counts (Task 7, spec §7), from state", () => {
   type Row = Record<string, unknown>;
-  /** Enough of Prisma's where for the inventory list's predicates: AND / OR / NOT, in, not, and plain values. */
+  /** Enough of Prisma's where for the inventory list's predicates: AND / OR / NOT, in, not, a to-one `is`, values. */
   const matches = (row: Row, where: Row): boolean =>
     Object.entries(where).every(([k, v]) => {
       if (k === "AND") return (Array.isArray(v) ? v : [v]).every((w) => matches(row, w as Row));
       if (k === "OR") return (v as Row[]).some((w) => matches(row, w));
       if (k === "NOT") return !(Array.isArray(v) ? v : [v]).some((w) => matches(row, w as Row));
       if (v !== null && typeof v === "object" && !(v instanceof Date)) {
-        const op = v as { in?: unknown[]; not?: unknown };
+        const op = v as { in?: unknown[]; not?: unknown; is?: Row };
+        if (op.is) return row[k] != null && matches(row[k] as Row, op.is);
         if (op.in) return op.in.includes(row[k]);
         if ("not" in op) return op.not === null ? row[k] != null : row[k] !== op.not;
       }
       return v === null ? row[k] == null : row[k] === v;
     });
   let assets: Row[] = [];
+  let pos: Row[] = [];
   const reads: Array<{ notificationId: string; userId: string }> = [];
+  const returned = new Date("2026-10-20");
+  const checked = new Date("2026-10-18");
+  /** An asset Finance sent back (unless `financeReturnedAt: null`), carrying its PO as the relation reads it. */
+  const asset = (id: string, cls: "IT" | "PURCHASING", extra: Row = {}): Row => {
+    const row: Row = {
+      id, tag: `BR-${id}`, cls, itVerifiedAt: cls === "IT" ? checked : null, financeConfirmedAt: null,
+      financeReturnedAt: returned, financeReturnedTo: null, purchaseOrderId: null, purchaseRecordId: "rec1", ...extra,
+    };
+    row.purchaseOrder = row.purchaseOrderId ? pos.find((p) => p.id === row.purchaseOrderId) ?? null : null;
+    return row;
+  };
+  const purchasing = { id: "p", role: "purchasing_staff" as const };
+  const viewOf = (key: "itSentBack" | "assetsSentBackPurchasing", cls: "IT" | "PURCHASING") =>
+    buildAssetWhere(parseListState(new URL(NAV_COUNT_HREF[key], "http://x").searchParams, INVENTORY_LIST_CONFIG), null, cls);
+  const listed = (where: Row) => assets.filter((a) => matches(a, where)).map((a) => a.id);
 
   beforeEach(() => {
     h.writes = [];
+    pos = [{ id: "po1", refNo: "PO-0001", state: "SENT_BACK" }, { id: "po2", refNo: "PO-0002", state: "READY" }];
     assets = [
       // IT checked it, Finance sent it back to IT (Review Focus 4)
-      {
-        id: "a1", tag: "BR-LT-0001", cls: "IT", itVerifiedAt: new Date("2026-10-18"), financeConfirmedAt: null,
-        financeReturnedAt: new Date("2026-10-20"), financeReturnedTo: "IT", purchaseOrderId: null, purchaseRecordId: "rec1",
-      },
-      // sent back to Purchasing: not IT's
-      {
-        id: "a2", tag: "BR-LT-0002", cls: "IT", itVerifiedAt: new Date("2026-10-18"), financeConfirmedAt: null,
-        financeReturnedAt: new Date("2026-10-20"), financeReturnedTo: "PURCHASING", purchaseOrderId: null, purchaseRecordId: "rec1",
-      },
+      asset("a1", "IT", { financeReturnedTo: "IT" }),
+      // (b) an IT laptop's money, sent back to Purchasing on a PO that is not itself sent back
+      asset("a2", "IT", { financeReturnedTo: "PURCHASING", purchaseOrderId: "po2" }),
       // with Finance: not sent back
-      {
-        id: "a3", tag: "BR-LT-0003", cls: "IT", itVerifiedAt: new Date("2026-10-18"), financeConfirmedAt: null,
-        financeReturnedAt: null, financeReturnedTo: null, purchaseOrderId: null, purchaseRecordId: "rec1",
-      },
+      asset("a3", "IT", { financeReturnedAt: null }),
+      // (a) a legacy Purchasing batch's chair, returned before teams were recorded: Purchasing's
+      asset("a4", "PURCHASING"),
+      // (c) a Purchasing chair's "Other", sent back to IT
+      asset("a5", "PURCHASING", { financeReturnedTo: "IT" }),
+      // on a PO that is itself sent back: counted once, through the PO
+      asset("a6", "PURCHASING", { financeReturnedTo: "PURCHASING", purchaseOrderId: "po1" }),
     ];
-    h.asset.mockImplementation(async ({ where }: { where: Row }) => assets.filter((a) => matches(a, where)).length);
+    h.asset.mockImplementation(async ({ where }: { where: Row }) => listed(where).length);
+    h.purchase.mockImplementation(async ({ where }: { where: Row }) => pos.filter((p) => matches(p, where)).length);
+    h.poFind.mockImplementation(async ({ where }: { where: { id: string } }) => pos.find((p) => p.id === where.id) ?? null);
     h.assetFind.mockImplementation(async ({ where }: { where: { id: string } }) => {
       const a = assets.find((x) => x.id === where.id);
       return a ? { ...a } : null;
@@ -341,26 +359,62 @@ describe("readNavCounts: the Sent back and To register counts (Task 7, spec §7)
     // The bell rang IT once for a1, and every IT person has opened it: the tab still holds the asset.
     for (const userId of ["u1", "u3", "u4"]) reads.push({ notificationId: "n1", userId });
     expect(NAV_COUNT_HREF.itSentBack).toBe("/inventory?reg=needs-correction&to=IT");
-    expect(await readNavCounts(["itSentBack"], itStaff)).toEqual({ itSentBack: 1 });
+    expect(await readNavCounts(["itSentBack"], itStaff)).toEqual({ itSentBack: 2 }); // a1, and a5 (route c)
 
     // Someone on IT fixes it and sends it on: it leaves the tab.
     h.sessionUser = { id: "u3", name: "Ivan IT", role: "it_staff" };
     const res = await resubmitAssetToFinance({ id: "a1", reply: "Serial corrected" });
     expect(res.ok).toBe(true);
-    expect(await readNavCounts(["itSentBack"], itStaff)).toEqual({ itSentBack: 0 });
+    expect(await readNavCounts(["itSentBack"], itStaff)).toEqual({ itSentBack: 1 });
     // …and the resubmit rang Finance, not IT
     expect(h.writes.filter((w) => w.table === "notification").map((w) => (w.data as Row).team)).toEqual(["FINANCE"]);
   });
 
-  it("itSentBack is the Sent back view's own where: /inventory's, cls IT", async () => {
-    await readNavCounts(["itSentBack"], itStaff);
-    const params = new URL(NAV_COUNT_HREF.itSentBack, "http://x").searchParams;
-    expect(h.asset).toHaveBeenCalledWith({ where: buildAssetWhere(parseListState(params, INVENTORY_LIST_CONFIG), null, "IT") });
+  it("each count is its Sent back view's own where, the same whatever class the page opens on", async () => {
+    await readNavCounts(["itSentBack", "assetsSentBackPurchasing"], itStaff);
+    expect(h.asset).toHaveBeenCalledWith({ where: viewOf("itSentBack", "IT") });
+    expect(h.asset).toHaveBeenCalledWith({ where: viewOf("assetsSentBackPurchasing", "IT") });
+    expect(viewOf("assetsSentBackPurchasing", "PURCHASING")).toEqual(viewOf("assetsSentBackPurchasing", "IT"));
   });
 
-  it("an IT asset returned before teams were recorded (no financeReturnedTo) is IT's", async () => {
-    assets[1].financeReturnedTo = null;
-    expect(await readNavCounts(["itSentBack"], itStaff)).toEqual({ itSentBack: 2 });
+  it("(a) a legacy Purchasing batch's asset returned with no team recorded counts for Purchasing, not IT", async () => {
+    expect(await readNavCounts(["assetsSentBackPurchasing"], purchasing)).toEqual({ assetsSentBackPurchasing: 2 }); // a2, a4
+    expect(listed(viewOf("assetsSentBackPurchasing", "PURCHASING"))).toContain("a4");
+    expect(listed(viewOf("itSentBack", "IT"))).not.toContain("a4");
+  });
+
+  it("(b) an IT-class asset returned to Purchasing counts for Purchasing and is in Purchasing's view", () => {
+    expect(NAV_COUNT_HREF.assetsSentBackPurchasing).toBe("/inventory?reg=needs-correction&to=PURCHASING");
+    // the view as purchasing_staff opens it (their default class, Purchasing) still lists the IT laptop
+    expect(listed(viewOf("assetsSentBackPurchasing", "PURCHASING"))).toEqual(["a2", "a4"]);
+    expect(listed(viewOf("itSentBack", "IT"))).not.toContain("a2");
+  });
+
+  it("(c) a Purchasing-class asset returned to IT counts for IT and is in IT's view", () => {
+    expect(listed(viewOf("itSentBack", "IT"))).toEqual(["a1", "a5"]);
+    expect(listed(viewOf("assetsSentBackPurchasing", "PURCHASING"))).not.toContain("a5");
+  });
+
+  it("an asset on a sent-back PO is counted only through the PO", async () => {
+    expect(await readNavCounts(["poSentBack", "assetsSentBackPurchasing", "itSentBack"], purchasing)).toEqual({
+      poSentBack: 1, assetsSentBackPurchasing: 2, itSentBack: 2,
+    });
+    expect(listed(viewOf("assetsSentBackPurchasing", "PURCHASING"))).not.toContain("a6");
+  });
+
+  it("resubmitting drops each count: IT's chair (c), Purchasing's legacy chair (a) and the IT laptop (b)", async () => {
+    const counts = () => readNavCounts(["itSentBack", "assetsSentBackPurchasing"], purchasing);
+    expect(await counts()).toEqual({ itSentBack: 2, assetsSentBackPurchasing: 2 });
+    h.sessionUser = { id: "u3", name: "Ivan IT", role: "it_staff" };
+    expect((await resubmitAssetToFinance({ id: "a5" })).ok).toBe(true);
+    expect(await counts()).toEqual({ itSentBack: 1, assetsSentBackPurchasing: 2 });
+    h.sessionUser = { id: "p1", name: "Pia Purchasing", role: "purchasing_staff" };
+    expect((await resubmitAssetToFinance({ id: "a4" })).ok).toBe(true);
+    expect(await counts()).toEqual({ itSentBack: 1, assetsSentBackPurchasing: 1 });
+    expect((await resubmitAssetToFinance({ id: "a2" })).ok).toBe(true);
+    expect(await counts()).toEqual({ itSentBack: 1, assetsSentBackPurchasing: 0 });
+    // the asset on the sent-back PO comes back with the PO, not on its own
+    expect((await resubmitAssetToFinance({ id: "a6" })).ok).toBe(false);
   });
 
   it("poToRegister counts READY or WITH_IT POs, not completed, with a line Purchasing can register and units left", async () => {
@@ -412,8 +466,8 @@ describe("NAV_COUNT_HREF", () => {
     }
     // itSpare, itDefective, itMissing, leaving, poWithIt, poSentBack, poReady; Phase 46: stockLow,
     // suppliersRenewing, finToConfirmIt, finToConfirmPurchasing, usersDisabled, deadDeliveries, flagsUnavailable;
-    // Task 6: finGroupsToReview; Task 7: itSentBack, poToRegister
-    expect(checked).toBe(17);
+    // Task 6: finGroupsToReview; Task 7: itSentBack, poToRegister, assetsSentBackPurchasing
+    expect(checked).toBe(18);
   });
 
   it("accounts for every counted view: a list count (equal to its page), an exempt one, or a work count", () => {

@@ -35,6 +35,8 @@ export type CountKey =
   | "poSentBack" | "poWithIt" | "poReady"
   // Task 7 (spec §7): IT's Sent back view (assets Finance sent back to IT) and Purchasing's To register view
   | "itSentBack" | "poToRegister"
+  // Task 7 fix round 1: the assets Finance sent back to Purchasing (both classes), beside its sent-back POs
+  | "assetsSentBackPurchasing"
   // Phase 46 spec §4.3
   | "stockLow" | "stocktakesOverdue" | "suppliersRenewing"
   | "finToConfirmIt" | "finToConfirmPurchasing"
@@ -164,7 +166,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
             },
             { label: "Missing", href: "/inventory?status=MISSING", count: "itMissing" },
             // Task 7 (spec §7): what Finance sent back to IT, until someone on IT fixes it and sends it on (state, never
-            // the bell's read marks). Red, like every Sent back count. IT's and admin's: a viewer can fix nothing.
+            // the bell's read marks), in both classes (fix round 1). Red, like every Sent back count. IT's and admin's:
+            // a viewer can fix nothing.
             {
               label: "Sent back",
               href: "/inventory?reg=needs-correction&to=IT",
@@ -321,10 +324,13 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Assets",
           href: "/inventory?cls=PURCHASING",
           icon: "inventory",
+          // Task 7 fix round 1: the assets sent back to Purchasing stay on the closed link, red.
+          badge: ["assetsSentBackPurchasing"],
           views: [
             { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
-            // Task 7 (spec §7): Purchasing assets Finance sent back to Purchasing (a PO's own send-back is on the PO).
-            { label: "Sent back", href: "/inventory?cls=PURCHASING&reg=needs-correction&to=PURCHASING" },
+            // Task 7 (spec §7, fix round 1): the assets Finance sent back to Purchasing, both classes (an asset on a
+            // sent-back PO counts through the PO, under Purchase orders › Sent back).
+            { label: "Sent back", href: "/inventory?reg=needs-correction&to=PURCHASING", count: "assetsSentBackPurchasing" },
             { label: "IT inventory", href: "/inventory?cls=IT" },
             // Spec §4: Purchasing registers from a purchase order (Purchase orders → Register); an admin keeps this.
             { label: "Register assets", href: "/inventory/register", roles: ["admin"] },

@@ -3,8 +3,10 @@ import { Prisma, type AssetClass, type AssetStatus, type Role } from "@prisma/cl
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
-  attentionFacetOption, buildAssetOrderBy, buildAssetWhere, regFilterWhere, UNASSIGNED, type PurchaseYearValue,
+  attentionFacetOption, buildAssetOrderBy, buildAssetWhere, isSentBackTo, regFilterWhere, UNASSIGNED,
+  type PurchaseYearValue,
 } from "@/lib/inventory-list";
+import { teamOfRole } from "@/lib/intake-rules";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, STATUS_LABEL, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
 import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY, resolveInventoryColumns } from "@/lib/column-prefs";
@@ -541,10 +543,16 @@ export const getAsset = cache((id: string) =>
   }),
 );
 
-/** getAsset, but a class the role cannot see reads as absent (spec §3.1). */
+/**
+ * getAsset, but a class the role cannot see reads as absent (spec §3.1) — unless Finance sent the asset back to the
+ * role's team (Task 7 fix round 1): IT opens a Purchasing chair Finance returned to IT, read-only, to mark it corrected.
+ */
 export async function getVisibleAsset(id: string, role: Role) {
   const asset = await getAsset(id);
-  return asset && canSeeClass(role, asset.cls) ? asset : null;
+  if (!asset) return null;
+  if (canSeeClass(role, asset.cls)) return asset;
+  const team = teamOfRole(role);
+  return (team === "IT" || team === "PURCHASING") && isSentBackTo(asset, team) ? asset : null;
 }
 
 /**

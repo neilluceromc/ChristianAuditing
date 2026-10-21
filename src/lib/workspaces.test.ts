@@ -332,6 +332,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(counts("it", "Employees")).toEqual({ Leaving: "leaving" });
     expect(counts("it", "Approvals")).toEqual({ Open: "approvals" });
     expect(counts("purchasing", "Purchase orders")).toEqual({ "With IT": "poWithIt", "Sent back": "poSentBack", "To register": "poToRegister" });
+    expect(counts("purchasing", "Assets")).toEqual({ "Sent back": "assetsSentBackPurchasing" });
     expect(counts("finance", "Purchases")).toEqual({ "Ready to register": "poReady" });
     // Phase 46 spec §4.3
     expect(counts("purchasing", "Suppliers")).toEqual({ "Renewing soon": "suppliersRenewing" });
@@ -357,6 +358,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("it", "viewer", "Inventory").badge).toEqual([]);
     expect(item("it", "viewer", "Inventory").views.map((v) => v.label)).not.toContain("Sent back");
     expect(item("purchasing", "purchasing_staff", "Purchase orders").badge).toEqual(["poSentBack"]);
+    expect(item("purchasing", "purchasing_staff", "Assets").badge).toEqual(["assetsSentBackPurchasing"]);
     // Phase 46: failed deliveries are waiting work (a replay), so the closed Webhooks link keeps their red count.
     expect(item("admin", "admin", "Webhooks").badge).toEqual(["deadDeliveries"]);
   });
@@ -374,8 +376,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("purchasing", "purchasing_staff", "Assets").href).toBe("/inventory?cls=PURCHASING");
     expect(item("purchasing", "purchasing_staff", "Assets").views.map((v) => [v.label, v.href])).toEqual([
       ["Purchasing assets", "/inventory?cls=PURCHASING"],
-      // Task 7 (spec §7): Purchasing assets Finance sent back to Purchasing
-      ["Sent back", "/inventory?cls=PURCHASING&reg=needs-correction&to=PURCHASING"],
+      // Task 7 (spec §7, fix round 1): the assets Finance sent back to Purchasing, both classes
+      ["Sent back", "/inventory?reg=needs-correction&to=PURCHASING"],
       ["IT inventory", "/inventory?cls=IT"],
     ]);
     // Spec §4: Purchasing registers from a purchase order; an admin in the Purchasing workspace keeps Register.

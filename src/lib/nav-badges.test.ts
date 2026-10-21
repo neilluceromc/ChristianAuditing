@@ -25,6 +25,7 @@ describe("countBadge", () => {
     expect(countBadge("itSentBack", 2, b)).toEqual({ n: 2, label: "2 sent back", fault: true });
     expect(countBadge("poSentBack", 1, b)).toEqual({ n: 1, label: "1 sent back", fault: true });
     expect(countBadge("poToRegister", 4, b)).toEqual({ n: 4, label: "4 to register", fault: false });
+    expect(countBadge("assetsSentBackPurchasing", 1, b)).toEqual({ n: 1, label: "1 asset sent back", fault: true });
   });
 
   it("labels the Phase 46 counts", () => {
@@ -94,7 +95,7 @@ describe("navCountKeys", () => {
 
   it("covers the other workspaces", () => {
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.purchasing, "purchasing_staff")).sort())
-      .toEqual(["approvals", "poSentBack", "poToRegister", "poWithIt", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
+      .toEqual(["approvals", "assetsSentBackPurchasing", "poSentBack", "poToRegister", "poWithIt", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff")).sort())
       .toEqual(["approvals", "finGroupsToReview", "finToConfirmIt", "finToConfirmPurchasing", "poReady"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin")).sort())

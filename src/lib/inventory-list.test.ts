@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSET_STATUSES, assigneeWhere, attentionFacetOption, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
-  parsePurchaseYear, purchaseYearChips, regFilterWhere, scannerRedirect, sentBackToWhere, withPurchaseYearQS,
+  canSeeSentBackView, isSentBackTo, parsePurchaseYear, purchaseYearChips, regFilterWhere, scannerRedirect,
+  sentBackToTeamWhere, sentBackView, withPurchaseYearQS,
 } from "./inventory-list";
 import { regWhere } from "./registration";
 import { parseListState } from "./url-state";
@@ -305,30 +306,48 @@ describe("the scanner contract by URL opens an exact tag only with go=1 (spec 7.
   });
 });
 
-describe("the Sent back views (Task 7, spec §7): to=IT|PURCHASING narrows reg=needs-correction by financeReturnedTo", () => {
-  it("to names the team Finance sent it back to; a return from before teams were recorded is its class's team", () => {
-    expect(sentBackToWhere(["IT"])).toEqual({
-      OR: [{ financeReturnedTo: "IT" }, { financeReturnedTo: null, cls: "IT" }],
-    });
-    expect(sentBackToWhere(["IT", "PURCHASING"])).toEqual({
-      OR: [
-        { financeReturnedTo: "IT" }, { financeReturnedTo: null, cls: "IT" },
-        { financeReturnedTo: "PURCHASING" }, { financeReturnedTo: null, cls: "PURCHASING" },
+describe("the Sent back views (Task 7, spec §7; fix round 1): to=IT|PURCHASING, both classes", () => {
+  const notOnSentBackPo = { OR: [{ purchaseOrderId: null }, { purchaseOrder: { is: { state: { not: "SENT_BACK" } } } }] };
+
+  it("one predicate: returned and not approved, to the team (no team recorded: the class's), not on a sent-back PO", () => {
+    expect(sentBackToTeamWhere("IT")).toEqual({
+      AND: [
+        { financeReturnedAt: { not: null }, financeConfirmedAt: null },
+        { OR: [{ financeReturnedTo: "IT" }, { financeReturnedTo: null, cls: "IT" }] },
+        notOnSentBackPo,
       ],
     });
   });
 
-  it("reg=needs-correction&to=IT is needs-correction AND sent back to IT", () => {
-    expect(buildAssetWhere(parse("reg=needs-correction&to=IT"), null, "IT")).toEqual({
-      cls: "IT",
-      AND: [{ OR: [{ AND: [regWhere("needs-correction"), sentBackToWhere(["IT"])] }] }],
-    });
+  it("reg=needs-correction&to=IT spans both classes, whatever class the page opens on", () => {
+    const expected = { AND: [{ OR: [{ AND: [regWhere("needs-correction"), { OR: [sentBackToTeamWhere("IT")] }] }] }] };
+    expect(buildAssetWhere(parse("reg=needs-correction&to=IT"), null, "IT")).toEqual(expected);
+    expect(buildAssetWhere(parse("reg=needs-correction&to=IT"), null, "PURCHASING")).toEqual(expected);
+    expect(sentBackView(parse("reg=needs-correction&to=PURCHASING"))).toBe("PURCHASING");
   });
 
-  it("to narrows only the needs-correction state, and alone (or with a bad value) filters nothing", () => {
+  it("any other list keeps its class: to narrows only needs-correction, and alone (or with a bad value) filters nothing", () => {
+    expect(sentBackView(parse("reg=needs-correction,with-finance&to=IT"))).toBeNull();
+    expect(buildAssetWhere(parse("reg=needs-correction,with-finance&to=IT"), null, "IT").cls).toBe("IT");
     expect(regFilterWhere("with-finance", ["IT"])).toEqual(regWhere("with-finance"));
     expect(regFilterWhere("needs-correction", [])).toEqual(regWhere("needs-correction"));
     expect(buildAssetWhere(parse("to=IT"), null, "IT")).toEqual({ cls: "IT" });
     expect(parse("reg=needs-correction&to=FINANCE").filters).toEqual({ reg: ["needs-correction"] });
+  });
+
+  it("who may open one: every-class roles, or the team itself", () => {
+    expect(canSeeSentBackView("it_staff", "IT")).toBe(true);
+    expect(canSeeSentBackView("it_staff", "PURCHASING")).toBe(false);
+    expect(canSeeSentBackView("viewer", "IT")).toBe(false);
+    expect(canSeeSentBackView("purchasing_staff", "PURCHASING")).toBe(true);
+    expect(canSeeSentBackView("admin", "IT")).toBe(true);
+  });
+
+  it("isSentBackTo: the in-memory twin, so IT may open a Purchasing chair sent back to IT", () => {
+    const chair = { cls: "PURCHASING" as const, financeReturnedAt: new Date(), financeConfirmedAt: null, financeReturnedTo: "IT" };
+    expect(isSentBackTo(chair, "IT")).toBe(true);
+    expect(isSentBackTo({ ...chair, financeReturnedTo: null }, "IT")).toBe(false);
+    expect(isSentBackTo({ ...chair, financeReturnedTo: null }, "PURCHASING")).toBe(true);
+    expect(isSentBackTo({ ...chair, financeReturnedAt: null }, "IT")).toBe(false);
   });
 });

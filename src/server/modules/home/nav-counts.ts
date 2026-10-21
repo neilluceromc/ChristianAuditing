@@ -30,8 +30,10 @@ export const NAV_COUNT_HREF = {
   itSpare: "/inventory?status=SPARE",
   itDefective: "/inventory?status=DEFECTIVE&sort=defectiveSince",
   itMissing: "/inventory?status=MISSING",
-  // Task 7 (spec §7): what Finance sent back to IT, from state (the asset's return), never from the bell's reads.
+  // Task 7 (spec §7): what Finance sent back to IT / to Purchasing, from state (the asset's return), never from the
+  // bell's reads. A Sent back view spans both classes (sentBackToTeamWhere), so the class these URLs open on is moot.
   itSentBack: "/inventory?reg=needs-correction&to=IT",
+  assetsSentBackPurchasing: "/inventory?reg=needs-correction&to=PURCHASING",
   leaving: "/employees?employment=OFFBOARDING",
   // Migration 38: the purchase-order tabs (prDraft → poSentBack, prSubmitted → poWithIt, prItReviewed → poReady).
   poSentBack: "/purchases?state=SENT_BACK",
@@ -106,10 +108,10 @@ async function readItStatusCounts(keys: ItStatusKey[]): Promise<Array<[ItStatusK
   }
 }
 
-// Task 7 (spec §7): /inventory's own where for the Sent back view (cls IT, as for the status views above): the needs-
-// correction state narrowed to what went back to IT. It drops when someone fixes it and sends it on, not when read.
-const itSentBack = () =>
-  prisma.asset.count({ where: buildAssetWhere(parseListState(paramsOf("itSentBack"), INVENTORY_LIST_CONFIG), null, "IT") });
+// Task 7 (spec §7): /inventory's own where for a Sent back view: the needs-correction state narrowed to what went back
+// to the team (sentBackToTeamWhere), both classes. It drops when someone fixes it and sends it on, not when read.
+const sentBack = (key: "itSentBack" | "assetsSentBackPurchasing") => () =>
+  prisma.asset.count({ where: buildAssetWhere(parseListState(paramsOf(key), INVENTORY_LIST_CONFIG), null, "IT") });
 
 // /employees: parseListState → buildEmployeeWhere(state); pageEmployees counts that where (no gaps, no loadout sort).
 const employees = (key: "leaving") => () =>
@@ -159,7 +161,8 @@ const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<num
   poSentBack: purchases("poSentBack"),
   poWithIt: purchases("poWithIt"),
   poReady: purchases("poReady"),
-  itSentBack,
+  itSentBack: sentBack("itSentBack"),
+  assetsSentBackPurchasing: sentBack("assetsSentBackPurchasing"),
   poToRegister: () => purchasingToRegisterCount(),
   stockLow,
   stocktakesOverdue,

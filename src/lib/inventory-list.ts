@@ -1,7 +1,9 @@
 import type { AssetClass, AssetStatus, Prisma } from "@prisma/client";
 import type { ListConfig, ListState, SortKey } from "./url-state";
 import { isRepairStage } from "./repairs";
-import { STATUSES_BY_CLASS, isStatusOf } from "./asset-class";
+import { ASSET_CLASSES, STATUSES_BY_CLASS, VISIBLE_CLASSES, isStatusOf } from "./asset-class";
+import type { Role } from "@prisma/client";
+import { teamOfRole } from "./intake-rules";
 import { parseRegState, regWhere, type RegState } from "./registration";
 import { parseProvenance, provenanceWhere, type Provenance } from "./provenance";
 import { attentionWhere } from "./inventory-attention";
@@ -122,20 +124,60 @@ export function assigneeWhere(values: readonly string[]): Prisma.AssetWhereInput
   return null;
 }
 
+/** A team Finance sends assets back to (`?to=`). */
+export type SentBackTeam = "IT" | "PURCHASING";
+
+const isSentBackTeam = (t: string): t is SentBackTeam => t === "IT" || t === "PURCHASING";
+
 /**
- * Task 7 (purchase-orders spec §7): the assets Finance sent back to these teams (`?to=IT|PURCHASING`). A return from
- * before teams were recorded (no financeReturnedTo) went to the class's team — the class and the team share names —
- * as resubmitAssetToFinance and assetMoneyStage read it.
+ * Task 7 (purchase-orders spec §7, fix round 1 ruling): an asset sent back to `team`, from state — the one predicate
+ * every Sent back view, nav count and Home card reads, so they cannot drift. Finance returned it and has not
+ * approved it, to this team (a return from before teams were recorded went to the class's team: the class and the
+ * team share names), and it is not on a PO that is itself sent back — those count once, through the PO. Both classes:
+ * Finance sends a Purchasing chair's "Other" to IT, or an IT laptop's money to Purchasing. The PO branch keeps the
+ * null case explicit (Task 6 fix round 1: a NOT on the nullable relation also drops every asset with no PO).
  */
-export function sentBackToWhere(teams: readonly string[]): Prisma.AssetWhereInput {
-  const cls = teams.filter((t): t is AssetClass => t === "IT" || t === "PURCHASING");
-  return { OR: cls.flatMap((t) => [{ financeReturnedTo: t }, { financeReturnedTo: null, cls: t }]) };
+export function sentBackToTeamWhere(team: SentBackTeam): Prisma.AssetWhereInput {
+  return {
+    AND: [
+      { financeReturnedAt: { not: null }, financeConfirmedAt: null },
+      { OR: [{ financeReturnedTo: team }, { financeReturnedTo: null, cls: team }] },
+      { OR: [{ purchaseOrderId: null }, { purchaseOrder: { is: { state: { not: "SENT_BACK" } } } }] },
+    ],
+  };
+}
+
+/** The same predicate on one asset in memory (no PO clause: it decides who may open the asset, not what counts). */
+export function isSentBackTo(
+  a: { cls: AssetClass; financeReturnedAt: Date | null; financeConfirmedAt: Date | null; financeReturnedTo: string | null },
+  team: SentBackTeam,
+): boolean {
+  return a.financeReturnedAt !== null && a.financeConfirmedAt === null && (a.financeReturnedTo ?? a.cls) === team;
 }
 
 /** One registration state's where; with `to`, the needs-correction state is only what went back to those teams. */
 export function regFilterWhere(r: RegState, to: readonly string[]): Prisma.AssetWhereInput {
-  if (r !== "needs-correction" || to.length === 0) return regWhere(r);
-  return { AND: [regWhere(r), sentBackToWhere(to)] };
+  const teams = to.filter(isSentBackTeam);
+  if (r !== "needs-correction" || teams.length === 0) return regWhere(r);
+  return { AND: [regWhere(r), { OR: teams.map(sentBackToTeamWhere) }] };
+}
+
+/**
+ * A Sent back view — `reg=needs-correction` with one `to` team — spans both classes (the ruling): what Finance sent
+ * back to a team is that team's to fix whatever its class. Null for every other list state, which keeps its class.
+ */
+export function sentBackView(state: ListState): SentBackTeam | null {
+  const reg = state.filters.reg ?? [];
+  const to = (state.filters.to ?? []).filter(isSentBackTeam);
+  return reg.length === 1 && reg[0] === "needs-correction" && to.length === 1 ? to[0] : null;
+}
+
+/**
+ * Who may open a Sent back view: a role that sees every class, or the team it is (IT sees the Purchasing-class assets
+ * sent back to IT, and only those, read-only unless it manages the class).
+ */
+export function canSeeSentBackView(role: Role, team: SentBackTeam): boolean {
+  return VISIBLE_CLASSES[role].length === ASSET_CLASSES.length || teamOfRole(role) === team;
 }
 
 export function buildAssetWhere(
@@ -144,10 +186,13 @@ export function buildAssetWhere(
   cls: AssetClass = "IT",
   now: Date = new Date(),
 ): Prisma.AssetWhereInput {
-  // Class first: it is the one filter that is ALWAYS applied. IT by default
+  // Class first: it is applied to every list but one. IT by default
   // so that every consumer and every URL that predates Phase 13 behaves
   // identically — the Purchasing view is the one that has to ask for itself.
-  const where: Prisma.AssetWhereInput = { cls };
+  // Task 7 (fix round 1): the one exception is a Sent back view, which spans both classes (its rows are already
+  // narrowed to one team's returns); the page checks who may open one (canSeeSentBackView), and the bulk actions
+  // refuse a mixed-class selection.
+  const where: Prisma.AssetWhereInput = sentBackView(state) ? {} : { cls };
   if (state.q) {
     // contains-search with insensitive mode is the sanctioned use; the
     // ILIKE-wildcard hazard applies to identity/equals lookups only.

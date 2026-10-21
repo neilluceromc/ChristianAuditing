@@ -538,27 +538,31 @@ export interface TeamCard {
   n: number;
   href: string;
   meta: string;
+  /** what one unit is, singular and plural ("purchase order", "purchase orders"); none reads "N sent back to you" */
+  noun?: readonly [string, string];
 }
 
+const counted = (c: TeamCard) => (c.noun ? plural(c.n, c.noun[0], c.noun[1]) : String(c.n));
+
 /**
- * Task 7 (spec §7): each team's Home shows "N sent back to you" (bad: another team returned work to this one) and
- * "N to check" (warn), each linking to its tab; a card at 0 is left out. They come first within their tone, ahead of
- * the workspace's own items, and `max` still holds.
+ * Task 7 (spec §7): each team's Home shows what was sent back to it (bad: another team returned work) and what it has
+ * to check (warn), each linking to its tab — "N sent back to you" / "N to check"; Purchasing's two Sent back tabs read
+ * "N purchase orders sent back to you" and "N assets sent back to you" (fix round 1). A card at 0 is left out. They
+ * come first within their tone, ahead of the workspace's own items, and `max` still holds.
  */
 export function withTeamCards(
-  cards: { sentBack?: TeamCard; toCheck?: TeamCard; toCheckIcon?: IconName }, items: NeedItem[], max = 6,
+  cards: { sentBack?: TeamCard[]; toCheck?: TeamCard; toCheckIcon?: IconName }, items: NeedItem[], max = 6,
 ): NeedItem[] {
   const out: NeedItem[] = [];
-  if (cards.sentBack && cards.sentBack.n > 0) {
-    out.push({
-      tone: "bad", icon: "alert", title: `${cards.sentBack.n} sent back to you`, meta: cards.sentBack.meta,
-      action: "Fix", href: cards.sentBack.href,
-    });
+  for (const c of cards.sentBack ?? []) {
+    if (c.n > 0) {
+      out.push({ tone: "bad", icon: "alert", title: `${counted(c)} sent back to you`, meta: c.meta, action: "Fix", href: c.href });
+    }
   }
   if (cards.toCheck && cards.toCheck.n > 0) {
     out.push({
       tone: "warn", icon: cards.toCheckIcon ?? "requests",
-      title: `${cards.toCheck.n} to check`, meta: cards.toCheck.meta, action: "Review", href: cards.toCheck.href,
+      title: `${counted(cards.toCheck)} to check`, meta: cards.toCheck.meta, action: "Review", href: cards.toCheck.href,
     });
   }
   return byTone([...out, ...items], max);

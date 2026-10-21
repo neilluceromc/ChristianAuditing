@@ -238,7 +238,7 @@ export async function itOverview(user: Viewer, now: Date = new Date()): Promise<
     kpis,
     needsYou: withTeamCards(
       {
-        sentBack: { n: team.itSentBack ?? 0, href: NAV_COUNT_HREF.itSentBack, meta: "Finance sent these back · fix them and send them on" },
+        sentBack: [{ n: team.itSentBack ?? 0, href: NAV_COUNT_HREF.itSentBack, meta: "Finance sent these back · fix them and send them on" }],
         toCheck: { n: team.poWithIt ?? 0, href: NAV_COUNT_HREF.poWithIt, meta: "Purchase orders waiting for IT's check" },
       },
       needsFromWork(groups, claims, !viewer),
@@ -317,7 +317,7 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
     metricHistory<SnapshotKey>([...PURCHASING_KEYS], now),
     purchaseFlowTrend(now),
     // Task 7 (spec §7): the Sent back card and To register, the nav's own counts (state, never the bell)
-    readNavCounts(["poSentBack", "poToRegister"], user),
+    readNavCounts(["poSentBack", "assetsSentBackPurchasing", "poToRegister"], user),
   ]);
   const lowHref = stockLowHref();
   const suppliers = rankByLabel(
@@ -353,7 +353,20 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
   return {
     kpis,
     needsYou: withTeamCards(
-      { sentBack: { n: team.poSentBack ?? 0, href: NAV_COUNT_HREF.poSentBack, meta: "Purchase orders sent back · correct them and save" } },
+      {
+        // Fix round 1: the POs sent back, and the single assets Finance sent back (both classes; not those on a
+        // sent-back PO, which come back with it) — two tabs, two cards.
+        sentBack: [
+          {
+            n: team.poSentBack ?? 0, href: NAV_COUNT_HREF.poSentBack, noun: ["purchase order", "purchase orders"],
+            meta: "Correct them and save to send them on",
+          },
+          {
+            n: team.assetsSentBackPurchasing ?? 0, href: NAV_COUNT_HREF.assetsSentBackPurchasing, noun: ["asset", "assets"],
+            meta: "Finance sent these back · fix them and send them on",
+          },
+        ],
+      },
       purchasingNeeds(todo, overdue, stock.low, lowHref, today),
     ),
     needsYouHref: "/purchases",
