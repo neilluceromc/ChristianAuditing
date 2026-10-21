@@ -162,7 +162,8 @@ describe("SignInCard", () => {
     expect(html).toContain("Sign up · 3 of 3");
     expect(html).toContain("You&#x27;re in");
     expect(html).toContain("Viewer");
-    expect(html).toContain("An admin assigns your role, and your role decides which workspace you land in.");
+    expect(html).toContain("An admin assigns your role, which decides the workspaces you can open. You&#x27;ll start on Home.");
+    expect(html).not.toContain("land in"); // every sign-in lands on Home now (final review M7)
     expect(html).toMatch(/<a[^>]* href="\/inventory"[^>]*>Go to Cris<\/a>/);
   });
 
