@@ -7,5 +7,3 @@ const BANK_REVEAL_ROLES: readonly Role[] = ["admin", "purchasing_staff", "financ
 export function canManageSuppliers(role: Role): boolean { return SUPPLIER_MANAGER_ROLES.includes(role); }
 export function canRevealBank(role: Role): boolean { return BANK_REVEAL_ROLES.includes(role); }
 export function canAttachToRequest(role: Role): boolean { return role !== "viewer"; }
-/** Same set as canManageSuppliers today; named apart because it gates a REQUEST, not a supplier. */
-export function canSetRequestSupplier(role: Role): boolean { return canManageSuppliers(role); }

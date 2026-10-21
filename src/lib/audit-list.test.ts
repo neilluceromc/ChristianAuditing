@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, NO_HIDDEN_REFS, buildAuditWhere, whenRange, WHEN_LABEL } from "./audit-list";
+import {
+  AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, NO_HIDDEN_REFS, buildAuditWhere, entityOptionCount, whenRange, WHEN_LABEL,
+} from "./audit-list";
 import { parseListState } from "./url-state";
 
 const parse = (qs: string) => parseListState(new URLSearchParams(qs), AUDIT_LIST_CONFIG);
@@ -24,6 +26,13 @@ describe("buildAuditWhere", () => {
     expect(AUDIT_ENTITY_TYPES).toContain("purchase-order");
     expect(buildAuditWhere(parse("entity=purchase-order")).entityType).toEqual({ in: ["purchase-order", "purchase-request"] });
     expect(buildAuditWhere(parse("entity=purchase-request")).entityType).toEqual({ in: ["purchase-request", "purchase-order"] });
+  });
+  it("migration 38: the purchase-order facet option counts the old purchase-request rows too", () => {
+    const groups = [{ entityType: "purchase-request", _count: 5 }, { entityType: "purchase-order", _count: 2 }, { entityType: "asset", _count: 9 }];
+    expect(entityOptionCount("purchase-order", groups)).toBe(7);
+    expect(entityOptionCount("asset", groups)).toBe(9);
+    expect(entityOptionCount("vendor", groups)).toBe(0);
+    expect(entityOptionCount("purchase-order", [{ entityType: "purchase-request", _count: 5 }])).toBe(5);
   });
   it("lists the four Phase 27 entity types the page already renders", () => {
     expect(AUDIT_ENTITY_TYPES).toEqual(expect.arrayContaining(["vendor", "stock-item", "stock-category", "stocktake"]));

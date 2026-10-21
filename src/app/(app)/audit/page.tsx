@@ -7,7 +7,7 @@ import { prisma } from "@/server/db/client";
 import {
   clearFilters, parseListState, serializeListState, toSearchParams, withFilter,
 } from "@/lib/url-state";
-import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, WHEN_LABEL, buildAuditWhere } from "@/lib/audit-list";
+import { AUDIT_ENTITY_TYPES, AUDIT_LIST_CONFIG, WHEN_LABEL, buildAuditWhere, entityOptionCount } from "@/lib/audit-list";
 import { invisibleAuditRefs, listAudit } from "@/server/modules/audit/queries";
 import { resolveEntitySearch } from "@/server/modules/audit/search";
 import { PageHeader } from "@/components/ui/page-header";
@@ -54,7 +54,7 @@ export default async function AuditPage({
   const entityOptions: FacetOptionLike[] = AUDIT_ENTITY_TYPES.map((t) => ({
     value: t,
     label: humanize(t),
-    count: entityGroups.find((g) => g.entityType === t)?._count ?? 0,
+    count: entityOptionCount(t, entityGroups),
   }));
 
   const href = (s: typeof state) => "/audit" + serializeListState(s, AUDIT_LIST_CONFIG);
