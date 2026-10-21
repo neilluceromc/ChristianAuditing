@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { ROLE_LANDING } from "@/lib/workspaces";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 12, Task 7 (third revision). Two surfaces: registration (Task 5 — IT
@@ -45,23 +45,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 /** The highest number currently in use by the BR-LT- prefix. Never hardcode
  * 0210/0211 — an earlier test in this very file may have registered more. */

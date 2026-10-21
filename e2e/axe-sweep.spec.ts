@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 10's axe pass. The point is COVERAGE, not severity: a design token
@@ -91,23 +91,6 @@ test.afterAll(async () => {
   if (rows.length === 0) console.log("  none");
   for (const [rule, count] of rows) console.log(`  ${count.toString().padStart(4)}  ${rule}`);
 });
-
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 /**
  * Navigates, asserts we actually landed on the intended path (an

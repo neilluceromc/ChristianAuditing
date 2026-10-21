@@ -2,30 +2,13 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { E2E_BASE_URL } from "../playwright.config";
+import { login, submitSignIn } from "./fixtures/login";
 
 // Phase 27, Task 6: the reference-name cases at the foot of this file read and
 // restore rows directly, so this file gains the client every other spec that
 // touches the database already carries.
 const db = new PrismaClient();
-
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 async function expectNoSeriousAxe(page: Page) {
   const results = await new AxeBuilder({ page }).analyze();
@@ -91,12 +74,7 @@ test.describe.serial("users & roles", () => {
     await expect(page.getByText(/V. Cruz is disabled/)).toBeVisible({ timeout: 20_000 });
 
     await page.goto("/logout");
-    await page.getByRole("link", { name: /^Log in/ }).click();
-    await page.locator('[data-login-ready="true"]').waitFor();
-    await page.getByLabel("Work email", { exact: true }).fill("viewer@thebackroomop.com");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-    await page.getByRole("button", { name: "Log in", exact: true }).click();
+    await submitSignIn(page, "viewer@thebackroomop.com");
     // Still on /login: authorize() refuses a disabled user.
     await expect(page).toHaveURL(/\/login/);
   });
@@ -151,12 +129,7 @@ test.describe.serial("users & roles", () => {
     // mutation ends the actor's own session.
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
 
-    await page.getByRole("link", { name: /^Log in/ }).click();
-    await page.locator('[data-login-ready="true"]').waitFor();
-    await page.getByLabel("Work email", { exact: true }).fill("it@thebackroomop.com");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-    await page.getByRole("button", { name: "Log in", exact: true }).click();
+    await submitSignIn(page, "it@thebackroomop.com");
     // Finance follow-up (spec §7.1): every sign-in lands on Home.
     await expect(page).toHaveURL((u) => u.pathname === "/", { timeout: 20_000 });
   });

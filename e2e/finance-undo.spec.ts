@@ -2,9 +2,9 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { depStartMonth, monthLabel } from "@/lib/depreciation";
 import { fmtDayMonthYear, fmtMoneyExact } from "@/lib/format";
+import { login, submitSignIn } from "./fixtures/login";
 
 /**
  * Phase 47 follow-up (spec docs/superpowers/specs/2026-10-21-finance-sort-undo-notify-design.md): Finance sorting,
@@ -60,21 +60,6 @@ test.beforeEach(async () => {
   await db.userPreference.deleteMany({ where: { key: "ui:prefs" } });
 });
 
-// Copied from e2e/phase-47-finance.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 §5.4: the first page after a sign-in rewrites the settings cookies and refreshes; wait for it.
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(users[email]);
-}
 async function waitForHydration(target: Locator) {
   const el = target.first();
   await el.waitFor({ state: "attached", timeout: 20_000 });
@@ -508,12 +493,7 @@ test.describe("sign-in lands on Home", () => {
     try {
       await fresh.goto(assetHref(id));
       await expect(fresh).toHaveURL(/\/login\?next=/);
-      await fresh.getByRole("link", { name: /^Log in/ }).click();
-      await fresh.locator('[data-login-ready="true"]').waitFor();
-      await fresh.getByLabel("Work email", { exact: true }).fill(FINANCE);
-      await fresh.getByRole("button", { name: "Continue", exact: true }).click();
-      await fresh.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-      await fresh.getByRole("button", { name: "Log in", exact: true }).click();
+      await submitSignIn(fresh, FINANCE);
       await expect(fresh).toHaveURL((u) => u.pathname === assetHref(id), { timeout: 30_000 });
     } finally {
       await context.close();

@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 const db = new PrismaClient();
 
@@ -16,25 +16,6 @@ async function waitForHydration(target: Locator) {
       true,
     );
   }).toPass({ timeout: 20_000 });
-}
-
-async function login(page: Page, email: string) {
-  // /logout clears the session cookie and redirects to /login, which keeps this
-  // helper safe to call again mid-file to switch users.
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
 }
 
 async function expectNoSeriousAxe(page: Page) {

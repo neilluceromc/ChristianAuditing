@@ -2,11 +2,11 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { REPAIR_STAGES, REPAIR_STAGE_CASE_SQL, repairStage, type RepairLike } from "@/lib/repairs";
 import { ENTITY_PAGE_SIZE } from "@/lib/paging";
 import { RETENTION_DAYS, RETENTION_NOTE } from "@/lib/retention";
 import { fmtDate } from "@/lib/format";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 20, Task 8 — the six closed IT gaps from spec §6; Phase 24 (spec §4–5)
@@ -84,25 +84,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/transfers.spec.ts:34-40 — house rule: never import helpers
-// across spec files, since each file reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // Copied from e2e/transfers.spec.ts:43-47.
 async function expectNoSeriousAxe(page: Page) {

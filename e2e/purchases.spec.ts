@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Purchase orders (migration 38, spec docs/superpowers/specs/2026-10-21-purchase-orders-intake-design.md §3): the list,
@@ -29,22 +29,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function login(page: Page, email: string) {
-  // /logout clears the session cookie and redirects to /login — safe to call again mid-test to switch users.
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies and refreshes; wait for it.
-  await expect
-    .poll(async () => (await page.context().cookies()).some((c) => c.name === "br.uid"), { timeout: 30_000 })
-    .toBe(true);
-}
 
 async function waitForHydration(target: Locator) {
   const el = target.first();
