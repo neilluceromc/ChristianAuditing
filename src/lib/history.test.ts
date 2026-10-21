@@ -148,6 +148,12 @@ describe("formatHistoryValue", () => {
     expect(f("financeReturn", { fields: [], note: "Wrong PO" })).toBe("Wrong PO");
     expect(f("financeReturn", { fields: [], note: "" })).toBe("—");
   });
+  it("Task 6's send-back also names the team it went to — still its labels and note, never key: value pairs", () => {
+    expect(f("financeReturn", { fields: ["Cost", "Sales invoice"], note: "Invoice is for another PO", team: "IT" }))
+      .toBe("Cost, Sales invoice — Invoice is for another PO · to IT");
+    expect(f("financeReturn", { fields: ["Serial number"], note: null, team: "PURCHASING" })).toBe("Serial number · to Purchasing");
+    expect(f("financeReturn", { fields: [], note: "", team: "IT" })).toBe("to IT");
+  });
   it("shows any other object as key: value pairs and never [object Object]", () => {
     expect(f("lines", { qty: 2, ready: true })).toBe("qty: 2; ready: Yes");
     expect(f("lines", { startsAt: "2026-01-05T00:00:00Z", who: null })).toBe("startsAt: 5 Jan 2026; who: —");

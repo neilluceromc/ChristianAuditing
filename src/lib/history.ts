@@ -70,10 +70,16 @@ function formatDate(d: Date): string | null {
   return midnight ? day : `${day} ${timeFmt.format(d)}`;
 }
 
-/** The send-back's value: `{ fields: <checklist labels>, note }` (inventory/actions.ts, `finance.return`). */
-function isSendBack(v: Record<string, unknown>): v is { fields: unknown[]; note?: unknown } {
-  return Array.isArray(v.fields) && v.fields.every((x) => typeof x === "string") && Object.keys(v).every((k) => k === "fields" || k === "note");
+/**
+ * The send-back's value: `{ fields: <checklist labels>, note }` (inventory/actions.ts, `finance.return`), plus the team
+ * it went to since purchase orders (`team`, finance/review-writes.ts).
+ */
+function isSendBack(v: Record<string, unknown>): v is { fields: unknown[]; note?: unknown; team?: unknown } {
+  return Array.isArray(v.fields) && v.fields.every((x) => typeof x === "string")
+    && Object.keys(v).every((k) => k === "fields" || k === "note" || k === "team");
 }
+
+const SEND_BACK_TEAM: Record<string, string> = { IT: "IT", PURCHASING: "Purchasing" };
 
 /**
  * One diff value in words. Ids become names ("(removed)" when the id no longer exists), dates read in Asia/Manila,
@@ -105,8 +111,10 @@ export function formatHistoryValue(key: string, value: unknown, names: HistoryNa
     if (isSendBack(value)) {
       const items = value.fields.map(String).join(", ");
       const note = typeof value.note === "string" ? value.note : "";
-      if (items && note) return `${items} — ${note}`;
-      return items || note || BLANK;
+      const said = items && note ? `${items} — ${note}` : items || note;
+      const team = typeof value.team === "string" ? SEND_BACK_TEAM[value.team] ?? value.team : "";
+      if (team) return said ? `${said} · to ${team}` : `to ${team}`;
+      return said || BLANK;
     }
     const pairs = Object.entries(value).map(([k, v]) => `${k}: ${formatHistoryValue(k, v, names)}`);
     return pairs.length ? pairs.join("; ") : BLANK;
