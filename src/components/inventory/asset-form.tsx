@@ -77,6 +77,8 @@ export function AssetForm({
   const leave = useLeaveTo();
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState<AssetFormInitial>(initial);
+  // Task 6 (spec §2): a fix to money another team owns (IT fixing what Finance sent back, say) needs a reason.
+  const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
@@ -157,6 +159,7 @@ export function AssetForm({
       ...form,
       cost: cost.ok ? cost.value : form.cost,
       repairQuote: repairQuote.ok ? repairQuote.value : form.repairQuote,
+      ...(reason.trim() ? { reason } : {}),
     };
     startTransition(async () => {
       const res = await action(payload);
@@ -331,6 +334,24 @@ export function AssetForm({
         <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {field("RMA reference", "rmaRef", { onBlur: trim("rmaRef") })}
           {field("Repair quote (₱)", "repairQuote", { inputMode: "decimal", onBlur: normaliseMoney("repairQuote") })}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Reason for the change" />
+        <CardBody>
+          <FormField
+            label="Reason"
+            hint="Needed when you change money details another team owns (5–300 characters). It's kept with the change."
+            error={errors.reason}
+          >
+            {(p) => (
+              <Textarea
+                id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
+                value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300}
+              />
+            )}
+          </FormField>
         </CardBody>
       </Card>
 

@@ -6,7 +6,7 @@ import { readSheet } from "read-excel-file/node";
 import { IDS_CAP, idsRefusalText } from "@/lib/export-columns";
 import { IMPORT_ROW_CAP, rowCapRefusal } from "@/lib/import-vocabulary";
 import { ROLE_LANDING } from "@/lib/workspaces";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 9, Task 13. Covers both halves of the feature — four export routes
@@ -55,23 +55,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 /**
  * Task 13, T-3: the pointer park and the settle are MEASURED, not defensive

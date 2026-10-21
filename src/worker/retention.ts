@@ -1,12 +1,22 @@
 import { prisma } from "../server/db/client";
-import { PRUNE_BATCH, crisConversationCutoff, crisPendingCutoff, metricSnapshotCutoff, retentionCutoff } from "../lib/retention";
+import {
+  PRUNE_BATCH, crisConversationCutoff, crisPendingCutoff, metricSnapshotCutoff, notificationCutoff, retentionCutoff,
+} from "../lib/retention";
 
-export interface PruneResult { deliveries: number; jobs: number; crisConversations: number; crisPending: number; metricSnapshots: number }
+export interface PruneResult {
+  deliveries: number;
+  jobs: number;
+  crisConversations: number;
+  crisPending: number;
+  metricSnapshots: number;
+  notifications: number;
+}
 
 /**
  * One full pass, in id batches: finished deliveries and jobs older than the cutoff, and (Phase 41, spec §7) Cris
  * chats untouched for 30 days (their messages cascade) and Cris pending actions older than a day; and (Phase 46,
- * spec §2.3) MetricSnapshot days older than 400 days.
+ * spec §2.3) MetricSnapshot days older than 400 days; and (Task 7, purchase-orders spec §7) bell notifications older
+ * than 90 days.
  */
 export async function pruneRetention(now: Date = new Date()): Promise<PruneResult> {
   const cutoff = retentionCutoff(now);
@@ -33,7 +43,13 @@ export async function pruneRetention(now: Date = new Date()): Promise<PruneResul
   );
   // At most one row per key per day, so one statement: no batching needed, and nothing revives an old day.
   const metricSnapshots = (await prisma.metricSnapshot.deleteMany({ where: { day: { lt: metricSnapshotCutoff(now) } } })).count;
-  return { deliveries, jobs, crisConversations, crisPending, metricSnapshots };
+  // Task 7 (spec §7): bell notifications older than 90 days; their per-person reads cascade (NotificationRead's FK).
+  const noteCutoff = notificationCutoff(now);
+  const notifications = await pruneTable(
+    () => prisma.notification.findMany({ where: { createdAt: { lt: noteCutoff } }, select: { id: true }, take: PRUNE_BATCH }),
+    (ids) => prisma.notification.deleteMany({ where: { id: { in: ids }, createdAt: { lt: noteCutoff } } }),
+  );
+  return { deliveries, jobs, crisConversations, crisPending, metricSnapshots, notifications };
 }
 
 async function pruneTable(pick: () => Promise<{ id: string }[]>, drop: (ids: string[]) => Promise<{ count: number }>): Promise<number> {

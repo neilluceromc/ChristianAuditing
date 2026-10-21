@@ -70,10 +70,16 @@ function formatDate(d: Date): string | null {
   return midnight ? day : `${day} ${timeFmt.format(d)}`;
 }
 
-/** The send-back's value: `{ fields: <checklist labels>, note }` (inventory/actions.ts, `finance.return`). */
-function isSendBack(v: Record<string, unknown>): v is { fields: unknown[]; note?: unknown } {
-  return Array.isArray(v.fields) && v.fields.every((x) => typeof x === "string") && Object.keys(v).every((k) => k === "fields" || k === "note");
+/**
+ * The send-back's value: `{ fields: <checklist labels>, note }` (inventory/actions.ts, `finance.return`), plus the team
+ * it went to since purchase orders (`team`, finance/review-writes.ts).
+ */
+function isSendBack(v: Record<string, unknown>): v is { fields: unknown[]; note?: unknown; team?: unknown } {
+  return Array.isArray(v.fields) && v.fields.every((x) => typeof x === "string")
+    && Object.keys(v).every((k) => k === "fields" || k === "note" || k === "team");
 }
+
+const SEND_BACK_TEAM: Record<string, string> = { IT: "IT", PURCHASING: "Purchasing" };
 
 /**
  * One diff value in words. Ids become names ("(removed)" when the id no longer exists), dates read in Asia/Manila,
@@ -105,8 +111,10 @@ export function formatHistoryValue(key: string, value: unknown, names: HistoryNa
     if (isSendBack(value)) {
       const items = value.fields.map(String).join(", ");
       const note = typeof value.note === "string" ? value.note : "";
-      if (items && note) return `${items} — ${note}`;
-      return items || note || BLANK;
+      const said = items && note ? `${items} — ${note}` : items || note;
+      const team = typeof value.team === "string" ? SEND_BACK_TEAM[value.team] ?? value.team : "";
+      if (team) return said ? `${said} · to ${team}` : `to ${team}`;
+      return said || BLANK;
     }
     const pairs = Object.entries(value).map(([k, v]) => `${k}: ${formatHistoryValue(k, v, names)}`);
     return pairs.length ? pairs.join("; ") : BLANK;
@@ -138,12 +146,18 @@ export function historyNameIds(entries: AuditEntryLike[]): { category: string[];
   };
 }
 
+/**
+ * Task 6: keys that say which action an entry belongs to, not what changed — a registration group's id, a group
+ * action's id, the PO a send-back went with (finance-undo.ts). Never a row of their own.
+ */
+const META_KEYS: ReadonlySet<string> = new Set(["group", "batch", "po"]);
+
 /** "One row per field, not per save. Two rows sharing a timestamp were one action." */
 export function historyRows(entries: AuditEntryLike[], names: HistoryNames): HistoryRow[] {
   const rows: HistoryRow[] = [];
   for (const entry of entries) {
     const diff = (entry.diff ?? null) as Diff | null;
-    const fields = diff ? Object.keys(diff) : [];
+    const fields = diff ? Object.keys(diff).filter((k) => !META_KEYS.has(k)) : [];
     const action = actionLabel(entry.action);
     if (fields.length === 0) {
       rows.push({
@@ -200,12 +214,12 @@ function withHolderNamed(diff: unknown, employees: Map<string, string>): unknown
  * An action the sentence builder has no wording for falls back to the shared action label, never its raw code.
  */
 export function timelinePhrase(
-  entry: { actorLabel: string; action: string; diff: unknown },
+  entry: { actorLabel: string; action: string; diff: unknown; reason?: string | null },
   tag: string,
   employees: Map<string, string>,
 ): string {
   const phrase = auditSentence(
-    { actorLabel: entry.actorLabel, action: entry.action, diff: withHolderNamed(entry.diff, employees), entityLabel: tag },
+    { actorLabel: entry.actorLabel, action: entry.action, diff: withHolderNamed(entry.diff, employees), entityLabel: tag, reason: entry.reason },
     { omitActor: true, omitEntity: true },
   );
   // Phase 41: the fallback compares without the "(via Cris)" ending auditSentence adds, then puts it back

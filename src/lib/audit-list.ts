@@ -2,14 +2,25 @@ import type { Prisma } from "@prisma/client";
 import { addDays } from "./deadlines";
 import { localDateISO } from "./format";
 import type { ListConfig, ListState } from "./url-state";
+import { PURCHASE_ENTITY_TYPES } from "./activity-list";
 
 export const AUDIT_ENTITY_TYPES = [
-  "asset", "employee", "approval", "purchase-request", "user",
+  // Migration 38: "purchase-order" (filtering on it also finds the old "purchase-request" rows; see buildAuditWhere).
+  "asset", "employee", "approval", "purchase-order", "user",
   "asset-category", "asset-type", "department", "equipment-policy",
   "feature-flag", "webhook-endpoint",
   "vendor", "stock-item", "stock-category", "stocktake", // Phase 27 (spec §3.3): rows the page already renders and links
   "purchase-record", // Phase 34 (P-8): one `purchase.recorded` row per Register submit
 ] as const;
+
+/**
+ * The /audit Entity facet's count for one option, from the page's groupBy over entityType. Migration 38: the
+ * "purchase-order" option also counts the old "purchase-request" rows, the same set filtering on it returns.
+ */
+export function entityOptionCount(type: string, groups: ReadonlyArray<{ entityType: string; _count: number }>): number {
+  const types: readonly string[] = type === "purchase-order" ? PURCHASE_ENTITY_TYPES : [type];
+  return groups.filter((g) => types.includes(g.entityType)).reduce((sum, g) => sum + g._count, 0);
+}
 
 export const AUDIT_LIST_CONFIG: ListConfig = {
   facets: ["entity", "when"],
@@ -48,7 +59,14 @@ export function buildAuditWhere(
       ...(matchIds.length ? [{ entityId: { in: matchIds } }] : []),
     ];
   }
-  if (state.filters.entity?.length) where.entityType = { in: state.filters.entity };
+  if (state.filters.entity?.length) {
+    // Migration 38: a purchase order's history spans both entity types; either filter value finds both.
+    const purchase: readonly string[] = PURCHASE_ENTITY_TYPES;
+    const entity = state.filters.entity.some((e) => purchase.includes(e))
+      ? [...new Set([...state.filters.entity, ...purchase])]
+      : state.filters.entity;
+    where.entityType = { in: entity };
+  }
   const when = whenRange(state.filters.when?.[0], todayISO);
   if (when) where.createdAt = when;
   // Phase 14 (spec §3.1), generalised in Phase 27 (spec §3.3): rows about class-bearing things this

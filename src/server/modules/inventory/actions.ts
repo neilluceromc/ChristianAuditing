@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Prisma, type AssetClass } from "@prisma/client";
+import { Prisma, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { typeRequired } from "@/server/modules/inventory/register-queries";
 import { TYPE_REQUIRED } from "@/lib/register-type";
@@ -10,6 +10,8 @@ import { actionRole } from "@/server/auth/guards";
 import { isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
+import { notify } from "@/server/notifications/notify";
+import { canRegisterLine } from "@/lib/po-flow";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { createApproval, newSlaAt, OPEN_APPROVAL_STATES, openApprovalForAsset } from "@/server/modules/approvals/create";
 import {
@@ -19,7 +21,7 @@ import {
   ASSET_STATUSES, BULK_MAX, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG, parsePurchaseYear,
 } from "@/lib/inventory-list";
 import {
-  ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canManageClass, canRegisterClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
+  ASSET_CLASSES, CLASS_LABEL, CLASS_PHRASE, canEditAsset, canSeeClass, canManageClass, canRegisterClass, defaultClassFor, isAwaitingItCheck, isDirectLifecycle, isStatusOf, parseCls,
   statusLabel,
 } from "@/lib/asset-class";
 import { reasonOptional, reasonRequired } from "@/lib/reason";
@@ -36,8 +38,16 @@ import { nextToReview } from "@/server/modules/finance/queries";
 import { toReviewCount } from "@/server/modules/finance/review-queue";
 import { serialRequired } from "@/lib/serial-rules";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
-import { approveSchema, resubmitSchema, sendBackSchema } from "@/lib/registration-input";
+import { approveSchema, resubmitSchema, returnSchema } from "@/lib/registration-input";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
+import {
+  assetMoneyStage, canEditField, DEVICE_FIELDS, MONEY_FIELDS, reasonError, returnTeamFor, teamOfRole, type IntakeField,
+} from "@/lib/intake-rules";
+import {
+  approveOne, approveRefusal, returnOne, returnRefusal, TEAM_NAME, type ReturnContext,
+} from "@/server/modules/finance/review-writes";
+import { lockPo } from "@/server/modules/purchases/po-lock";
+import { emitIfPoFullyApproved } from "@/server/modules/purchases/po-complete";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -211,17 +221,20 @@ const createSchema = z.object({
   // Phase 21 (spec §6): cleaned like every other reason — a zero-width string
   // must fall through to the "assigned at registration" default below.
   assignReason: reasonOptional(),
-  // Phase 30 (spec §5.3, plan P-13): Register at quantity 1 submits here — a loan's due date and the
-  // purchase request the unit came from ride along, so no loan is created without a due date.
+  // Phase 30 (spec §5.3, plan P-13): Register at quantity 1 submits here — a loan's due date rides along, so
+  // no loan is created without a due date. No purchase order (spec §4 way 3): a PO's units register from the PO.
   loanDueAt: dateStr.optional(),
-  requestId: z.string().optional(),
 });
 
 const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
 const toCost = (c: number | "" | undefined) => (c === "" || c === undefined ? null : c);
 
+/**
+ * Register at quantity 1 (spec §4 way 3): IT registers IT gear directly, an admin anything; Purchasing registers only
+ * from a purchase order (po-register.ts). The one asset is its own registration group, and Finance's bell rings once.
+ */
 export async function createAsset(input: unknown): Promise<ActionResult<{ id: string; purchaseRecordId: string }>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff");
+  const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -234,8 +247,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   const errors: Record<string, string> = {};
   const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
   if (!category) errors.categoryId = "Unknown category";
-  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
-  // managing — an IT asset Purchasing registers is IT's from this moment.
+  // Spec §4 way 3: IT registers its own class directly (REGISTRABLE_CLASSES); Purchasing's items come in from a PO.
   else if (!canRegisterClass(user.role, category.cls)) {
     errors.categoryId = `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not create ${CLASS_LABEL[category.cls]} assets.`;
   }
@@ -261,11 +273,6 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   }
   // Spec §8, a category with types needs one picked (Phase 36).
   else if (category && (await typeRequired(d.categoryId, d.typeId))) errors.typeId = TYPE_REQUIRED;
-  if (d.requestId) {
-    const req = await prisma.purchaseRequest.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });
-    if (!req) errors.requestId = "Unknown request";
-    else if (req.state !== "COMPLETED") errors.requestId = `${req.refNo} is ${req.state.toLowerCase()} — only a completed request can be linked.`;
-  }
   const tagTaken = await prisma.asset.findUnique({ where: { tag: d.tag }, select: { id: true } });
   if (tagTaken) errors.tag = `${d.tag} is already registered`;
   // Scoped to the class being registered into, like checkIdentifiers (identifierWhere): the message
@@ -320,7 +327,6 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           warrantyCoveredBy: d.warrantyCoveredBy || null,
           warrantyContact: d.warrantyContact || null,
           purchaseRecordId: record.id,
-          purchaseRequestId: d.requestId || null,
           itVerifiedAt: selfChecked ? new Date() : null,
           itVerifiedById: selfChecked ? user.id : null,
         },
@@ -347,6 +353,13 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           quantity: { from: null, to: 1 },
           total: { from: null, to: (Number(toCost(d.cost) ?? 0) + Number(toCost(d.fees) ?? 0)).toFixed(2) },
         },
+      });
+      // Spec §4 way 3: the registration reaches Finance as one group, and Finance's bell rings once.
+      await notify(tx, {
+        team: "FINANCE", kind: "TO_CHECK",
+        title: `${created.tag} registered by ${user.role === "admin" ? "an admin" : "IT"}, ready to check`,
+        href: `/finance/review/${record.id}`, actorId: user.id, actorRole: user.role,
+        entityType: "purchase-record", entityId: record.id,
       });
       if (plan.approval) {
         // Phase 15 (spec §2.1): IT registering its own deploy applies directly —
@@ -430,11 +443,15 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   }
 }
 
+/**
+ * Every key is optional (Task 6): the Edit form sends them all, and a key left out is left alone — so Finance's money
+ * fix sends only what it changes. `reason` is the 5–300 character reason a cross-team fix needs (canEditField).
+ */
 const updateSchema = z.object({
   id: z.string().min(1),
-  model: z.string().trim().min(2, "Name the model").max(120),
+  model: z.string().trim().min(2, "Name the model").max(120).optional(),
   serial: z.string().trim().max(120).optional(),
-  categoryId: z.string().min(1, "Pick a category"),
+  categoryId: z.string().min(1, "Pick a category").optional(),
   typeId: z.string().optional(),
   purchasedAt: dateStr.optional(),
   cost: z.union([z.literal(""), z.coerce.number().nonnegative().max(10_000_000).multipleOf(0.01, "Whole centavos only")]).optional(),
@@ -449,14 +466,22 @@ const updateSchema = z.object({
   receiptRef: z.string().trim().max(60).optional(),
   warrantyCoveredBy: z.union([z.literal(""), z.enum(WARRANTY_COVERED_BY)]).optional(),
   warrantyContact: z.string().trim().max(160).optional(),
+  reason: reasonOptional({ max: 300 }),
 });
+
+const INTAKE_FIELDS: readonly string[] = [...MONEY_FIELDS, ...DEVICE_FIELDS];
+const MONEY: readonly string[] = MONEY_FIELDS;
 
 /**
  * Direct-write surface: identity/procurement/repair fields ONLY (scope
  * decision #3). tag is immutable; status/assignee move via approvals.
+ *
+ * Task 6 (spec §2): each changed intake field must pass `canEditField` for the person, the asset's class and where its
+ * money sits (`assetMoneyStage`), with a reason when any of them needs one (a cross-team fix). Finance edits money
+ * only — it never touches IT's fields — and an asset from a PO has its money fixed on the PO, never here.
  */
 export async function updateAsset(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff");
+  const user = await actionRole("admin", "it_staff", "purchasing_staff", "finance_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -466,12 +491,14 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
 
   const asset = await prisma.asset.findUnique({ where: { id: d.id } });
   if (!asset) return conflict("That asset no longer exists.");
-  if (!canEditAsset(user.role, asset)) return forbidden();
-  if (d.categoryId !== asset.categoryId) {
+  const finance = user.role === "finance_staff";
+  if (finance ? !canSeeClass(user.role, asset.cls) : !canEditAsset(user.role, asset)) return forbidden();
+  const categoryId = d.categoryId ?? asset.categoryId;
+  if (categoryId !== asset.categoryId) {
     // Same class only. A category change across classes would flip the
     // asset's class and invalidate its status; the trigger would refuse it,
     // but the person deserves the reason, not a database error.
-    const target = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
+    const target = await prisma.assetCategory.findUnique({ where: { id: categoryId }, select: { name: true, cls: true } });
     if (!target) return validationError({ categoryId: "Unknown category" });
     if (target.cls !== asset.cls) {
       return validationError({ categoryId: `${target.name} is ${CLASS_PHRASE[target.cls]} category; this is ${CLASS_PHRASE[asset.cls]} asset.` });
@@ -479,7 +506,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   }
   if (d.typeId) {
     const type = await prisma.assetType.findUnique({ where: { id: d.typeId } });
-    if (!type || type.categoryId !== d.categoryId) {
+    if (!type || type.categoryId !== categoryId) {
       return validationError({ typeId: "That type doesn't belong to the chosen category" });
     }
   }
@@ -487,24 +514,28 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
     return validationError({ vendorId: "Unknown vendor" });
   }
 
-  const data = {
+  const given = <V,>(v: V | undefined, f: (x: V) => unknown) => (v === undefined ? undefined : f(v));
+  const orNull = (v: string) => v || null;
+  const all: Record<string, unknown> = {
     model: d.model,
-    serial: d.serial || null,
+    serial: given(d.serial, orNull),
     categoryId: d.categoryId,
-    typeId: d.typeId || null,
-    purchasedAt: toDate(d.purchasedAt),
-    cost: toCost(d.cost),
-    warrantyUntil: toDate(d.warrantyUntil),
-    notes: d.notes || null,
-    vendorId: d.vendorId || null,
-    brand: d.brand || null,
-    invoiceRef: d.invoiceRef || null,
-    rmaRef: d.rmaRef || null,
-    repairQuote: toCost(d.repairQuote),
-    receiptRef: d.receiptRef || null,
-    warrantyCoveredBy: d.warrantyCoveredBy || null,
-    warrantyContact: d.warrantyContact || null,
+    typeId: given(d.typeId, orNull),
+    purchasedAt: given(d.purchasedAt, toDate),
+    cost: given(d.cost, toCost),
+    warrantyUntil: given(d.warrantyUntil, toDate),
+    notes: given(d.notes, orNull),
+    vendorId: given(d.vendorId, orNull),
+    brand: given(d.brand, orNull),
+    invoiceRef: given(d.invoiceRef, orNull),
+    rmaRef: given(d.rmaRef, orNull),
+    repairQuote: given(d.repairQuote, toCost),
+    receiptRef: given(d.receiptRef, orNull),
+    warrantyCoveredBy: given(d.warrantyCoveredBy, orNull),
+    warrantyContact: given(d.warrantyContact, orNull),
   };
+  // Only the keys sent: one left out keeps its stored value.
+  const data = Object.fromEntries(Object.entries(all).filter(([, v]) => v !== undefined));
   // The form round-trips dates at DAY precision while seed/legacy rows carry
   // time-of-day. Compare at day precision — otherwise every first edit of an
   // old row writes phantom purchasedAt/warrantyUntil audit entries — and
@@ -517,12 +548,44 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   // the operator did choose one, but nothing changed, so no transaction ran and
   // `rememberPicks` below is never reached. Deliberate: Recent tracks picks that
   // produced a write, not every time a form was opened and closed.
-  if (Object.keys(diff).length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
+  const keys = Object.keys(diff);
+  if (keys.length === 0) return ok({ id: asset.id }); // no audit noise for no-ops
+
+  // ---- who may change what (spec §2) ----
+  if (finance && keys.some((k) => !MONEY.includes(k))) {
+    // Finance never edits IT's (or Purchasing's device) fields: name the team to send it to when it's one of theirs.
+    const device = keys.find((k) => INTAKE_FIELDS.includes(k) && !MONEY.includes(k));
+    const verdict = device ? canEditField(user.role, device as IntakeField, asset.cls, "with-finance") : null;
+    return conflict(verdict && !verdict.ok ? verdict.why : "Finance changes money details only — send the rest back.");
+  }
+  const moneyChanged = keys.filter((k) => MONEY.includes(k));
+  if (asset.purchaseOrderId && moneyChanged.length > 0) {
+    const po = await prisma.purchaseOrder.findUnique({ where: { id: asset.purchaseOrderId }, select: { refNo: true } });
+    return conflict(`Fix it on ${po?.refNo ?? "its purchase order"}`);
+  }
+  const stage = assetMoneyStage(asset);
+  let needsReason = false;
+  for (const k of keys.filter((x) => INTAKE_FIELDS.includes(x))) {
+    const verdict = canEditField(user.role, k as IntakeField, asset.cls, stage);
+    if (!verdict.ok) return conflict(verdict.why);
+    needsReason ||= verdict.reasonRequired;
+  }
+  const reason = d.reason ? d.reason : null;
+  if (needsReason) {
+    const err = reasonError(reason ?? undefined);
+    if (err) return validationError({ reason: err });
+  }
+  // Spec §7: the team that registered the batch hears when another team changes its numbers (notify skips the
+  // actor's own team, so a team fixing its own numbers rings nobody).
+  const owner = moneyChanged.length > 0
+    ? returnTeamFor(moneyChanged[0] as IntakeField, asset.cls, { hasPo: false, registeredByRole: await registeredBy(asset.purchaseRecordId) })
+    : null;
 
   // Phase 35 (spec §3.6): a cost on an asset approved as NOT capitalised reopens Finance's review —
   // Finance never saw that cost, and depreciation must start from an approval of it.
   // Final review I-1: keyed on "approved, had no cost, now has one" (covers legacy approvals with no cost too).
-  const reopen = shouldReopen(asset, data.cost);
+  const newCost = "cost" in data ? data.cost : asset.cost;
+  const reopen = "cost" in diff && shouldReopen(asset, newCost);
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -533,7 +596,7 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
           data: { ...changed, financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false },
         });
         if (done.count === 0) throw new StaleAssetError();
-      } else if (asset.cost === null && data.cost !== null) {
+      } else if ("cost" in diff && asset.cost === null && newCost !== null) {
         // Not approved when read; if Finance approves (even as not capitalised) before this lands, conflict.
         const done = await tx.asset.updateMany({ where: { id: asset.id, financeConfirmedAt: null }, data: changed });
         if (done.count === 0) throw new StaleAssetError();
@@ -543,12 +606,21 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name,
         entityType: "asset", entityId: asset.id,
-        action: "update", diff,
+        action: "update", diff, reason, source: "web",
       });
       if (reopen) {
         await writeAudit(tx, {
           actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
-          action: "finance.reopened", diff: { cost: diff.cost ?? { from: null, to: Number(data.cost) } },
+          action: "finance.reopened", diff: { cost: diff.cost ?? { from: null, to: Number(newCost) } }, source: "web",
+        });
+      }
+      if (owner) {
+        const team = teamOfRole(user.role);
+        await notify(tx, {
+          team: owner, kind: "CHANGED",
+          title: `${team ? TEAM_NAME[team] : "An admin"} changed ${asset.tag}'s ${fieldLabels(moneyChanged).join(", ")}`,
+          body: reason, href: `/inventory/${asset.id}`, actorId: user.id, actorRole: user.role,
+          entityType: "asset", entityId: asset.id,
         });
       }
     });
@@ -559,12 +631,19 @@ export async function updateAsset(input: unknown): Promise<ActionResult<{ id: st
   }
   revalidatePath(`/inventory/${asset.id}`);
   revalidatePath("/inventory");
-  if (reopen) {
-    revalidatePath("/finance/assets");
-    revalidatePath(`/finance/assets/${asset.id}`);
-  }
-  await rememberPicks(user.id, { vendor: d.vendorId || null });
+  revalidatePath("/finance/assets");
+  revalidatePath(`/finance/assets/${asset.id}`);
+  if (asset.purchaseRecordId) revalidatePath(`/finance/review/${asset.purchaseRecordId}`);
+  if (d.vendorId !== undefined) await rememberPicks(user.id, { vendor: d.vendorId || null });
   return ok({ id: asset.id });
+}
+
+/** The role of whoever registered the asset's batch (the PurchaseRecord's creator), or null. */
+async function registeredBy(recordId: string | null): Promise<Role | null> {
+  if (!recordId) return null;
+  const record = await prisma.purchaseRecord.findUnique({ where: { id: recordId }, select: { createdById: true } });
+  if (!record) return null;
+  return (await prisma.user.findUnique({ where: { id: record.createdById }, select: { role: true } }))?.role ?? null;
 }
 
 const statusChangeSchema = z.object({
@@ -654,75 +733,52 @@ export async function confirmAssetDetails(
   let out: { id: string; tag: string; cls: AssetClass } | null = null;
   let failure: ActionResult<{ tag: string; next: { id: string; tag: string } | null; remaining: number }> | null = null;
 
+  const select = {
+    id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, cost: true, financeReturnedAt: true,
+    financeReturnedTo: true, financeNotCapitalised: true, financeResubmitNote: true, purchaseOrderId: true,
+  } as const;
+
   await prisma.$transaction(async (tx) => {
-    const asset = await tx.asset.findUnique({
-      where: { id: parsed.data.id },
-      select: {
-        id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, cost: true, financeReturnedAt: true,
-        financeNotCapitalised: true, financeResubmitNote: true,
-      },
-    });
+    let asset = await tx.asset.findUnique({ where: { id: parsed.data.id }, select });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
       return;
     }
-    if (asset.financeConfirmedAt) {
-      failure = conflict(`${asset.tag} was already confirmed.`);
-      return;
-    }
-    if (isAwaitingItCheck(asset)) {
-      failure = conflict(`${asset.tag} is waiting for IT's check — Finance confirms after IT.`);
-      return;
-    }
-    if (asset.financeReturnedAt) {
-      failure = conflict(`${asset.tag} is waiting for ${CLASS_LABEL[asset.cls]} to correct it — Finance reviews it when it comes back.`);
-      return;
+    // Task 6: an asset from a PO is approved under the PO row's lock (lockPo, as the group approval and a PO fix
+    // take it), then re-read: a fix or send-back landing at the same moment waits, and this sees what it left.
+    if (asset.purchaseOrderId) {
+      await lockPo(tx, asset.purchaseOrderId);
+      const po = await tx.purchaseOrder.findUnique({
+        where: { id: asset.purchaseOrderId }, select: { refNo: true, state: true, invoiceRef: true },
+      });
+      if (po?.state === "SENT_BACK") {
+        failure = conflict(`${po.refNo} is with Purchasing for corrections.`);
+        return;
+      }
+      // Spec §3: an old request has no SI number; Finance approves nothing from it until it has one.
+      if (po && !po.invoiceRef?.trim()) {
+        failure = conflict("No SI number yet. Add it before approving.");
+        return;
+      }
+      asset = await tx.asset.findUnique({ where: { id: parsed.data.id }, select });
+      if (!asset) {
+        failure = validationError({ id: "Unknown asset" });
+        return;
+      }
     }
     const notCap = parsed.data.notCapitalised === true;
-    if (notCap && asset.cost !== null) {
-      failure = conflict(`${asset.tag} has a cost, so it is approved as capitalised — use Approve.`);
+    const refusal = approveRefusal(asset, notCap);
+    if (refusal) {
+      failure = conflict(refusal);
       return;
     }
-    if (!notCap && asset.cost === null) {
-      failure = conflict(`${asset.tag} has no cost. Send it back for the cost, or approve it as not capitalised.`);
-      return;
-    }
-    // State-guarded write: the null check is IN the where clause, so two
-    // simultaneous confirmations cannot both succeed.
-    const hit = await tx.asset.updateMany({
-      where: { id: asset.id, financeConfirmedAt: null, financeReturnedAt: null, cost: notCap ? null : { not: null } },
-      data: {
-        financeConfirmedAt: new Date(),
-        financeConfirmedById: user.id,
-        financeNotCapitalised: notCap,
-        financeReturnFields: [],
-        financeResubmitNote: null,
-        // Clearing the return here is what makes "confirmed AND returned"
-        // unreachable, so the pill's three states stay mutually exclusive.
-        financeReturnedAt: null,
-        financeReturnedById: null,
-        financeReturnReason: null,
-      },
-    });
-    if (hit.count === 0) {
+    // State-guarded write: the null check is IN the where clause, so two simultaneous confirmations cannot both succeed.
+    if (!(await approveOne(tx, asset, user, notCap))) {
       failure = conflict(`${asset.tag} was changed by someone else just now — reload and review it again.`);
       return;
     }
-    await writeAudit(tx, {
-      actorId: user.id,
-      actorLabel: user.name,
-      entityType: "asset",
-      entityId: asset.id,
-      action: "finance.confirm",
-      // The earlier values an undo puts back (finance-undo.ts): the not-capitalised flag before and after when either
-      // side is true (no key means false both sides, so a plain approval shows no "No → No" chip), and IT's reply the
-      // approval cleared.
-      diff: {
-        financeConfirmed: { from: null, to: user.name },
-        ...(notCap || asset.financeNotCapitalised ? { notCapitalised: { from: asset.financeNotCapitalised, to: notCap } } : {}),
-        ...(asset.financeResubmitNote ? { resubmitNote: { from: asset.financeResubmitNote, to: null } } : {}),
-      },
-    });
+    // The last asset of a fully registered PO approved: the PO's approval webhooks, once.
+    if (asset.purchaseOrderId) await emitIfPoFullyApproved(tx, asset.purchaseOrderId);
     out = { id: asset.id, tag: asset.tag, cls: asset.cls };
   });
 
@@ -741,22 +797,27 @@ export async function confirmAssetDetails(
  * Finance sends a registration back to IT or Purchasing with a checklist of what is wrong and an
  * optional note (Phase 35, spec §3.3). The counterpart to
  * confirmAssetDetails, and deliberately NOT a gate (C-7): the asset stays
- * live and usable throughout — what changes is that IT can see what to fix.
+ * live and usable throughout — what changes is that the team can see what to fix.
+ *
+ * Task 6 (spec §5): Finance picks the team (`team`), and the ticked fields must be that team's to fix
+ * (`returnTeamFor`: the field's owner, or — money on an asset with no PO — the team that registered the batch); "Other"
+ * goes wherever Finance picks. Money on an asset from a PO is refused: Finance sends the PO back instead, so its
+ * assets keep one SI number. The team's bell rings once.
  *
  * A SECOND return is allowed and overwrites the current checklist and note: Finance
- * re-checking after IT's fix and finding it still wrong is a real sequence.
+ * re-checking after the fix and finding it still wrong is a real sequence.
  * Only the current ones live in the columns; every one survives in the
  * audit trail.
  */
-export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ tag: string }>> {
+export async function returnAsset(input: unknown): Promise<ActionResult<{ tag: string }>> {
   const user = await actionRole("admin", "finance_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
-  const parsed = sendBackSchema.safeParse(input);
+  const parsed = returnSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const { id, fields, note } = parsed.data;
+  const { id, team, fields, note } = parsed.data;
   const cleanNote = note ? note : null;
 
   let out: { tag: string } | null = null;
@@ -767,6 +828,7 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
       where: { id },
       select: {
         id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, financeReturnedAt: true, financeResubmitNote: true,
+        purchaseOrderId: true, purchaseRecordId: true,
       },
     });
     if (!asset) {
@@ -781,36 +843,22 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
       failure = conflict(`${asset.tag} is waiting for IT's check — Finance reviews after IT.`);
       return;
     }
-    // State-guarded, the same shape as confirmAssetDetails: the confirmed-is-
-    // null check lives IN the where clause, so a confirmation landing between
-    // the read above and this write wins rather than being silently undone.
-    const hit = await tx.asset.updateMany({
-      where: { id: asset.id, financeConfirmedAt: null },
-      data: {
-        financeReturnedAt: new Date(),
-        financeReturnedById: user.id,
-        financeReturnReason: cleanNote,
-        financeReturnFields: fields,
-        financeResubmitNote: null,
-      },
-    });
-    if (hit.count === 0) {
+    const ctx = await returnContext(tx, asset);
+    const refused = returnRefusal(fields, team, ctx);
+    if (refused) {
+      failure = validationError(refused);
+      return;
+    }
+    // State-guarded, the same shape as confirmAssetDetails: the confirmed-is-null check lives IN the where clause, so a
+    // confirmation landing between the read above and this write wins rather than being silently undone.
+    if (!(await returnOne(tx, asset, user, { team, fields, note: cleanNote }))) {
       failure = conflict(`${asset.tag} was confirmed by someone else just now.`);
       return;
     }
-    await writeAudit(tx, {
-      actorId: user.id,
-      actorLabel: user.name,
-      entityType: "asset",
-      entityId: asset.id,
-      action: "finance.return",
-      // The checklist (as labels) and note go in the diff, and that is what makes the audit trail
-      // the history: the columns hold only the CURRENT ones. For the undo (finance-undo.ts): `from` says whether
-      // this replaced an earlier send-back (such an undo is refused), and `resubmitNote` is IT's reply it cleared.
-      diff: {
-        financeReturn: { from: asset.financeReturnedAt ? "returned" : null, to: { fields: fieldLabels(fields), note: cleanNote } },
-        ...(asset.financeResubmitNote ? { resubmitNote: { from: asset.financeResubmitNote, to: null } } : {}),
-      },
+    await notify(tx, {
+      team, kind: "SENT_BACK", title: `${asset.tag} sent back by Finance: ${fieldLabels(fields).join(", ")}`,
+      body: cleanNote, href: `/inventory/${asset.id}`, actorId: user.id, actorRole: user.role,
+      entityType: "asset", entityId: asset.id,
     });
     out = { tag: asset.tag };
   });
@@ -820,7 +868,23 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
   revalidatePath("/inventory");
   revalidatePath("/finance/assets");
   revalidatePath(`/finance/assets/${id}`);
+  revalidatePath("/finance/review");
   return ok(out!);
+}
+
+/** What decides which team a field goes back to: the asset's class, its PO and who registered its batch. */
+async function returnContext(
+  tx: Prisma.TransactionClient,
+  asset: { cls: AssetClass; purchaseOrderId: string | null; purchaseRecordId: string | null },
+): Promise<ReturnContext> {
+  const po = asset.purchaseOrderId
+    ? await tx.purchaseOrder.findUnique({ where: { id: asset.purchaseOrderId }, select: { refNo: true } })
+    : null;
+  const record = asset.purchaseRecordId
+    ? await tx.purchaseRecord.findUnique({ where: { id: asset.purchaseRecordId }, select: { createdById: true } })
+    : null;
+  const by = record ? await tx.user.findUnique({ where: { id: record.createdById }, select: { role: true } }) : null;
+  return { cls: asset.cls, refNo: po?.refNo ?? null, registeredByRole: by?.role ?? null };
 }
 
 /**
@@ -847,15 +911,16 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id },
-      select: { id: true, tag: true, cls: true, financeReturnedAt: true },
+      select: { id: true, tag: true, cls: true, financeReturnedAt: true, financeReturnedTo: true, purchaseOrderId: true, purchaseRecordId: true },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
       return;
     }
-    // Resubmit is the department's own action, like register: the class that
-    // may send an asset back to Finance is the class that may send it again.
-    if (!canManageClass(user.role, asset.cls)) {
+    // Task 6 (spec §5): only the team Finance sent it back to resubmits it (an admin is every team). A return from
+    // before teams were recorded went to the class's team.
+    const to = asset.financeReturnedTo ?? (asset.cls === "IT" ? "IT" : "PURCHASING");
+    if (user.role !== "admin" && teamOfRole(user.role) !== to) {
       failure = forbidden();
       return;
     }
@@ -863,10 +928,18 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
       failure = conflict(`${asset.tag} was not sent back, so there is nothing to resubmit.`);
       return;
     }
+    // The PO's own send-back comes back with the PO: Purchasing corrects it and saves, which un-returns its assets.
+    if (asset.purchaseOrderId && to === "PURCHASING") {
+      const po = await tx.purchaseOrder.findUnique({ where: { id: asset.purchaseOrderId }, select: { refNo: true, state: true } });
+      if (po?.state === "SENT_BACK") {
+        failure = conflict(`Correct ${po.refNo} and save it — that sends ${asset.tag} back to Finance.`);
+        return;
+      }
+    }
     const hit = await tx.asset.updateMany({
       where: { id: asset.id, financeReturnedAt: { not: null } },
       data: {
-        financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null,
+        financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null, financeReturnedTo: null,
         financeReturnFields: [], financeResubmitNote: reply ? reply : null,
       },
     });
@@ -881,6 +954,13 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
       entityId: asset.id,
       action: "finance.resubmit",
       diff: { financeReturn: { from: "returned", to: null }, ...(reply ? { reply: { from: null, to: reply } } : {}) },
+      source: "web",
+    });
+    // Spec §7: a correction is new to check for Finance — on the asset's group when it has one.
+    await notify(tx, {
+      team: "FINANCE", kind: "TO_CHECK", title: `${asset.tag} corrected by ${TEAM_NAME[to]}, to check again`, body: reply ? reply : null,
+      href: asset.purchaseRecordId ? `/finance/review/${asset.purchaseRecordId}` : `/finance/assets/${asset.id}`,
+      actorId: user.id, actorRole: user.role, entityType: "asset", entityId: asset.id,
     });
     out = { tag: asset.tag };
   });
@@ -890,6 +970,7 @@ export async function resubmitAssetToFinance(input: unknown): Promise<ActionResu
   revalidatePath("/inventory");
   revalidatePath("/finance/assets");
   revalidatePath(`/finance/assets/${id}`);
+  revalidatePath("/finance/review");
   return ok(out!);
 }
 
@@ -963,9 +1044,10 @@ export async function checkIdentifiers(
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = identifiersSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  // Each hit now names a record (its id, a serial's tag): a class the caller cannot register into is
-  // refused outright, so a hand-crafted call cannot read another class's tags or ids.
-  if (!canRegisterClass(user.role, parsed.data.cls)) return forbidden();
+  // Each hit now names a record (its id, a serial's tag): a class the caller cannot register into — directly, or
+  // from a purchase order (Purchasing's own items, po-register-form.tsx) — is refused outright, so a hand-crafted
+  // call cannot read another class's tags or ids.
+  if (!canRegisterClass(user.role, parsed.data.cls) && !canRegisterLine(user.role, parsed.data.cls, "READY").ok) return forbidden();
   const tags = [...new Set((parsed.data.tags ?? []).map(tagKey).filter(Boolean))];
   const serials = [...new Set((parsed.data.serials ?? []).filter(Boolean))];
   const where = identifierWhere(parsed.data.cls, tags, serials);

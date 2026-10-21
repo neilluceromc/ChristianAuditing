@@ -105,6 +105,12 @@
 .cr-spin-f { animation: var(--cr-spin, cris-spin) var(--cr-spin-c, 9s) linear infinite; }
 .cr-eye { animation: var(--cr-eye-anim, none) var(--cr-eye-dur, 3s) ease-in-out infinite; }
 .cr-core { animation: var(--cr-core-anim, cris-core-breath) var(--cr-core-dur, 3.2s) ease-in-out infinite; }
+/* Where the eye looks, on top of its mood: the login page points it at the caret (--cr-look, inherited into the
+   <use> clone). Unset everywhere else, so 0 0. */
+.cr-eye { translate: var(--cr-look, 0 0); }
+@media (prefers-reduced-motion: no-preference) {
+  .cr-eye { transition: translate 0.25s ease; }
+}
 
 /* The originals inside the hidden defs svg never show, so they don't animate. The
    <use> clones inherit from their <use> element, not from here, so they are unaffected. */

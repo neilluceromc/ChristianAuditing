@@ -2,19 +2,18 @@ import { cn } from "@/lib/cn";
 import type { Stepper } from "@/lib/purchase-thread";
 
 /**
- * Four stops, and the loop drawn explicitly: when a request came back, the
+ * PO saved → With IT → Registered → Approved (With IT only when the order has IT lines), and the loop drawn explicitly: when an order came back, the
  * connector it travelled backwards along is dashed amber/red and labelled
  * "← sent back", so the return path is visible instead of implied.
  */
 export function PurchaseStepper({ model }: { model: Stepper }) {
-  // finance bounced IT_REVIEWED → SUBMITTED (connector 1); IT rejected
-  // SUBMITTED → DRAFT (connector 0)
-  const returnAt = model.sentBack === "finance" ? 1 : model.sentBack === "it" ? 0 : -1;
+  // stepperModel decides which connector the return travelled back along
+  const returnAt = model.returnAt;
 
   return (
-    <ol className="flex flex-wrap items-start gap-1" aria-label="Request progress">
+    <ol className="flex flex-wrap items-start gap-1" aria-label="Purchase order progress">
       {model.stops.map((stop, i) => (
-        <li key={stop.state} className="flex items-start gap-1">
+        <li key={stop.key} className="flex items-start gap-1">
           <div className="flex w-[104px] flex-col items-center gap-1 text-center">
             <span
               aria-hidden

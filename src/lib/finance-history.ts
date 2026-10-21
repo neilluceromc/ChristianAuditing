@@ -1,7 +1,7 @@
 import type { Role } from "@prisma/client";
 import { lifeYears, monthLabel, type DepResult, type MonthIndex } from "./depreciation";
 import { lifeLabel } from "./depreciation-input";
-import { fieldLabel } from "./activity";
+import { fieldLabel, moneyFixChanges, moneyFixFields } from "./activity";
 import { CLASS_LABEL, statusLabel } from "./asset-class";
 import { fmtDate, fmtMoneyExact } from "./format";
 import { EMPLOYMENT_LABEL } from "./labels";
@@ -198,6 +198,23 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
   update: { kind: "cost", verb: (d) => `changed the ${changedList(d, "purchase details")}` },
   "import-update": { kind: "cost", verb: (d) => `changed the ${changedList(d, "purchase details")} by import` },
   "purchase.recorded": { kind: "cost", verb: "recorded the purchase" },
+  // Purchase orders (spec §6): a PO-level money fix reaching this asset names each field, old and new; the row's reason follows
+  "asset.money.fixed": { kind: "cost", verb: (d) => `changed ${moneyFixChanges(d)}` },
+  "po.fix": { kind: "cost", verb: (d) => `fixed the ${moneyFixFields(d)}` },
+  // the PO's own entries (finance-relevant when the PO's money is what moved, was sent back or was registered)
+  "po.send-back": { kind: "review", verb: "sent the purchase order back to Purchasing" },
+  "po.send-back.undone": { kind: "review", verb: "undid the send-back to Purchasing" },
+  "po.resubmit": {
+    kind: "review",
+    verb: (d) => `corrected the purchase order and sent it back to ${d?.state?.to === "WITH_IT" ? "IT" : "Finance"}`,
+  },
+  "po.register": {
+    kind: "review",
+    verb: (d) => {
+      const n = d?.registered?.to;
+      return typeof n === "number" && n > 0 ? `registered ${n} asset${n === 1 ? "" : "s"} from the purchase order` : "registered assets from the purchase order";
+    },
+  },
   // depreciation settings
   "depreciation.override": { kind: "settings", verb: "set a custom depreciation" },
   "depreciation.override.cleared": { kind: "settings", verb: "removed the custom depreciation" },
@@ -269,6 +286,8 @@ export function isFinanceRelevant(e: { entityType: string; action: string; diff:
 const HIDDEN_FIELDS = new Set([
   "via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "noteId", "document", "attachment",
   "resubmitNote", "depreciationNote",
+  // Task 6: which group action or PO send-back an entry belongs to (finance-undo.ts)
+  "group", "batch", "po",
 ]);
 const MONEY_FIELDS = new Set(["cost", "total", "fees", "salvage", "unitCost", "price", "repairQuote"]);
 const CHIP_LABELS: Record<string, string> = {

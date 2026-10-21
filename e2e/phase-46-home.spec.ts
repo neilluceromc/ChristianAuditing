@@ -2,9 +2,9 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { addDays, dayFromISO } from "@/lib/deadlines";
 import { localDateISO } from "@/lib/format";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 46 (spec docs/superpowers/specs/2026-10-20-home-overview-sidebar-design.md §5): the Overview Home in every
@@ -52,23 +52,6 @@ test.beforeEach(async () => {
   await db.userPreference.deleteMany({ where: { key: "ui:prefs" } });
 });
 
-// Copied from e2e/phase-42-sidebar.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 async function waitForHydration(target: Locator) {
   const el = target.first();
   await el.waitFor({ state: "attached", timeout: 20_000 });
@@ -151,7 +134,11 @@ async function pageCount(page: Page): Promise<number> {
     case "/approvals":
       return read(main.getByText(/\d[\d,]* in this tab/), /([\d,]+) in this tab/, main.getByText("The queue is clear", { exact: true }));
     case "/purchases":
-      return read(main.getByText(/^\d[\d,]* requests?$/), /^([\d,]+) requests?$/);
+      // migration 38: the list's count line reads "N purchase orders"
+      return read(main.getByText(/^\d[\d,]* purchase orders?$/), /^([\d,]+) purchase orders?$/);
+    case "/finance/review":
+      // Task 6: "N groups · N assets waiting", or "Nothing to review"
+      return read(main.getByText(/^\d[\d,]* groups? · /), /^([\d,]+) groups? · /, main.getByText("Nothing to review", { exact: true }));
     case "/stock":
       return read(main.getByText(/^\d[\d,]* items · /), /^([\d,]+) items · /);
     case "/stock/reports/expiry":
@@ -218,7 +205,8 @@ const WORKSPACES: Workspace[] = [
     ],
   },
   {
-    name: "Finance", email: FINANCE, needsHref: "/purchases?state=IT_REVIEWED", series: "Capitalized", points: 12,
+    // Purchase orders (Task 6): Finance's queue is To review, registration groups
+    name: "Finance", email: FINANCE, needsHref: "/finance/review", series: "Capitalized", points: 12,
     tiles: [
       ["fin.waitingC", false], ["fin.waitingCount", true], ["approved.month", false],
       ["capitalized.month", false], ["fin.bookC", false], ["fin.toConfirm", true],

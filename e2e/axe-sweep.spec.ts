@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 10's axe pass. The point is COVERAGE, not severity: a design token
@@ -91,23 +91,6 @@ test.afterAll(async () => {
   if (rows.length === 0) console.log("  none");
   for (const [rule, count] of rows) console.log(`  ${count.toString().padStart(4)}  ${rule}`);
 });
-
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 /**
  * Navigates, asserts we actually landed on the intended path (an
@@ -292,7 +275,7 @@ test.describe("axe sweep", () => {
     // route additionally requires `state === "DRAFT"` and
     // `requestedById === user.id || role === "admin"`, so this is the one
     // seeded record purchasing_staff (not just admin) can actually reach.
-    const draftPr = await db.purchaseRequest.findUniqueOrThrow({ where: { refNo: "PR-0201" } });
+    const draftPr = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0201" } });
     await scanRoute(page, `/purchases/${draftPr.id}/edit`);
   });
 
@@ -332,7 +315,7 @@ test.describe("axe sweep", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     const employee = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     const approval = await db.approval.findFirstOrThrow({ orderBy: { refNo: "asc" } });
-    const pr = await db.purchaseRequest.findFirstOrThrow({ orderBy: { refNo: "asc" } });
+    const pr = await db.purchaseOrder.findFirstOrThrow({ orderBy: { refNo: "asc" } });
 
     for (const path of [
       `/inventory/${asset.id}`, `/inventory/${asset.id}/history`, `/inventory/${asset.id}/timeline`,
@@ -405,12 +388,12 @@ test.describe("axe sweep", () => {
 
     // A purchase request with 8 messages (over the page's 5), with the Conversation panel open. NoteEntry is
     // append-only and Restrict-linked, so the request stays behind; the next reseed truncates it.
-    const request = await db.purchaseRequest.create({
-      data: { refNo: `PR-7${tag}`, state: "DRAFT", requestedById: purchasing.id, departmentId: dept.id },
+    const request = await db.purchaseOrder.create({
+      data: { refNo: `PO-7${tag}`, state: "SENT_BACK", requestedById: purchasing.id, departmentId: dept.id },
     });
     await db.noteEntry.createMany({
       data: Array.from({ length: 8 }, (_, i) => ({
-        requestId: request.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: "COMMENT" as const,
+        orderId: request.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: "COMMENT" as const,
         text: `Axe message ${i} ${tag}`, createdAt: new Date(stamp - (8 - i) * 3_600_000),
       })),
     });

@@ -1,11 +1,11 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { SIDE_TAB_KEY, sideBadges } from "../src/lib/side-card";
 import { notYetCount } from "../src/lib/it-setup";
 import { localDateISO } from "../src/lib/format";
 import { isExpired, lotRemaining } from "../src/lib/stock-allocation";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 39 — no long scrolls (spec §7.2).
@@ -66,24 +66,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/clients-profile.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 async function waitForHydration(target: Locator) {
   const el = target.first();
@@ -334,7 +316,7 @@ test.describe("Phase 39 — the IT setup tab", () => {
 
       // Argus saves on change: the toast, the database and the select after a reload.
       await select("Argus").selectOption({ label: "Done" });
-      await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 15_000 });
+      await expect(page.locator('div[aria-live="polite"]')).toContainText("Saved", { timeout: 15_000 });
       await expect.poll(async () => (await db.employee.findUniqueOrThrow({ where: { id: person.id } })).argusStatus, {
         timeout: 15_000,
       }).toBe("DONE");
@@ -360,9 +342,9 @@ test.describe("Phase 39 — the purchase conversation", () => {
 
     // NoteEntry is append-only (a database trigger) and a request that has notes cannot be deleted
     // (onDelete: Restrict), so these two requests stay behind; every spec file reseeds, which truncates them.
-    const twelve = await db.purchaseRequest.create({
+    const twelve = await db.purchaseOrder.create({
       data: {
-        refNo: `PR-9${tag}`, state: "IT_REVIEWED", requestedById: purchasing.id, departmentId: dept.id,
+        refNo: `PO-9${tag}`, state: "WITH_IT", requestedById: purchasing.id, departmentId: dept.id,
         submittedAt: new Date(now - 13 * DAY), reviewedAt: new Date(now - 12 * DAY), reviewedById: it.id,
       },
     });
@@ -373,7 +355,7 @@ test.describe("Phase 39 — the purchase conversation", () => {
     const dates = Array.from({ length: 12 }, (_, i) => new Date(now - (12 - i) * DAY));
     await db.noteEntry.createMany({
       data: dates.map((createdAt, i) => ({
-        requestId: twelve.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: kindOf(i), text: textOf(i), createdAt,
+        orderId: twelve.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: kindOf(i), text: textOf(i), createdAt,
       })),
     });
 
@@ -434,12 +416,12 @@ test.describe("Phase 39 — the purchase conversation", () => {
     await expect(earlier).toBeFocused();
 
     // 31 messages: the panel shows 30, then "Load 30 more" gives 31 and the button goes.
-    const long = await db.purchaseRequest.create({
-      data: { refNo: `PR-8${tag}`, state: "DRAFT", requestedById: purchasing.id, departmentId: dept.id },
+    const long = await db.purchaseOrder.create({
+      data: { refNo: `PO-8${tag}`, state: "SENT_BACK", requestedById: purchasing.id, departmentId: dept.id },
     });
     await db.noteEntry.createMany({
       data: Array.from({ length: 31 }, (_, i) => ({
-        requestId: long.id, authorId: purchasing.id, kind: "COMMENT" as const, text: `Long thread ${i} ${tag}`,
+        orderId: long.id, authorId: purchasing.id, kind: "COMMENT" as const, text: `Long thread ${i} ${tag}`,
         createdAt: new Date(now - (31 - i) * 3_600_000),
       })),
     });

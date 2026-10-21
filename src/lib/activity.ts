@@ -31,6 +31,11 @@ export const ACTION_LABELS: Record<string, string> = {
   // Finance follow-up (spec §3): undo within 15 minutes, and an admin's reopen
   "finance.confirm.undone": "Approval undone", "asset.return.undone": "Send-back undone",
   "depreciation.override.undone": "Custom depreciation undone", "finance.confirm.reopened": "Review reopened",
+  // Purchase orders (spec §3–§6)
+  "po.save": "Saved the purchase order", "po.resubmit": "Corrected and sent back on", "po.send-back": "Sent back to Purchasing",
+  "po.fix": "Fixed the money details", "po.cancel": "Cancelled the purchase order", "po.line-closed": "Closed a line short",
+  "po.register": "Registered from the purchase order", "po.send-back.undone": "Send-back undone",
+  "asset.money.fixed": "Fixed the money details",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
@@ -68,6 +73,7 @@ export const FIELD_LABELS: Record<string, string> = {
   employeeNo: "employee number", email: "email", title: "title", employment: "employment", joinedAt: "join date",
   offboardingAt: "offboarding start", offboardingDueAt: "complete-by date",
   registeredName: "registered name", contactPerson: "contact person", phone: "phone", address: "address",
+  invoiceRef: "SI number", receiptRef: "OR number",
   registrationNo: "registration number", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
   unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
   // Phase 40 §8: triage records Dispose/Donate's `reason` apart from Keep/Repair's optional `note`
@@ -89,6 +95,60 @@ export function fieldLabel(key: string): string {
 // sorted on the label: jsonb stores keys shortest-first, so storage order is neither the writer's nor alphabetical
 const fieldList = (diff: Record<string, unknown> | null) => (diff ? Object.keys(diff).map(fieldLabel).sort().join(", ") : "fields");
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// ---- Task 8 (spec §6): purchase orders and the money fixes -----------------------------------------------------------
+
+/** "a", "a and b", "a, b and c". */
+export function wordList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** The reason a row carries, as the sentence's ending: `: 'typo on receipt'`; nothing for a blank one. */
+const reasonTail = (reason: unknown) => (typeof reason === "string" && reason.trim() ? `: '${reason.trim()}'` : "");
+
+/** The money fields a fix can change, in the order a sentence names them (the PO header's order, then the price). */
+const MONEY_FIX_FIELDS = ["vendorId", "invoiceRef", "receiptRef", "purchasedAt", "fees", "cost"] as const;
+type MoneyFixField = (typeof MONEY_FIX_FIELDS)[number];
+const MONEY_FIX_LABEL: Record<MoneyFixField, string> = {
+  vendorId: "supplier", invoiceRef: "SI number", receiptRef: "OR number", purchasedAt: "purchase date", fees: "fees", cost: "unit price",
+};
+/** A fix's diff key as a money field: a PO's per-line `line2.unitPrice` and a record's `unitCost` are the unit price too. */
+function moneyFixField(key: string): MoneyFixField | null {
+  const last = key.split(".").pop() ?? key;
+  const k = last === "unitPrice" || last === "unitCost" ? "cost" : last;
+  return (MONEY_FIX_FIELDS as readonly string[]).includes(k) ? (k as MoneyFixField) : null;
+}
+function moneyFixValue(field: MoneyFixField, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "nothing";
+  if ((field === "cost" || field === "fees") && (typeof v === "number" || typeof v === "string") && !Number.isNaN(Number(v))) return fmtMoneyExact(v);
+  if (field === "purchasedAt" && (typeof v === "string" || v instanceof Date) && !Number.isNaN(Date.parse(String(v)))) return fmtDate(v);
+  return String(v);
+}
+/** The fields a fix's diff names, once each: "SI number and unit price". */
+export function moneyFixFields(diff: unknown): string {
+  const keys = diff && typeof diff === "object" ? Object.keys(diff as object) : [];
+  const found = new Set(keys.map(moneyFixField));
+  const labels = MONEY_FIX_FIELDS.filter((f) => found.has(f)).map((f) => MONEY_FIX_LABEL[f]);
+  return labels.length ? wordList(labels) : "money details";
+}
+/** What an asset's fix changed, with the old and the new value: "the SI number from 0012 to 0021". A supplier is an id, so it is named only. */
+export function moneyFixChanges(diff: unknown): string {
+  const d = (diff && typeof diff === "object" ? diff : {}) as Record<string, { from?: unknown; to?: unknown }>;
+  const parts: string[] = [];
+  for (const f of MONEY_FIX_FIELDS) {
+    const key = Object.keys(d).find((k) => moneyFixField(k) === f);
+    if (!key) continue;
+    parts.push(f === "vendorId"
+      ? `the ${MONEY_FIX_LABEL[f]}`
+      : `the ${MONEY_FIX_LABEL[f]} from ${moneyFixValue(f, d[key]?.from)} to ${moneyFixValue(f, d[key]?.to)}`);
+  }
+  return parts.length ? wordList(parts) : "the money details";
+}
+
+type PoStateChange = { from?: unknown; to?: unknown } | undefined;
+/** Where a resubmitted PO went: IT's send-back returns to IT, Finance's straight to registering (po-flow.ts). */
+const resubmittedTo = (state: PoStateChange) => (state?.to === "WITH_IT" ? "IT" : "Finance");
 
 /**
  * Phase 22 Task 2 (spec §2.3/§4.3): the three document kinds a
@@ -117,6 +177,8 @@ export interface ActivityEntryLike {
   action: string;
   diff: unknown;
   entityLabel: string;
+  /** The row's reason column (AuditEntry.reason): a fix, a send-back or a cancel names it in its sentence. */
+  reason?: string | null;
 }
 
 /**
@@ -242,6 +304,63 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
         : `${actor}undid the depreciation settings change on ${entry.entityLabel}`;
     case "finance.confirm.reopened":
       return omitEntity ? `${actor}reopened the review` : `${actor}reopened ${entry.entityLabel}'s review`;
+    // Task 6 fix round 1: the sender took a PO's send-back back
+    case "po.send-back.undone":
+      return omitEntity ? `${actor}undid the send-back to Purchasing` : `${actor}undid sending ${entry.entityLabel} back to Purchasing`;
+    // Task 8 (spec §6): a purchase order's own entries (entityLabel is the PO number) and the per-asset money fix
+    case "po.save": {
+      const state = diff?.state as PoStateChange;
+      const tail = reasonTail(entry.reason);
+      if (state && state.from === null) {
+        const where = state.to === "WITH_IT" ? " and sent it to IT to check" : ", ready to register";
+        const what = omitEntity ? "the purchase order" : entry.entityLabel;
+        return `${actor}created ${what}${where}${tail}`;
+      }
+      const sent = state?.to === "WITH_IT" && state.from !== "WITH_IT" ? " and sent it to IT to check" : "";
+      return omitEntity ? `${actor}saved changes${sent}${tail}` : `${actor}saved changes to ${entry.entityLabel}${sent}${tail}`;
+    }
+    case "po.resubmit": {
+      const tail = `sent it back to ${resubmittedTo(diff?.state as PoStateChange)}${reasonTail(entry.reason)}`;
+      return omitEntity ? `${actor}corrected the purchase order and ${tail}` : `${actor}corrected ${entry.entityLabel} and ${tail}`;
+    }
+    case "po.send-back": {
+      const sent = diff?.sentBack?.to as { fields?: unknown; note?: unknown } | null | undefined;
+      const fields = Array.isArray(sent?.fields) ? sent.fields.map(String) : [];
+      const fix = fields.length ? ` to fix the ${wordList(fields)}` : "";
+      // the reason column carries the note; a row written before it was stored there keeps it in the diff
+      const tail = reasonTail(entry.reason ?? sent?.note);
+      return omitEntity ? `${actor}sent back to Purchasing${fix}${tail}` : `${actor}sent ${entry.entityLabel} back to Purchasing${fix}${tail}`;
+    }
+    case "po.fix": {
+      const tail = reasonTail(entry.reason);
+      return omitEntity
+        ? `${actor}fixed the ${moneyFixFields(diff)}${tail}`
+        : `${actor}fixed the ${moneyFixFields(diff)} on ${entry.entityLabel}${tail}`;
+    }
+    case "asset.money.fixed": {
+      const tail = reasonTail(entry.reason);
+      return omitEntity
+        ? `${actor}changed ${moneyFixChanges(diff)}${tail}`
+        : `${actor}changed ${moneyFixChanges(diff)} on ${entry.entityLabel}${tail}`;
+    }
+    case "po.cancel": {
+      const tail = reasonTail(entry.reason);
+      return omitEntity ? `${actor}cancelled the purchase order${tail}` : `${actor}cancelled ${entry.entityLabel}${tail}`;
+    }
+    case "po.line-closed": {
+      const from = diff?.closedShort?.from;
+      const to = diff?.closedShort?.to;
+      const line = diff?.line?.to;
+      const n = typeof from === "number" && typeof to === "number" ? to - from : null;
+      const phrase = n !== null && typeof line === "string" ? `closed ${n} of ${line} short` : "closed a line short";
+      const tail = reasonTail(entry.reason);
+      return omitEntity ? `${actor}${phrase}${tail}` : `${actor}${phrase} on ${entry.entityLabel}${tail}`;
+    }
+    case "po.register": {
+      const n = diff?.registered?.to;
+      const assets = typeof n === "number" && n > 0 ? plural(n, "asset") : "assets";
+      return omitEntity ? `${actor}registered ${assets} from the purchase order` : `${actor}registered ${assets} from ${entry.entityLabel}`;
+    }
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw
@@ -543,6 +662,9 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
  * `auditSentence` builds, minus the leading actor and the entity label, so the caller can show
  * `{phrase} · {date} · {actor}` without the actor or the tag appearing twice.
  */
-export function auditPhrase(entry: { action: string; diff: unknown }): string {
-  return auditSentence({ actorLabel: "", action: entry.action, diff: entry.diff, entityLabel: "" }, { omitActor: true, omitEntity: true });
+export function auditPhrase(entry: { action: string; diff: unknown; reason?: string | null }): string {
+  return auditSentence(
+    { actorLabel: "", action: entry.action, diff: entry.diff, entityLabel: "", reason: entry.reason },
+    { omitActor: true, omitEntity: true },
+  );
 }

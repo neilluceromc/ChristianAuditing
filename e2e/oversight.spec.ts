@@ -2,9 +2,9 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { fmtDateTime, localDateISO } from "@/lib/format";
 import { addDays } from "@/lib/deadlines";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 21, Task 7 — approvals oversight (spec §§2–4, 9), 7 cases run
@@ -59,26 +59,6 @@ test.afterAll(async () => {
   execSync("npm run db:seed", { timeout: 120_000 });
   await db.$disconnect();
 });
-
-// Copied from e2e/transfers.spec.ts (itself copied from e2e/stock.spec.ts) —
-// house rule: never import helpers across spec files, since each file
-// reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 async function expectNoSeriousAxe(page: Page) {
   await page.mouse.move(0, 0);

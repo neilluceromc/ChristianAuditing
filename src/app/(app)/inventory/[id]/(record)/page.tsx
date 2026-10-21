@@ -95,16 +95,16 @@ export default async function AssetOverviewPage({
                   <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span>{CLASS_LABEL[asset.cls]}</span>
                     <span aria-hidden className="text-fg-muted">·</span>
-                    {asset.purchaseRequest ? (
-                      <Link href={`/purchases/${asset.purchaseRequest.id}`} className="text-accent hover:underline">
-                        From {asset.purchaseRequest.refNo}
+                    {asset.purchaseOrder ? (
+                      <Link href={`/purchases/${asset.purchaseOrder.id}`} className="text-accent hover:underline">
+                        From {asset.purchaseOrder.refNo}
                       </Link>
                     ) : (
                       // The label map stays "Historical import" (facet, export,
                       // Finance use it); only the record spells out the gap.
                       <span>
                         {PROVENANCE_LABEL[provenance]}
-                        {provenance === "HISTORICAL" && " · no purchase request"}
+                        {provenance === "HISTORICAL" && " · no purchase order"}
                       </span>
                     )}
                   </span>

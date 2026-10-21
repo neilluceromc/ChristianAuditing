@@ -46,7 +46,7 @@ export default async function EditSupplierPage({ params }: { params: Promise<{ i
       <PageHeader
         title={`Edit ${vendor.name}`}
         breadcrumb={[
-          { label: "Purchase requests", href: "/purchases" },
+          { label: "Purchase orders", href: "/purchases" },
           { label: "Suppliers", href: "/purchases/suppliers" },
           { label: vendor.name, href: `/purchases/suppliers/${id}` },
           { label: "Edit" },

@@ -32,7 +32,7 @@ test.describe("kitchen sink", () => {
   test("dialog traps focus and closes on ESC", async ({ page }) => {
     await page.goto("/dev/kitchen-sink");
     await page.getByRole("button", { name: "Open dialog" }).click();
-    await expect(page.getByRole("dialog", { name: "Cancel request PR-0198?" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Cancel purchase order PO-0198?" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
     // focus returned to the trigger

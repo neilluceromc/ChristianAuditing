@@ -1,15 +1,16 @@
-import type { PurchaseRequestState, PurchaseUnitState } from "@prisma/client";
+import type { AssetClass, Prisma, PurchaseOrderState, Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
+import { derivePoProgress, lineProgress, type poProgress } from "@/lib/po-flow";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
 export interface PurchaseListRow {
   id: string;
   refNo: string;
-  state: PurchaseRequestState;
+  state: PurchaseOrderState;
   requester: string;
   /** what is actually being bought: the first line, plus a count of the rest */
   summary: string;
@@ -28,12 +29,22 @@ export interface PurchaseUnitView {
   index: number;
   description: string;
   specs: string | null;
+  /** Migration 38: the line's category (and so its class); null on legacy lines. */
+  categoryId: string | null;
+  categoryName: string | null;
+  cls: AssetClass | null;
   qty: number;
   /** number, never a Prisma.Decimal: this crosses into client components */
   unitPrice: number | null;
   price: string;
   lineTotal: string;
-  state: PurchaseUnitState;
+  /** Assets registered from this line (the asset's PO-line link), and units closed short with why. */
+  registered: number;
+  closedShort: number;
+  closedShortReason: string | null;
+  /** Units still to register, and the label ("3 of 5 registered · 2 closed short"). */
+  remaining: number;
+  progressLabel: string;
   itSlotNotes: string | null;
   financeNotes: string | null;
 }
@@ -41,7 +52,7 @@ export interface PurchaseUnitView {
 export interface PurchaseDetail {
   id: string;
   refNo: string;
-  state: PurchaseRequestState;
+  state: PurchaseOrderState;
   requester: string;
   requestedById: string;
   createdAt: Date;
@@ -58,38 +69,58 @@ export interface PurchaseDetail {
   department: { id: string; name: string } | null;
   supplier: { id: string; name: string; archived: boolean } | null;
   documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
+  /** Migration 38: the PO's money (purchasedAt as YYYY-MM-DD for the date input; fees as a number). */
+  invoiceRef: string | null;
+  receiptRef: string | null;
+  purchasedAt: string | null;
+  fees: number | null;
+  /** The open send-back, if any. */
+  sentBack: { by: Team | null; byName: string | null; at: Date | null; note: string | null; fields: string[] } | null;
+  /** Assets registered from it (all of them, through a line or not): editing and cancelling stop once there are any. */
+  assetCount: number;
+  /** …and how many of those Finance has approved. */
+  approvedCount: number;
+  /** derivePoProgress: poProgress over the lines, or off the asset counts for an old completed request; null until something is registered. */
+  progress: ReturnType<typeof poProgress>;
+  /** Some line is IT gear, or has no class yet (a legacy line): the IT check applies. */
+  hasItLines: boolean;
+  /** An old request (its lines have no category): the unit link was never set, so the page counts "N assets linked". */
+  legacy: boolean;
 }
 
 const money = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
 
 export async function listPurchases(
-  state: PurchaseRequestState | null,
+  state: PurchaseOrderState | null,
   q: string,
   page: number,
   department: string | null = null,
   supplier: string | null = null,
+  /** Task 7: only these POs (Purchasing's To register view, purchasingToRegisterIds); null = no such filter */
+  onlyIds: string[] | null = null,
 ): Promise<{ rows: PurchaseListRow[]; total: number; page: number; pageCount: number }> {
-  const where = purchaseWhere(state, q, department, supplier);
+  const base = purchaseWhere(state, q, department, supplier);
+  const where: Prisma.PurchaseOrderWhereInput = onlyIds ? { AND: [base, { id: { in: onlyIds } }] } : base;
   const { rows, total, page: pg, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
     page,
-    (tx) => tx.purchaseRequest.count({ where }),
+    (tx) => tx.purchaseOrder.count({ where }),
     (tx, pg) =>
-      tx.purchaseRequest.findMany({
+      tx.purchaseOrder.findMany({
         where,
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         skip: pg.skip,
         take: pg.take,
         select: {
           id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
-          reviewedAt: true, completedAt: true, cancelledAt: true,
+          sentBackAt: true, cancelledAt: true,
           requestedBy: { select: { name: true } },
           department: { select: { name: true } },
           vendor: { select: { name: true } },
           // id is a tiebreaker, not the sort key: units created in the same
           // batch (every seed row, every draft save) share one createdAt
           // millisecond, and createdAt alone is not a stable order across reads.
-          units: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+          lines: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
           // the newest state-carrying note decides "did this come back?" —
           // bounceBack() reads the last non-COMMENT note, so one row is enough
           notes: {
@@ -111,27 +142,27 @@ export async function listPurchases(
       const last: ThreadNote[] = r.notes.map((n) => ({
         id: n.id, kind: n.kind, text: n.text, author: n.author.name, at: n.createdAt,
       }));
-      const value = r.units.reduce((sum, u) => sum + u.qty * money(u.unitPrice), 0);
+      const value = r.lines.reduce((sum, u) => sum + u.qty * money(u.unitPrice), 0);
       return {
         id: r.id,
         refNo: r.refNo,
         state: r.state,
         requester: r.requestedBy.name,
         summary:
-          r.units.length === 0
+          r.lines.length === 0
             ? "no lines yet"
-            : r.units.length === 1
-              ? r.units[0].description
-              : `${r.units[0].description} +${r.units.length - 1} more`,
-        unitCount: r.units.length,
-        totalQty: r.units.reduce((sum, u) => sum + u.qty, 0),
+            : r.lines.length === 1
+              ? r.lines[0].description
+              : `${r.lines[0].description} +${r.lines.length - 1} more`,
+        unitCount: r.lines.length,
+        totalQty: r.lines.reduce((sum, u) => sum + u.qty, 0),
         total: fmtMoney(value),
         department: r.department?.name ?? null,
         supplier: r.vendor?.name ?? null,
         dwell: dwellLine(
           {
             state: r.state, updatedAt: r.updatedAt, submittedAt: r.submittedAt,
-            reviewedAt: r.reviewedAt, completedAt: r.completedAt, cancelledAt: r.cancelledAt,
+            sentBackAt: r.sentBackAt, cancelledAt: r.cancelledAt,
             bounced: bounceBack(r.state, last) !== null,
           },
           now,
@@ -141,25 +172,37 @@ export async function listPurchases(
   };
 }
 
-/** Tab counts — one grouped query, plus the All total. */
+/**
+ * Tab counts — one grouped query, plus the All total. Ready to register leaves out the completed POs, as its tab
+ * does (purchaseWhere): they stay READY, so they are counted apart and taken off.
+ */
 export async function stateCounts(): Promise<Record<string, number>> {
-  const groups = await prisma.purchaseRequest.groupBy({ by: ["state"], _count: { _all: true } });
+  const [groups, completedReady] = await Promise.all([
+    prisma.purchaseOrder.groupBy({ by: ["state"], _count: { _all: true } }),
+    prisma.purchaseOrder.count({ where: { state: "READY", completedAt: { not: null } } }),
+  ]);
   const counts: Record<string, number> = {
-    ALL: 0, DRAFT: 0, SUBMITTED: 0, IT_REVIEWED: 0, COMPLETED: 0, CANCELLED: 0,
+    ALL: 0, WITH_IT: 0, SENT_BACK: 0, READY: 0, CANCELLED: 0,
   };
   for (const g of groups) {
     counts[g.state] = g._count._all;
     counts.ALL += g._count._all;
   }
+  counts.READY = Math.max(0, counts.READY - completedReady);
   return counts;
 }
 
 export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
-  const r = await prisma.purchaseRequest.findUnique({
+  const [r, perLine, approvedCount] = await Promise.all([
+    prisma.purchaseOrder.findUnique({
     where: { id },
     select: {
       id: true, refNo: true, state: true, createdAt: true, submittedAt: true, reviewedAt: true,
       completedAt: true, cancelledAt: true, cancelReason: true, requestedById: true,
+      invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
+      sentBackBy: true, sentBackNote: true, sentBackFields: true, sentBackAt: true,
+      sentBackByUser: { select: { name: true } },
+      _count: { select: { assets: true } },
       requestedBy: { select: { name: true } },
       reviewedBy: { select: { name: true } },
       department: { select: { id: true, name: true } },
@@ -171,27 +214,41 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       // See the identical comment in listPurchases: units created in the
       // same batch tie on createdAt, so `unit.index` (unit-N anchors, the
       // bounce-back's "Jump to unit 02") needs a stable tiebreaker.
-      units: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      lines: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: { category: { select: { name: true, cls: true } } } },
       notes: {
         orderBy: { createdAt: "asc" },
         select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
       },
     },
-  });
+  }),
+    // Registered per line: the asset's own PO-line link (Task 5 sets it on every registration; old units never had it).
+    prisma.asset.groupBy({ by: ["purchaseOrderLineId"], where: { purchaseOrderId: id }, _count: { _all: true } }),
+    prisma.asset.count({ where: { purchaseOrderId: id, financeConfirmedAt: { not: null } } }),
+  ]);
   if (!r) return null;
+  const registeredOn = new Map(perLine.filter((g) => g.purchaseOrderLineId).map((g) => [g.purchaseOrderLineId!, g._count._all]));
 
-  const units = r.units.map((u, i): PurchaseUnitView => {
+  const units = r.lines.map((u, i): PurchaseUnitView => {
     const price = money(u.unitPrice);
+    const registered = registeredOn.get(u.id) ?? 0;
+    const progress = lineProgress({ qty: u.qty, registered, closedShort: u.closedShort });
     return {
       id: u.id,
       index: i + 1,
       description: u.description,
       specs: u.specs,
+      categoryId: u.categoryId,
+      categoryName: u.category?.name ?? null,
+      cls: u.category?.cls ?? null,
       qty: u.qty,
       unitPrice: u.unitPrice === null ? null : price,
       price: u.unitPrice === null ? "—" : fmtMoney(price),
       lineTotal: u.unitPrice === null ? "—" : fmtMoney(price * u.qty),
-      state: u.state,
+      registered,
+      closedShort: u.closedShort,
+      closedShortReason: u.closedShortReason,
+      remaining: progress.remaining,
+      progressLabel: progress.label,
       itSlotNotes: u.itSlotNotes,
       financeNotes: u.financeNotes,
     };
@@ -223,6 +280,19 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
       at: fmtDate(d.createdAt), downloadHref: `/purchases/${r.id}/documents/${d.id}/download`,
     })),
+    invoiceRef: r.invoiceRef,
+    receiptRef: r.receiptRef,
+    purchasedAt: r.purchasedAt ? r.purchasedAt.toISOString().slice(0, 10) : null,
+    fees: r.fees === null ? null : Number(r.fees),
+    sentBack: r.state === "SENT_BACK"
+      ? { by: r.sentBackBy, byName: r.sentBackByUser?.name ?? null, at: r.sentBackAt, note: r.sentBackNote, fields: r.sentBackFields }
+      : null,
+    assetCount: r._count.assets,
+    approvedCount,
+    // An old completed request has linked assets but no line links: derivePoProgress reads it off the asset counts.
+    progress: derivePoProgress(units, { assetCount: r._count.assets, approvedCount, completed: r.completedAt !== null }),
+    hasItLines: units.some((u) => u.cls !== "PURCHASING"),
+    legacy: units.some((u) => u.categoryId === null),
   };
 }
 

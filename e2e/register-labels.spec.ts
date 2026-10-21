@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 34 — the Register and Labels tabs of "New equipment" (spec §3–§5),
@@ -44,7 +44,9 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 const db = new PrismaClient();
 
 const IT = "it@thebackroomop.com";
-const PURCHASING = "purchasing@thebackroomop.com";
+// Purchase orders (spec §4 way 3): the direct Register is IT's and an admin's; Purchasing registers from a PO. The
+// Purchasing-class cases below register directly as an admin, on the Purchasing class (?cls=PURCHASING).
+const ADMIN = "admin@thebackroomop.com";
 const KNOWN_LAPTOP = "ThinkPad T14 Gen 4";
 
 test.beforeAll(async () => {
@@ -53,24 +55,6 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/queues-records-ux.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // Copied from e2e/queues-records-ux.spec.ts.
 async function expectNoSeriousAxe(page: Page) {
@@ -345,13 +329,13 @@ test.describe("register — the Register tab", () => {
     expect(asset.assigneeId).toBe(emp.id);
   });
 
-  test("7. Purchasing In use files an assign approval, with no serial", async ({ page }) => {
+  test("7. a Purchasing-class In use files an assign approval, with no serial", async ({ page }) => {
     test.setTimeout(120_000);
     const t0 = new Date();
     const emp = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     const model = "Toyota Vios 1.3 E";
     try {
-      await login(page, PURCHASING);
+      await login(page, ADMIN);
       await openRegister(page, "PURCHASING");
       await pickCategory(page, "Vehicle");
       await modelBox(page).fill(model);
@@ -510,9 +494,9 @@ test.describe("register — the Register tab", () => {
     await expect(figure.getByLabel(`Barcode ${tag}`, { exact: true })).toHaveCount(1);
   });
 
-  test("14. Purchasing sees its four cards in name order, and its serial is optional", async ({ page }) => {
+  test("14. the Purchasing class shows its four cards in name order, and its serial is optional", async ({ page }) => {
     test.setTimeout(120_000);
-    await login(page, PURCHASING);
+    await login(page, ADMIN);
     await openRegister(page, "PURCHASING");
     const cards = page.locator("[data-category-card]");
     await expect(cards).toHaveCount(4);

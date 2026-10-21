@@ -27,6 +27,15 @@ export const METRIC_SNAPSHOT_DAYS = 400;
 export function metricSnapshotCutoff(now: Date): Date {
   return dayFromISO(addDays(localDateISO(now), -METRIC_SNAPSHOT_DAYS));
 }
+/**
+ * Task 7 (spec §7): bell notifications are kept 90 days; the bell and the notifications page show only that window,
+ * and the maintenance worker prunes what is older (their per-person reads cascade).
+ */
+export const NOTIFICATION_DAYS = 90;
+
+export function notificationCutoff(now: Date): Date {
+  return new Date(now.getTime() - NOTIFICATION_DAYS * DAY_MS);
+}
 export function pruneDue(lastPruneAt: Date | null, now: Date): boolean {
   return lastPruneAt === null || now.getTime() - lastPruneAt.getTime() >= PRUNE_INTERVAL_MS;
 }

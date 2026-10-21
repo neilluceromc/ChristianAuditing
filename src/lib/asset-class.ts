@@ -147,11 +147,25 @@ export const VISIBLE_CLASSES: Record<Role, readonly AssetClass[]> = {
 };
 
 /**
- * Which classes a role may REGISTER or CREATE into. Purchasing buys for the
- * whole company, so it registers both; IT registers its own. Registering is
- * not managing: a laptop Purchasing registers is IT's from that moment.
+ * Which classes a role may REGISTER or CREATE into DIRECTLY — the Register page with no purchase order (spec §4
+ * way 3). IT registers its own gear; an admin anything. Purchasing registers only from a purchase order
+ * (po-register.ts, gated by canRegisterLine), so it has nothing here.
  */
 export const REGISTRABLE_CLASSES: Record<Role, readonly AssetClass[]> = {
+  admin: ["IT", "PURCHASING"],
+  it_staff: ["IT"],
+  purchasing_staff: [],
+  finance_staff: [],
+  viewer: [],
+};
+
+/**
+ * The department that may have registered an unchecked asset of a class — spec §5.4's "registering department",
+ * which keeps editing and attaching to it until IT checks it. Purchasing registered IT gear directly until the
+ * purchase-order intake (2026-10-21); its IT assets still awaiting IT's check stay its to fix. Not who may register
+ * now — that is REGISTRABLE_CLASSES (direct) and canRegisterLine (from a PO).
+ */
+const REGISTRANT_CLASSES: Record<Role, readonly AssetClass[]> = {
   admin: ["IT", "PURCHASING"],
   it_staff: ["IT"],
   purchasing_staff: ["IT", "PURCHASING"],
@@ -188,7 +202,7 @@ export function isAwaitingItCheck(a: { cls: AssetClass; itVerifiedAt: Date | nul
  * own typo). Status, assign and return follow canManageClass alone.
  */
 export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
-  return canManageClass(role, a.cls) || (isAwaitingItCheck(a) && canRegisterClass(role, a.cls));
+  return canManageClass(role, a.cls) || (isAwaitingItCheck(a) && REGISTRANT_CLASSES[role].includes(a.cls));
 }
 
 /**
@@ -202,7 +216,10 @@ export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Dat
  * "Registered — the invoice did not attach."
  */
 export function canAttachDocuments(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
-  return canManageClass(role, a.cls) || (canRegisterClass(role, a.cls) && a.itVerifiedAt === null);
+  // Task 6 (spec §2): Purchasing, IT and Finance can all upload or re-upload documents — Finance on any asset it can
+  // see, so it can replace a blurry receipt itself instead of sending the asset back for it.
+  if (role === "finance_staff") return canSeeClass(role, a.cls);
+  return canManageClass(role, a.cls) || (REGISTRANT_CLASSES[role].includes(a.cls) && a.itVerifiedAt === null);
 }
 
 /**

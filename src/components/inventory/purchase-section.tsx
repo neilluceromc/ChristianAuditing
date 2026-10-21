@@ -16,7 +16,7 @@ const LENGTH_LABEL: Record<(typeof WARRANTY_LENGTHS)[number], string> = { 0: "No
 
 /** The keys whose fields live inside this section — a refusal naming one opens it. */
 export const PURCHASE_KEYS = [
-  "vendorId", "purchasedAt", "requestId", "invoiceRef", "receiptRef", "cost", "fees",
+  "vendorId", "purchasedAt", "invoiceRef", "receiptRef", "cost", "fees",
   "warrantyUntil", "warrantyCoveredBy", "warrantyContact", "brand", "notes",
 ] as const;
 /** The keys whose fields live in the "Notes" fold-out. */
@@ -46,9 +46,6 @@ export function PurchaseSection(props: {
   onOpen: (v: boolean) => void;
   single: boolean;
   quantity: number;
-  requests: Array<{ id: string; label: string; vendorId: string | null }>;
-  requestId: string;
-  onRequest: (id: string) => void;
   vendors: ComboOption[];
   recentVendors: string[];
   vendorId: string;
@@ -163,18 +160,6 @@ export function PurchaseSection(props: {
                     value={props.purchasedAt}
                     onChange={(e) => props.onPurchased(e.target.value)}
                   />
-                )}
-              </FormField>
-              <FormField label="Purchase request" hint="Only if this delivery fulfils a completed request." error={errors.requestId}>
-                {(p) => (
-                  <Select
-                    id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
-                    value={props.requestId}
-                    onChange={(e) => props.onRequest(e.target.value)}
-                  >
-                    <option value="">—</option>
-                    {props.requests.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                  </Select>
                 )}
               </FormField>
               <FormField label="Invoice no." error={errors.invoiceRef}>

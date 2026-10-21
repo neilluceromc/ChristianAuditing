@@ -3,7 +3,7 @@ import { executeApproval } from "./execute-approval";
 import { deliverWebhook, PermanentDeliveryError } from "./deliver-webhook";
 import { MAX_JOB_ATTEMPTS } from "../lib/jobs";
 import { pruneRetention } from "./retention";
-import { METRIC_SNAPSHOT_DAYS, RETENTION_DAYS } from "../lib/retention";
+import { METRIC_SNAPSHOT_DAYS, NOTIFICATION_DAYS, RETENTION_DAYS } from "../lib/retention";
 import { expireHolds } from "./holds";
 import { writeSnapshot } from "../server/modules/metrics/snapshot";
 import { manilaDay } from "../lib/snapshot";
@@ -142,6 +142,9 @@ export async function safePrune(): Promise<void> {
     }
     if (r.metricSnapshots) {
       console.log(`[worker] pruned ${r.metricSnapshots} metric snapshot${r.metricSnapshots === 1 ? "" : "s"} older than ${METRIC_SNAPSHOT_DAYS} days`);
+    }
+    if (r.notifications) {
+      console.log(`[worker] pruned ${r.notifications} notification${r.notifications === 1 ? "" : "s"} older than ${NOTIFICATION_DAYS} days`);
     }
   } catch (err) {
     console.error(`[worker] prune failed: ${err instanceof Error ? err.message : String(err)}`);

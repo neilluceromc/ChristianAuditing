@@ -10,8 +10,12 @@ import { canAttachToRequest } from "@/lib/supplier-access";
 import { REQUEST_DOCUMENT_KINDS } from "@/lib/documents";
 import { storeUpload, validateUpload } from "@/server/uploads";
 
-/** Mirrors suppliers/document-actions.ts's uploadSupplierDocument, with requestId in place of vendorId. */
-export async function uploadRequestDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
+/**
+ * Mirrors suppliers/document-actions.ts's uploadSupplierDocument, with the PO's id (form field `requestId`, kept for
+ * the existing form) in place of vendorId. Spec §2: Purchasing, IT, Finance and admin can all upload or re-upload, on
+ * any PO that isn't cancelled. Uploading a kind again adds a new document; nothing is replaced or deleted.
+ */
+export async function uploadPoDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
   const user = await actionUser();
   if (!user || !canAttachToRequest(user.role)) return forbidden();
   const rate = await checkRate(user.id);
@@ -19,13 +23,14 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
 
   const requestId = String(formData.get("requestId") ?? "");
   const kind = String(formData.get("kind") ?? "");
-  if (!requestId) return conflict("Missing request.");
+  if (!requestId) return conflict("Missing purchase order.");
   if (!(REQUEST_DOCUMENT_KINDS as readonly string[]).includes(kind)) return validationError({ kind: "Pick a document kind" });
   const checked = validateUpload(formData.get("file"));
   if (!checked.ok) return validationError({ file: checked.error });
 
-  const request = await prisma.purchaseRequest.findUnique({ where: { id: requestId } });
-  if (!request) return conflict("That request no longer exists.");
+  const request = await prisma.purchaseOrder.findUnique({ where: { id: requestId } });
+  if (!request) return conflict("That purchase order no longer exists.");
+  if (request.state === "CANCELLED") return conflict(`${request.refNo} is cancelled — it takes no new documents.`);
 
   let stored: Awaited<ReturnType<typeof storeUpload>>;
   try {
@@ -37,7 +42,7 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
   const doc = await prisma.$transaction(async (tx) => {
     const created = await tx.requestDocument.create({
       data: {
-        requestId, kind,
+        orderId: requestId, kind,
         fileName: stored.fileName,
         path: stored.relPath, checksum: stored.checksum,
         uploadedById: user.id,
@@ -45,7 +50,7 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
     });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
-      entityType: "purchase-request", entityId: requestId,
+      entityType: "purchase-order", entityId: requestId,
       action: "document.uploaded",
       diff: { document: { from: null, to: created.fileName } },
     });

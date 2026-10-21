@@ -14,7 +14,7 @@ export function SuppliersTable({ rows }: { rows: SupplierRow[] }) {
           <Th>Category</Th>
           <Th>Contact</Th>
           <Th>Contract</Th>
-          <Th align="right">Requests</Th>
+          <Th align="right">Purchase orders</Th>
           <Th align="right">Assets</Th>
         </Tr>
       </THead>

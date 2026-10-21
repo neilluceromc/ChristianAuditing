@@ -64,8 +64,8 @@ async function main() {
     await insert(data.employees, (b) => tx.employee.createMany({ data: b }));
     await insert(data.policies, (b) => tx.equipmentPolicy.createMany({ data: b }));
     await insert(data.policySlots, (b) => tx.policySlot.createMany({ data: b }));
-    await insert(data.purchaseRequests, (b) => tx.purchaseRequest.createMany({ data: b }));
-    await insert(data.purchaseUnits, (b) => tx.purchaseUnit.createMany({ data: b }));
+    await insert(data.purchaseOrders, (b) => tx.purchaseOrder.createMany({ data: b }));
+    await insert(data.purchaseOrderLines, (b) => tx.purchaseOrderLine.createMany({ data: b }));
     await insert(data.noteEntries, (b) => tx.noteEntry.createMany({ data: b }));
     await insert(data.assets, (b) => tx.asset.createMany({ data: b }));
     await insert(data.employeeNotes, (b) => tx.employeeNote.createMany({ data: b }));
@@ -82,7 +82,7 @@ async function main() {
   console.log(
     `Scale seed complete in ${secs}s: +${data.departments.length} departments, +${data.users.length} users, ` +
     `+${data.employees.length} employees (${employees} total), +${data.assets.length} assets (${assets} total), ` +
-    `+${data.purchaseRequests.length} purchase requests (${data.purchaseUnits.length} units), +${data.approvals.length} approvals, ` +
+    `+${data.purchaseOrders.length} purchase orders (${data.purchaseOrderLines.length} lines), +${data.approvals.length} approvals, ` +
     `+${data.reservations.length} reservations, +${data.employeeNotes.length} employee notes, +${data.policies.length} policies, ` +
     `+${data.auditEntries.length} audit rows.`,
   );

@@ -16,6 +16,8 @@ export const WEBHOOK_EVENTS = [
   "approval.executed",
   "offboarding.completed",
   "purchase_request.completed",
+  // Task 6 (spec §3): the new name, sent alongside the old one until the next phase so no receiver breaks.
+  "purchase_order.approved",
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -37,7 +39,8 @@ export const SIGNATURE_HEADER = "x-backroom-signature";
 export const EVENT_LABELS: Record<WebhookEvent, string> = {
   "approval.executed": "An approval finished executing",
   "offboarding.completed": "An offboarding was completed",
-  "purchase_request.completed": "A purchase request was completed",
+  "purchase_request.completed": "(old name) A purchase order was fully approved",
+  "purchase_order.approved": "A purchase order was fully approved",
 };
 
 /**

@@ -2,9 +2,9 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { fmtDate, fmtDayMonth, fmtDayMonthYear, localDateISO } from "../src/lib/format";
 import { dueStatus } from "../src/lib/deadlines";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 16 — custody. Six cases per spec §9.2 rows 7–12: a loaner slot fills
@@ -33,25 +33,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/direct-lifecycle.spec.ts:24-51 — house rule: never import
-// helpers across spec files, since each file reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: { tag }, select: { id: true } })).id;
 
@@ -123,7 +104,7 @@ test.describe.serial("custody", () => {
     await editor.getByLabel("Line 2 variant", { exact: true }).selectOption({ label: laptopType.name });
     await editor.getByLabel("Line 2 filled by a lent device").check();
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
+    await expect(page.locator('div[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
     // Wait for the refreshed page to replace the editor (Save idle and disabled: nothing unsaved) — leaving
     // earlier would meet the editor's beforeunload guard — and for both slots to be in the database.
     const save = editor.getByRole("button", { name: "Save", exact: true });

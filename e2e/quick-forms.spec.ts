@@ -2,10 +2,10 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { REASON_CHIPS, chipsForOutcome } from "@/lib/reason-chips";
 import { RETURN_OUTCOME_LABEL } from "@/lib/lifecycle";
 import { unitsLabel } from "@/lib/stock-balance";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 23, Task 9 — the Parkinson sweep's shrunk forms (spec §9.2, 9 cases).
@@ -53,26 +53,6 @@ test.afterAll(async () => {
   execSync("npm run db:seed", { timeout: 120_000 });
   await db.$disconnect();
 });
-
-// Copied from e2e/deadlines.spec.ts:62-68 (itself copied from
-// e2e/stock-lots.spec.ts) — house rule: never import helpers across spec
-// files, since each file reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // Copied from e2e/deadlines.spec.ts:74-82. Probed on the element about to be
 // interacted with, since hydration walks parent-to-child and a hydrated
@@ -355,7 +335,7 @@ test.describe.serial("quick forms", () => {
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /purchases/new in this file
-    const draftsBefore = await db.purchaseRequest.count();
+    const draftsBefore = await db.purchaseOrder.count();
 
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
@@ -377,8 +357,8 @@ test.describe.serial("quick forms", () => {
     await page.getByLabel("Line 2 unit price").press("Enter");
     await expect(page.getByLabel("Line 3 description")).toHaveCount(0);
 
-    // No department was ever chosen, so autosave never fired: no draft row.
-    expect(await db.purchaseRequest.count()).toBe(draftsBefore);
+    // Purchase orders have no drafts or autosave (migration 38): nothing is saved until Save, so no new row.
+    expect(await db.purchaseOrder.count()).toBe(draftsBefore);
   });
 
   test("6. the new-employee form starts with no department chosen and Next names what is missing", async ({

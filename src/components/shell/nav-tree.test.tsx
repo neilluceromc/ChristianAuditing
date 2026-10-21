@@ -12,7 +12,7 @@ vi.mock("@/server/auth/actions", () => ({ switchWorkspace: vi.fn() }));
 const sections = filterSectionsForRole(WORKSPACE_NAV.it, "it_staff");
 const badges: NavBadges = {
   approvals: { open: 2, overdue: 1 },
-  counts: { approvals: 2, purchaseReviews: 1, itSpare: 7, worklist: 15 },
+  counts: { approvals: 2, poWithIt: 1, itSpare: 7, worklist: 15 },
 };
 
 const render = (current: NavCurrent) =>
@@ -72,10 +72,13 @@ describe("NavTree", () => {
       expect(html).not.toContain("/approvals?tab=mine");
     });
 
-    it("sums Approvals and purchase reviews on the closed Approvals link", () => {
+    it("counts open approvals on the closed Approvals link, and orders with IT on Purchase orders (migration 38)", () => {
       const approvals = link(html, "/approvals");
-      expect(approvals.body).toMatch(/aria-label="3 waiting:[^"]*"/);
-      expect(approvals.body).toMatch(/>3</);
+      expect(approvals.body).toContain('aria-label="2 open approvals, some past SLA"');
+      expect(approvals.body).toMatch(/>2</);
+      const orders = link(html, "/purchases?state=WITH_IT");
+      expect(orders.body).toContain('aria-label="1 with IT"');
+      expect(orders.body).toMatch(/>1</);
     });
 
     it("has no headings, inside the Workspace nav", () => {
@@ -102,21 +105,27 @@ describe("NavTree", () => {
     });
   });
 
-  describe("on Approvals › Purchase reviews", () => {
-    const html = render({ item: "Approvals", view: "Purchase reviews" });
+  describe("on Approvals › Mine", () => {
+    const html = render({ item: "Approvals", view: "Mine" });
     it("hides the Approvals badge; the views carry their own counts", () => {
       const approvalsLink = link(html, "/approvals");
       expect(approvalsLink.tag).not.toContain("aria-current");
       expect(approvalsLink.body).not.toContain("aria-label");
-      expect(approvalsLink.body).not.toMatch(/>3</);
       // the Open view is the second /approvals link
       const open = link(html, "/approvals", 1).body;
       expect(open).toMatch(/>2</);
       expect(open).toContain('aria-label="2 open approvals, some past SLA"');
-      const reviews = link(html, "/purchases?state=SUBMITTED");
-      expect(reviews.tag).toContain('aria-current="page"');
-      expect(reviews.body).toMatch(/>1</);
-      expect(reviews.body).toContain('aria-label="1 waiting for IT"');
+      expect(link(html, "/approvals?tab=mine").tag).toContain('aria-current="page"');
+    });
+  });
+
+  describe("on Purchase orders (migration 38: was Approvals › Purchase reviews)", () => {
+    const html = render({ item: "Purchase orders", view: null });
+    it("marks the link current and keeps its count (it has no views to carry it)", () => {
+      const orders = link(html, "/purchases?state=WITH_IT");
+      expect(orders.tag).toContain('aria-current="page"');
+      expect(orders.body).toMatch(/>1</);
+      expect(orders.body).toContain('aria-label="1 with IT"');
     });
   });
 

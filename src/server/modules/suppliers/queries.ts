@@ -1,4 +1,4 @@
-import type { AssetStatus, PurchaseRequestState, VendorContractStatus } from "@prisma/client";
+import type { AssetStatus, PurchaseOrderState, VendorContractStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { ListState } from "@/lib/url-state";
 import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE, pageOf } from "@/lib/paging";
@@ -78,7 +78,7 @@ export interface SupplierDetail {
   bankAccounts: Array<{ id: string; label: string; bankName: string; accountName: string; accountLast4: string }>;
   documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
   requests: {
-    rows: Array<{ id: string; refNo: string; state: PurchaseRequestState; department: string | null; requester: string; updatedAt: Date }>;
+    rows: Array<{ id: string; refNo: string; state: PurchaseOrderState; department: string | null; requester: string; updatedAt: Date }>;
     page: number; pageCount: number; total: number;
   };
   assets: {
@@ -121,7 +121,7 @@ export async function getSupplier(
   const reqPg = pageOf(v._count.requests, pages.requests, LOG_PAGE_SIZE);
   const assetPg = pageOf(v._count.assets, pages.assets, ENTITY_PAGE_SIZE);
   const [requests, assets] = await Promise.all([
-    prisma.purchaseRequest.findMany({
+    prisma.purchaseOrder.findMany({
       where: { vendorId: id },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       skip: reqPg.skip, take: reqPg.take,
@@ -137,7 +137,7 @@ export async function getSupplier(
       skip: assetPg.skip, take: assetPg.take,
       select: {
         id: true, tag: true, model: true, status: true, purchasedAt: true,
-        purchaseRequestId: true, importedAt: true,
+        purchaseOrderId: true, importedAt: true,
       },
     }),
   ]);

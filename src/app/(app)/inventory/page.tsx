@@ -9,8 +9,8 @@ import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withPer, withSearch,
 } from "@/lib/url-state";
 import {
-  INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, scannerRedirect, withPurchaseYearQS,
-  type PurchaseYearValue,
+  INVENTORY_LIST_CONFIG, canSeeSentBackView, parsePurchaseYear, purchaseYearChips, scannerRedirect, sentBackView,
+  withPurchaseYearQS, type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import {
   CLASS_LABEL, VISIBLE_CLASSES, canManageClass, canRegisterClass, canSeeClass, defaultClassFor, isDirectLifecycle, isStatusOf,
@@ -38,6 +38,7 @@ import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
+import { parseTeam, TEAM_LABEL } from "@/lib/notifications";
 
 /** Spec §5: the tab names the list the heading names — "Inventory", or "{Class} assets" for another class. */
 export async function generateMetadata({
@@ -70,9 +71,16 @@ export default async function InventoryPage({
   // purchasing_staff — and a URL names its class only when it is not that default.
   const defaultCls = defaultClassFor(user.role);
   const cls: AssetClass = requested ?? defaultCls;
-  const canMutate = canManageClass(user.role, cls);
+  // Task 7 (fix round 1): a Sent back view (reg=needs-correction&to=TEAM) lists both classes. Only a role that sees
+  // every class, or the team itself, may open one; anyone else gets the list without `to`.
+  const sentBackTeam = sentBackView(state);
+  if (sentBackTeam && !canSeeSentBackView(user.role, sentBackTeam)) {
+    redirect("/inventory" + withViewClsQS(serializeListState(withFilter(state, "to", []), INVENTORY_LIST_CONFIG), cls, defaultCls));
+  }
+  // Its rows can be of either class, so it is for opening records and marking them corrected, not bulk or row work.
+  const canMutate = canManageClass(user.role, cls) && !sentBackTeam;
   const canRegister = canRegisterClass(user.role, cls);
-  const direct = isDirectLifecycle(user.role, cls);
+  const direct = isDirectLifecycle(user.role, cls) && !sentBackTeam;
 
   // A status from the other class is dropped by buildAssetWhere; drop it from
   // the state too, or the chip row advertises a filter that isn't applied and
@@ -102,6 +110,7 @@ export default async function InventoryPage({
   const today = localDateISO(now);
   // Phase 45 (spec §2.1): no tiles in the Repairs view (any stage set), so no counts to load there either.
   const stageSet = (state.filters.stage?.length ?? 0) > 0;
+  // …nor in a Sent back view (Task 7 fix round 1): its rows span both classes, and the tiles are one class's.
 
   const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, needsCorrection, tileCounts] = await Promise.all([
     listAssets(state, purchaseYear, cls, now),
@@ -109,7 +118,7 @@ export default async function InventoryPage({
     getInventoryColumns(user.id),
     purchaseYearBuckets(state, cls),
     prisma.asset.count({ where: { AND: [{ cls }, regWhere("needs-correction")] } }),
-    stageSet ? Promise.resolve({} as Record<string, number>) : inventoryTileCounts(state, purchaseYear, cls, now),
+    stageSet || sentBackTeam ? Promise.resolve({} as Record<string, number>) : inventoryTileCounts(state, purchaseYear, cls, now),
   ]);
   // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (Show them).
   const shownColumns = state.filters.reg?.length && !visibleColumns.includes("registration")
@@ -153,7 +162,7 @@ export default async function InventoryPage({
   );
   const repairMode = isRepairView(state);
   // Phase 45 (spec §2.1): the count tiles — a click applies one status (or the attention filter), keeping the year.
-  const tiles = buildInventoryTiles(cls, state, tileCounts, (s) => href(s));
+  const tiles = sentBackTeam ? [] : buildInventoryTiles(cls, state, tileCounts, (s) => href(s));
 
   // Phase 30 (spec §6.2): a chip reads as the value alone — the facet it belongs to is the
   // dropdown it came from. The search and the purchase year are chips too, so every narrowing
@@ -174,6 +183,9 @@ export default async function InventoryPage({
       const label =
         facet === "stage" && isRepairStage(value)
           ? REPAIR_STAGE_LABEL[value]
+          // Task 7 (spec §7): the Sent back views' team
+          : facet === "to" && parseTeam(value)
+          ? `Sent back to ${TEAM_LABEL[parseTeam(value)!]}`
           : facets[facet]?.find((o) => o.value === value)?.label ?? value;
       chips.push({
         label,
@@ -191,7 +203,7 @@ export default async function InventoryPage({
   return (
     <>
       <PageHeader
-        title={cls === "IT" ? "Inventory" : `${CLASS_LABEL[cls]} assets`}
+        title={sentBackTeam ? `Sent back to ${TEAM_LABEL[sentBackTeam]}` : cls === "IT" ? "Inventory" : `${CLASS_LABEL[cls]} assets`}
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={
           <>

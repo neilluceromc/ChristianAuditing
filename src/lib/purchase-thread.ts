@@ -1,4 +1,5 @@
-import type { NoteKind, PurchaseRequestState } from "@prisma/client";
+import type { NoteKind, PurchaseOrderState } from "@prisma/client";
+import type { Team } from "./intake-rules";
 
 /**
  * The bounce-back is the design problem (README 1j). Everything the banner and
@@ -22,13 +23,21 @@ export const NOTE_CHIP: Record<NoteKind, string> = {
   CANCEL: "CANCELLED",
   COMPLETE: "COMPLETED",
   RECEIVE: "RECEIVED",
+  // Migration 38: the purchase-order thread. The kinds above stay so history still renders.
+  PO_SAVED: "SAVED",
+  PO_SENT_BACK: "SENT BACK",
+  PO_RESUBMITTED: "RESUBMITTED",
+  PO_FIXED: "FIXED",
+  PO_REGISTERED: "REGISTERED",
+  PO_LINE_CLOSED: "CLOSED SHORT",
+  PO_CANCELLED: "CANCELLED",
 };
 
 export interface BounceBack {
   by: string;
   at: Date;
   reason: string;
-  /** who sent it back — finance bounced IT_REVIEWED, IT rejected SUBMITTED */
+  /** who sent it back — legacy: Finance asked for more info (now WITH_IT), IT rejected (now SENT_BACK) */
   from: "finance" | "it";
   /** the honest transition line: nothing was cleared */
   transition: string;
@@ -42,19 +51,23 @@ function lastFlowNote(notes: ThreadNote[]): ThreadNote | null {
   return null;
 }
 
-export function bounceBack(state: PurchaseRequestState, notes: ThreadNote[]): BounceBack | null {
+/**
+ * Migration 38 mapped the old states (SUBMITTED → WITH_IT, DRAFT → SENT_BACK), so a legacy bounce still reads
+ * off the same notes. The purchase-order send-back (PO_SENT_BACK) is Task 4's to render.
+ */
+export function bounceBack(state: PurchaseOrderState, notes: ThreadNote[]): BounceBack | null {
   const last = lastFlowNote(notes);
   if (!last) return null;
-  if (state === "SUBMITTED" && last.kind === "REQUEST_INFO") {
+  if (state === "WITH_IT" && last.kind === "REQUEST_INFO") {
     return {
       by: last.author, at: last.at, reason: last.text, from: "finance",
-      transition: "IT_REVIEWED → SUBMITTED · nothing was cleared",
+      transition: "Back with IT · nothing was cleared",
     };
   }
-  if (state === "DRAFT" && last.kind === "IT_REJECT") {
+  if (state === "SENT_BACK" && last.kind === "IT_REJECT") {
     return {
       by: last.author, at: last.at, reason: last.text, from: "it",
-      transition: "SUBMITTED → DRAFT · nothing was cleared",
+      transition: "Sent back to Purchasing · nothing was cleared",
     };
   }
   return null;
@@ -67,15 +80,16 @@ export function unitAnchor(reason: string): { anchor: string; label: string } {
   return { anchor: `#unit-${m[1]}`, label: `Jump to unit ${m[1].padStart(2, "0")}` };
 }
 
-/** Every arrival at SUBMITTED: one per submit, one per finance bounce-back. */
+/** Every arrival with IT under the old flow: one per submit, one per finance bounce-back. */
 export function submittedVisits(notes: ThreadNote[]): number {
   return notes.filter((n) => n.kind === "SUBMIT" || n.kind === "REQUEST_INFO").length;
 }
 
 export type StopStatus = "done" | "current" | "upcoming";
+export type StopKey = "saved" | "with-it" | "registered" | "approved";
 
 export interface StepperStop {
-  state: PurchaseRequestState;
+  key: StopKey;
   label: string;
   status: StopStatus;
   note?: string;
@@ -83,17 +97,22 @@ export interface StepperStop {
 
 export interface Stepper {
   stops: StepperStop[];
-  /** renders the dashed amber/red "← sent back" connector */
+  /** who sent it back, for the dashed "← sent back" connector: the PO's own send-back, or a legacy bounce off the thread */
   sentBack: "finance" | "it" | null;
+  /** the connector (between stop i and i + 1) the return is drawn on; -1 for none */
+  returnAt: number;
   cancelled: boolean;
 }
 
-const STOPS: Array<{ state: PurchaseRequestState; label: string }> = [
-  { state: "DRAFT", label: "Draft" },
-  { state: "SUBMITTED", label: "Submitted" },
-  { state: "IT_REVIEWED", label: "IT reviewed" },
-  { state: "COMPLETED", label: "Completed" },
-];
+/** What the stepper needs beyond the state and the thread: the lines' classes, how far registering got, who sent it back. */
+export interface StepperContext {
+  /** "With IT" is a stop only when some line is IT gear (or a legacy line, whose class IT still has to see). */
+  hasItLines: boolean;
+  /** poProgress(lines, approvedAll): null until something is registered. */
+  progress: "Partly registered" | "Registered" | "Approved" | null;
+  /** The open send-back's team (po.sentBackBy); null for a legacy draft that was never sent. */
+  sentBackBy: Team | null;
+}
 
 const ORDINAL_SUFFIXES = ["th", "st", "nd", "rd"] as const;
 
@@ -105,33 +124,68 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-/** How far a cancelled request actually got, read off the thread. */
-function reachedIndex(notes: ThreadNote[]): number {
-  let reached = 0;
-  for (const n of notes) {
-    if (n.kind === "SUBMIT" && reached < 1) reached = 1;
-    if (n.kind === "IT_REVIEW" && reached < 2) reached = 2;
-    if (n.kind === "COMPLETE") reached = 3;
-  }
-  return reached;
+/** Did a cancelled order get as far as IT? Read off the thread (old and new note kinds alike). */
+function reachedIt(notes: ThreadNote[]): boolean {
+  return notes.some((n) =>
+    n.kind === "SUBMIT" || n.kind === "IT_REVIEW" || n.kind === "COMPLETE" || n.kind === "PO_SAVED" || n.kind === "PO_RESUBMITTED");
 }
 
-export function stepperModel(state: PurchaseRequestState, notes: ThreadNote[]): Stepper {
+/**
+ * PO saved → With IT (only when it has IT lines) → Registered → Approved, driven by the state and poProgress — so
+ * With IT is never "done" on an order nobody has registered from yet, and a non-IT order has no With IT stop.
+ * Sent back: PO saved is the current stop (it is with Purchasing again) and the return is drawn after it; stops
+ * that registering already reached stay done. A cancelled order freezes at how far it got.
+ */
+export function stepperModel(state: PurchaseOrderState, notes: ThreadNote[], ctx: StepperContext): Stepper {
   const bounce = bounceBack(state, notes);
   const cancelled = state === "CANCELLED";
-  const currentIndex = cancelled ? -1 : STOPS.findIndex((s) => s.state === state);
-  const frozenAt = cancelled ? reachedIndex(notes) : -1;
+  const sentBackState = state === "SENT_BACK";
+  const progress = ctx.progress;
+  const registeredDone = progress === "Registered" || progress === "Approved";
   const visits = submittedVisits(notes);
 
-  const stops = STOPS.map((stop, i): StepperStop => {
-    if (cancelled) return { ...stop, status: i <= frozenAt ? "done" : "upcoming" };
-    if (i < currentIndex) return { ...stop, status: "done" };
-    if (i > currentIndex) return { ...stop, status: "upcoming" };
-    const repeat = stop.state === "SUBMITTED" && visits > 1 ? ` · ${ordinal(visits)} time` : "";
-    return { ...stop, status: "current", note: `NOW${repeat}` };
-  });
+  const stops: StepperStop[] = [{ key: "saved", label: "PO saved", status: "done" }];
+  if (ctx.hasItLines) stops.push({ key: "with-it", label: "With IT", status: "upcoming" });
+  stops.push({ key: "registered", label: "Registered", status: "upcoming" });
+  stops.push({ key: "approved", label: "Approved", status: "upcoming" });
+  const at = (key: StopKey) => stops.find((s) => s.key === key);
+  const set = (key: StopKey, status: StopStatus, note?: string) => {
+    const s = at(key);
+    if (s) { s.status = status; if (note) s.note = note; }
+  };
 
-  return { stops, sentBack: bounce?.from ?? null, cancelled };
+  if (cancelled) {
+    if (reachedIt(notes)) set("with-it", "done");
+  } else if (sentBackState) {
+    set("saved", "current", "SENT BACK");
+    if (progress !== null) set("with-it", "done");
+    if (registeredDone) set("registered", "done");
+    if (progress === "Approved") set("approved", "done");
+  } else {
+    if (state === "WITH_IT" && progress === null) {
+      const repeat = visits > 1 ? ` · ${ordinal(visits)} time` : "";
+      set("with-it", "current", `NOW${repeat}`);
+    } else {
+      set("with-it", "done");
+    }
+    if (progress === null) {
+      if (state !== "WITH_IT") set("registered", "current", "NOW");
+    } else if (progress === "Partly registered") {
+      set("registered", "current", "PARTLY");
+    } else {
+      set("registered", "done");
+      if (progress === "Approved") set("approved", "done");
+      else set("approved", "current", "WITH FINANCE");
+    }
+  }
+
+  const sentBack: Stepper["sentBack"] =
+    sentBackState && ctx.sentBackBy ? (ctx.sentBackBy === "IT" ? "it" : "finance") : bounce?.from ?? null;
+  // A PO send-back and a legacy IT rejection return to PO saved (connector 0); a legacy Finance bounce left it WITH_IT
+  // (the connector after With IT).
+  const returnAt = sentBack === null ? -1 : sentBackState ? 0 : Math.max(0, stops.findIndex((s) => s.key === "with-it"));
+
+  return { stops, sentBack, returnAt, cancelled };
 }
 
 /** Phase 39 (spec §3): the request page shows this many of the newest messages; the rest open in a side panel. */

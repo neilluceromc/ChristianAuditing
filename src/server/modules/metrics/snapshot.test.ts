@@ -48,8 +48,10 @@ vi.mock("@/server/modules/inventory/queries", () => ({
   inventoryTileCounts: async () => ({ "in-stock": 11, deployed: 12, "on-loan": 99, "in-repair": 13, missing: 14, attention: 15 }),
 }));
 vi.mock("@/server/modules/purchases/queries", () => ({
-  stateCounts: async () => ({ ALL: 50, DRAFT: 1, SUBMITTED: 21, IT_REVIEWED: 22, COMPLETED: 3, CANCELLED: 3 }),
+  stateCounts: async () => ({ ALL: 50, SENT_BACK: 1, WITH_IT: 21, READY: 22, CANCELLED: 3 }),
 }));
+// Task 7: Purchasing's To register count (POs with a line Purchasing can register and units left)
+vi.mock("@/server/modules/purchases/to-register", () => ({ purchasingToRegisterCount: async () => 9 }));
 vi.mock("@/server/modules/stock/queries", () => ({
   stockHomeSignals: async (today: string) => {
     h.stockToday = today;
@@ -66,10 +68,8 @@ vi.mock("@/server/modules/admin/queries", () => ({
 }));
 vi.mock("@/server/modules/home/queries", async (orig) => ({
   ...(await orig<object>()),
-  financeWaitingRows: async () => [
-    { units: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }] },
-    { units: [{ qty: 3, unitPrice: "0.30" }] },
-  ],
+  // Task 6: Finance's review groups, each with its waiting assets' total
+  financeWaitingRows: async () => [{ total: "2000.20" }, { total: "0.90" }],
 }));
 
 import { collectSnapshot, writeSnapshot } from "./snapshot";
@@ -95,9 +95,10 @@ describe("collectSnapshot", () => {
       "it.spare": 11n, "it.deployed": 12n, "it.defective": 13n, "it.missing": 14n, "it.attention": 15n,
       "approvals.open.it": 100n, "approvals.open.purchasing": 200n, "approvals.open.none": 300n,
       "approvals.pastSla.it": 10n, "approvals.pastSla.purchasing": 20n, "approvals.pastSla.none": 30n,
-      "pr.submitted": 21n, "pr.itReviewed": 22n,
+      // Task 7: pr.itReviewed is Purchasing's To register count, the one its Home tile shows live
+      "pr.submitted": 21n, "pr.itReviewed": 9n,
       "stock.low": 31n, "stock.expiringLots": 32n, "stock.stocktakesOverdue": 33n,
-      // 2 × 1000.10 + 3 × 0.30 = ₱2,001.10
+      // ₱2,000.20 + ₱0.90 = ₱2,001.10
       "fin.waitingC": 200_110n, "fin.waitingCount": 2n,
       "fin.toConfirm.it": 5n, "fin.toConfirm.purchasing": 6n, "fin.bookC": 123_456_789n,
       "admin.activeUsers": 36n, "admin.disabled": 4n, "admin.deadDeliveries": 7n,

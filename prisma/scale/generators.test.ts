@@ -163,9 +163,9 @@ describe("generateScaleData (Phase 43 spec §3)", () => {
     }
     const serials = data.assets.map((a) => a.serial).filter(Boolean);
     expect(new Set(serials).size).toBe(serials.length);
-    const prs = data.purchaseRequests.map((p) => p.refNo);
+    const prs = data.purchaseOrders.map((p) => p.refNo);
     expect(new Set(prs).size).toBe(prs.length);
-    for (const no of prs) expect(Number(/^PR-(\d{4})$/.exec(no)![1])).toBeGreaterThanOrEqual(1000);
+    for (const no of prs) expect(Number(/^PO-(\d{4})$/.exec(no)![1])).toBeGreaterThanOrEqual(1000);
     const aprs = data.approvals.map((a) => a.refNo);
     expect(new Set(aprs).size).toBe(aprs.length);
     for (const no of aprs) expect(Number(/^APR-(\d{4,})$/.exec(no)![1])).toBeGreaterThanOrEqual(5000);
@@ -234,7 +234,7 @@ describe("generateScaleData (Phase 43 spec §3)", () => {
 
   it("references only rows it creates or the context provides", () => {
     const ids = new Set([
-      ...data.employees.map((e) => e.id), ...data.assets.map((a) => a.id), ...data.purchaseRequests.map((p) => p.id),
+      ...data.employees.map((e) => e.id), ...data.assets.map((a) => a.id), ...data.purchaseOrders.map((p) => p.id),
       ...data.approvals.map((a) => a.id), ...data.users.map((u) => u.id), ...data.departments.map((d) => d.id),
       ...Object.values(ctx.fixedUsers).map((u) => u.id), ...Object.values(ctx.departments).map((d) => d.id),
     ]);
@@ -255,11 +255,11 @@ describe("generateScaleData (Phase 43 spec §3)", () => {
     expect(count(data.assets, (a) => a.cls === "IT" && !a.itVerifiedAt)).toBe(10);
   });
 
-  it("covers every purchase request state with 1–5 units each, and the 15 test accounts", () => {
-    expect(new Set(data.purchaseRequests.map((p) => p.state))).toEqual(new Set(["DRAFT", "SUBMITTED", "IT_REVIEWED", "COMPLETED", "CANCELLED"]));
-    expect(data.purchaseRequests).toHaveLength(150);
-    for (const p of data.purchaseRequests) {
-      const n = count(data.purchaseUnits, (u) => u.requestId === p.id);
+  it("covers every purchase order state (the old ones mapped by migration 38) with 1–5 lines each, and the 15 test accounts", () => {
+    expect(new Set(data.purchaseOrders.map((p) => p.state))).toEqual(new Set(["SENT_BACK", "WITH_IT", "READY", "CANCELLED"]));
+    expect(data.purchaseOrders).toHaveLength(150);
+    for (const p of data.purchaseOrders) {
+      const n = count(data.purchaseOrderLines, (u) => u.orderId === p.id);
       expect(n).toBeGreaterThanOrEqual(1);
       expect(n).toBeLessThanOrEqual(5);
     }

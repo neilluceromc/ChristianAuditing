@@ -16,7 +16,7 @@ const sections = filterSectionsForRole(WORKSPACE_NAV.it, "it_staff");
 const items = sections.flatMap((s) => s.items);
 const badges: NavBadges = {
   approvals: { open: 2, overdue: 1 },
-  counts: { approvals: 2, purchaseReviews: 1, itSpare: 7, worklist: 15 },
+  counts: { approvals: 2, poWithIt: 1, itSpare: 7, worklist: 15 },
 };
 
 const render = (current: NavCurrent, b: NavBadges = badges) =>
@@ -58,9 +58,8 @@ describe("NavRail", () => {
         expect(icon).toMatch(new RegExp(`aria-label="${it.label}(, [^"]+)?"`));
       }
       expect(item(html, "/inventory/work").icon).toContain('aria-label="Worklist, 15 waiting on the worklist"');
-      expect(item(html, "/approvals").icon).toContain(
-        'aria-label="Approvals, 3 waiting: 2 open approvals, 1 purchase review, some approvals past SLA"',
-      );
+      expect(item(html, "/approvals").icon).toContain('aria-label="Approvals, 2 open approvals, some past SLA"');
+      expect(item(html, "/purchases?state=WITH_IT").icon).toContain('aria-label="Purchase orders, 1 with IT"');
     });
 
     it("draws icons only: no visible label inside the icon link, no chevron", () => {
@@ -117,7 +116,8 @@ describe("NavRail", () => {
         expect(id, `${it.label} has a description`).toBeDefined();
         expect(body).toContain(`<span id="${id}" hidden="">Has ${it.views.length} view${it.views.length === 1 ? "" : "s"}</span>`);
       }
-      expect(item(html, "/inventory").body).toContain(">Has 5 views</span>");
+      // Task 7: All, Spare, Repairs, Missing, Sent back, Register assets
+      expect(item(html, "/inventory").body).toContain(">Has 6 views</span>");
     });
 
     it("hides every flyout until hover or focus, and its title from assistive tech", () => {
@@ -134,7 +134,7 @@ describe("NavRail", () => {
 
     it("puts a red pill on the Approvals icon while any approval is past SLA", () => {
       const pill = /<span aria-hidden="true" data-rail-pill="fault"[^>]*>([^<]*)</.exec(iconBody(item(html, "/approvals").body));
-      expect(pill?.[1]).toBe("3");
+      expect(pill?.[1]).toBe("2");
       expect(pill?.[0]).toContain("bg-[var(--st-fault-dot)]");
     });
 

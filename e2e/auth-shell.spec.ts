@@ -1,42 +1,13 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login, submitSignIn } from "./fixtures/login";
 
 const db = new PrismaClient();
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function login(page: Page, email: string) {
-  await page.goto("/login");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
-
-/**
- * Phase 42 spec §4.3 (builder-check ruling): IT's Approvals badge label. With no purchase reviews waiting it is
- * exactly the old "{n} open approvals[, some past SLA]"; otherwise "{sum} waiting: {a} open approval(s), {b}
- * purchase review(s)[, some approvals past SLA]". Copied, not imported — house rule.
- */
-function itApprovalsLabel(open: number, reviews: number, overdue: boolean): string {
-  if (reviews === 0) return `${open} open approvals${overdue ? ", some past SLA" : ""}`;
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  return `${open + reviews} waiting: ${plural(open, "open approval")}, ${plural(reviews, "purchase review")}`
-    + (overdue ? ", some approvals past SLA" : "");
-}
 
 // Spec files share one database and run in alphabetical order — each file
 // reseeds so no file inherits another's mutations (approvals-audit deploys
@@ -55,12 +26,7 @@ test.describe("auth", () => {
   test("unauthenticated deep link redirects to login and back", async ({ page }) => {
     await page.goto("/employees");
     await expect(page).toHaveURL(/\/login\?next=%2Femployees|\/login\?next=\/employees/);
-    await page.getByRole("link", { name: /^Log in/ }).click();
-    await page.locator('[data-login-ready="true"]').waitFor();
-    await page.getByLabel("Work email", { exact: true }).fill("it@thebackroomop.com");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-    await page.getByRole("button", { name: "Log in", exact: true }).click();
+    await submitSignIn(page, "it@thebackroomop.com");
     // Headroom, not a weaker assertion. This is the one place in the file that
     // signs in WITHOUT the `login` helper above — the helper uses
     // `waitForURL`, which gets the 30s navigation budget, while a bare
@@ -74,17 +40,12 @@ test.describe("auth", () => {
 
   test("wrong password shows an inline error", async ({ page }) => {
     await page.goto("/login");
-    await page.getByRole("link", { name: /^Log in/ }).click();
-    await page.locator('[data-login-ready="true"]').waitFor();
-    await page.getByLabel("Work email", { exact: true }).fill("it@thebackroomop.com");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("Password", { exact: true }).fill("wrong-password");
-    await page.getByRole("button", { name: "Log in", exact: true }).click();
-    // The error sits under the Password field (an aria-live region the field points at), and the card stays on
-    // step 2 with the email still shown. Read through the field's accessible description, not a role="alert":
-    // Next.js renders its own always-present, empty role="alert" route announcer.
+    await submitSignIn(page, "it@thebackroomop.com", "wrong-password");
+    // The error sits under the Password field (an aria-live region the field points at), and the form keeps the
+    // email. Read through the field's accessible description, not a role="alert": Next.js renders its own
+    // always-present, empty role="alert" route announcer.
     await expect(page.getByLabel("Password", { exact: true })).toHaveAccessibleDescription(/Wrong email or password/);
-    await expect(page.getByText("it@thebackroomop.com", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Work email", { exact: true })).toHaveValue("it@thebackroomop.com");
   });
 
   // Finance follow-up (spec §7.1): every sign-in lands on Home, whatever the role (a `next` link still wins — above).
@@ -131,12 +92,13 @@ test.describe("workspace gating", () => {
     await page.getByRole("button", { name: /4 workspaces/ }).click();
     await page.getByRole("menuitem", { name: "Purchasing" }).click();
     await expect(page).toHaveURL(/\/purchases$/);
-    // Phase 42 (spec §3.2): no headings any more — Purchasing's nav is known by its Requests link.
+    // Phase 42 (spec §3.2): no headings any more — Purchasing's nav is known by its Purchase orders link (migration
+    // 38; its name carries its count, hence the anchor).
     const nav = page.getByRole("navigation", { name: "Workspace" });
-    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(nav.getByRole("link", { name: /^Purchase orders\b/ })).toHaveAttribute("href", "/purchases");
     await expect(page.getByRole("button", { name: /^Switch workspace — Purchasing, 4 workspaces$/ })).toBeVisible();
     await page.reload();
-    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(nav.getByRole("link", { name: /^Purchase orders\b/ })).toHaveAttribute("href", "/purchases");
     await expect(page.getByRole("button", { name: /^Switch workspace — Purchasing, 4 workspaces$/ })).toBeVisible();
   });
 
@@ -155,14 +117,17 @@ test.describe("workspace gating", () => {
 
 test.describe("shell", () => {
   test("approvals badge shows the seeded urgent count", async ({ page }) => {
-    // Phase 42 (spec §4.3): IT's Approvals badge is the 3 seeded open approvals (one past SLA) plus the purchase
-    // reviews waiting for IT (the seed's PR-0198), so waiting reviews stay visible while Approvals is closed.
-    const reviews = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
+    // Phase 42 (spec §4.3): IT's Approvals badge is the 3 seeded open approvals (one past SLA). Migration 38 moved
+    // the purchase orders waiting for IT off it onto IT's own Purchase orders link ("N with IT").
+    const withIt = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
     await login(page, "it@thebackroomop.com");
     const badge = page.getByLabel(/open approval/);
-    await expect(badge).toHaveText(String(3 + reviews));
-    await expect(badge).toHaveAttribute("aria-label", itApprovalsLabel(3, reviews, true));
+    await expect(badge).toHaveText("3");
+    await expect(badge).toHaveAttribute("aria-label", "3 open approvals, some past SLA");
     await expect(badge).toHaveClass(/fault/);
+    const orders = page.getByLabel(/^\d+ with IT$/);
+    await expect(orders).toHaveText(String(withIt));
+    await expect(orders).toHaveAttribute("aria-label", `${withIt} with IT`);
   });
 
   test("theme survives a reload via the cookie contract", async ({ page }) => {

@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
-import { asOfMonth, monthLabel } from "@/lib/depreciation";
+import { asOfMonth, depStartMonth, monthLabel } from "@/lib/depreciation";
 import { fmtMoneyExact } from "@/lib/format";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 47 (spec docs/superpowers/specs/2026-10-21-finance-assets-and-shell-design.md): Finance's Assets list and
@@ -27,9 +27,10 @@ import { fmtMoneyExact } from "@/lib/format";
  *            Documents, light and dark — its own describe
  *
  * Fixtures (after the reseed): the Laptop category gets 36 months / 10 % and Building 120 months / 0 %; four seeded
- * assets are approved straight in the DB (no audit): BR-LT-0148 (Oct 2024, mid-life), BR-LT-0166 (Aug 2023, fully
- * depreciated), BR-LT-0210 (Oct 2024 with a 28-month override, 6 months or less left) and BR-BL-0001 (Aug 2018, a
- * Building). Everything is put back in afterAll; notes are deleted replies first (AssetNote's foreign keys restrict).
+ * assets are approved straight in the DB (no audit): BR-LT-0148 (bought 720 days before the seed, mid-life),
+ * BR-LT-0166 (1150 days, fully depreciated), BR-LT-0210 (720 days with a 28-month override, 6 months or less left)
+ * and BR-BL-0001 (3000 days, a Building). The seed's dates move with the calendar, so the ledger's years and months
+ * are computed from each asset's own start month (depStartMonth), never written in. Everything is put back in afterAll; notes are deleted replies first (AssetNote's foreign keys restrict).
  */
 
 const db = new PrismaClient();
@@ -53,6 +54,8 @@ const PNG = Buffer.from(
 );
 
 const ids: Record<string, string> = {};
+/** Each fixture's first month of depreciation, as the ledger computes it. */
+const starts: Record<string, number> = {};
 const users: Record<string, string> = {};
 let categoryIds: { laptop: string; building: string; monitor: string };
 
@@ -72,6 +75,7 @@ test.beforeAll(async () => {
       data: { ...confirmed, ...(tag === SOON ? { depreciationLifeMonths: 28, depreciationSalvage: 0, depreciationNote: "e2e short life" } : {}) },
     });
     ids[tag] = a.id;
+    starts[tag] = depStartMonth(a)!;
   }
 });
 
@@ -99,22 +103,6 @@ test.beforeEach(async () => {
   await db.userPreference.deleteMany({ where: { key: "ui:prefs" } });
 });
 
-// Copied from e2e/phase-46-home.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Spec §5.4: the first page after a sign-in rewrites the settings cookies (UiPrefsSync → restoreUiPrefs, stamping
-  // br.uid) and refreshes; wait for it, so nothing seeded or clicked next races that refresh.
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(users[email]);
-}
 async function waitForHydration(target: Locator) {
   const el = target.first();
   await el.waitFor({ state: "attached", timeout: 20_000 });
@@ -273,12 +261,23 @@ test.describe.serial("Finance → one asset", () => {
     await expect(page).toHaveTitle(`${MID} · CRIS`);
     await expect(assetTabs(page).getByRole("link", { name: /^Depreciation ledger/ })).toContainText("36 mo");
 
-    // Oct 2024 + 36 months: 2024 (3), 2025, 2026, 2027 (9), and All years; this year is open
+    // The start month + 36 months: a tab per calendar year it touches (the first and last partial), and All years;
+    // this year is open. Computed from the seed's own date, so the case holds whatever today is.
+    const start = starts[MID];
+    const end = start + 35;
+    const lifeYears = Array.from(
+      { length: Math.floor(end / 12) - Math.floor(start / 12) + 1 },
+      (_, i) => Math.floor(start / 12) + i,
+    );
+    const firstYear = lifeYears[0];
+    const lastYear = lifeYears[lifeYears.length - 1];
     const asOf = asOfMonth(new Date());
     const thisYear = String(Math.floor(asOf / 12));
-    await expect(years(page).getByRole("link")).toHaveText([/^2024/, /^2025/, /^2026/, /^2027/, "All years"]);
+    await expect(years(page).getByRole("link")).toHaveText([...lifeYears.map((y) => new RegExp(`^${y}`)), "All years"]);
     await expect(years(page).getByRole("link", { name: new RegExp(`^${thisYear}`) })).toHaveAttribute("aria-current", "true");
-    await expect(years(page).getByRole("link", { name: /^2024/ })).toContainText("3 mo");
+    // The tab reads "2024" then "2 mo · …" with nothing between, so the year anchors the count ("2 mo" ≠ "12 mo")
+    await expect(years(page).getByRole("link", { name: new RegExp(`^${firstYear}`) }))
+      .toContainText(new RegExp(`^${firstYear}${12 - (start % 12)} mo`));
     await expect(main(page).getByText("Opening book value", { exact: true })).toBeVisible();
     const months = page.getByRole("table", { name: `Depreciation by month, ${thisYear}` });
     await expect(months.getByRole("row", { name: new RegExp(`^${monthLabel(asOf)}`) })).toContainText("This month");
@@ -286,19 +285,24 @@ test.describe.serial("Finance → one asset", () => {
     await years(page).getByRole("link", { name: "All years", exact: true }).click();
     await expect(page).toHaveURL(/year=all/, { timeout: 15_000 });
     const byYear = page.getByRole("table", { name: "Depreciation by year" });
-    await expect(byYear.locator("tbody tr")).toHaveCount(4);
-    await byYear.getByRole("link", { name: "2027", exact: true }).click();
-    await expect(page).toHaveURL(/year=2027/, { timeout: 15_000 });
-    await expect(page.getByRole("table", { name: "Depreciation by month, 2027" }).locator("tbody tr")).toHaveCount(9);
+    await expect(byYear.locator("tbody tr")).toHaveCount(lifeYears.length);
+    await byYear.getByRole("link", { name: String(lastYear), exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`year=${lastYear}`), { timeout: 15_000 });
+    await expect(page.getByRole("table", { name: `Depreciation by month, ${lastYear}` }).locator("tbody tr"))
+      .toHaveCount((end % 12) + 1);
     // the Purchase, Cost breakdown and Depreciation cards under the ledger
     for (const h of ["Purchase", "Cost breakdown", "Depreciation"]) {
       await expect(main(page).getByRole("heading", { name: h, exact: true })).toBeVisible();
     }
 
-    // Review Focus #2: a 120-month life from Aug 2018 is 11 calendar years, and All years is 11 rows
+    // Review Focus #2: a 120-month life touches 11 calendar years (10 when it starts in January), and All years has a
+    // row for each
+    const bStart = starts[BUILDING];
+    const bYears = Math.floor((bStart + 119) / 12) - Math.floor(bStart / 12) + 1;
+    expect(bYears).toBe(bStart % 12 === 0 ? 10 : 11);
     await page.goto(`/finance/assets/${ids[BUILDING]}?year=all`);
-    await expect(years(page).getByRole("link")).toHaveCount(12);
-    await expect(page.getByRole("table", { name: "Depreciation by year" }).locator("tbody tr")).toHaveCount(11);
+    await expect(years(page).getByRole("link")).toHaveCount(bYears + 1);
+    await expect(page.getByRole("table", { name: "Depreciation by year" }).locator("tbody tr")).toHaveCount(bYears);
   });
 
   test("notes: Finance posts, replies, resolves and reopens — focus comes back each time", async ({ page }) => {

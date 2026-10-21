@@ -30,12 +30,18 @@ export const WORKSPACE_META: Record<WorkspaceId, { label: string; landing: strin
 
 /** A count the nav can show (Phase 42 spec §4.3). Task 3 reads them in the layout. */
 export type CountKey =
-  | "worklist" | "approvals" | "purchaseReviews"
+  | "worklist" | "approvals"
   | "itSpare" | "itDefective" | "itMissing" | "leaving"
-  | "prDraft" | "prSubmitted" | "prItReviewed"
+  | "poSentBack" | "poWithIt" | "poReady"
+  // Task 7 (spec §7): IT's Sent back view (assets Finance sent back to IT) and Purchasing's To register view
+  | "itSentBack" | "poToRegister"
+  // Task 7 fix round 1: the assets Finance sent back to Purchasing (both classes), beside its sent-back POs
+  | "assetsSentBackPurchasing"
   // Phase 46 spec §4.3
   | "stockLow" | "stocktakesOverdue" | "suppliersRenewing"
   | "finToConfirmIt" | "finToConfirmPurchasing"
+  // Task 6 (spec §5): Finance's To review queue, one per registration group
+  | "finGroupsToReview"
   | "usersDisabled" | "deadDeliveries" | "flagsUnavailable";
 
 /**
@@ -146,6 +152,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Inventory",
           href: "/inventory",
           icon: "inventory",
+          badge: ["itSentBack"],
           views: [
             { label: "All", href: "/inventory" },
             { label: "Spare", href: "/inventory?status=SPARE", count: "itSpare" },
@@ -158,8 +165,16 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
               match: [{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }],
             },
             { label: "Missing", href: "/inventory?status=MISSING", count: "itMissing" },
-            // The one Register flow (Phase 30): the /inventory/register PATH_RULE's roles, minus purchasing,
-            // who registers from its own workspace.
+            // Task 7 (spec §7): what Finance sent back to IT, until someone on IT fixes it and sends it on (state, never
+            // the bell's read marks), in both classes (fix round 1). Red, like every Sent back count. IT's and admin's:
+            // a viewer can fix nothing.
+            {
+              label: "Sent back",
+              href: "/inventory?reg=needs-correction&to=IT",
+              count: "itSentBack",
+              roles: ["admin", "it_staff"],
+            },
+            // The direct Register (spec §4 way 3): the /inventory/register PATH_RULE's roles.
             { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
           ],
         },
@@ -179,21 +194,23 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Approvals",
           href: "/approvals",
           icon: "approval",
-          // Spec §4.3: purchase reviews waiting for IT stay visible while Approvals is closed.
-          badge: ["approvals", "purchaseReviews"],
+          badge: ["approvals"],
           views: [
             { label: "Open", href: "/approvals", count: "approvals" },
             { label: "Mine", href: "/approvals?tab=mine" },
-            // The `roles` key is the only thing keeping this out of a viewer's sidebar: every IT-workspace role
-            // passes the /purchases path gate.
-            {
-              label: "Purchase reviews",
-              href: "/purchases?state=SUBMITTED",
-              count: "purchaseReviews",
-              roles: ["admin", "it_staff"],
-            },
             { label: "Closed", href: "/approvals?tab=closed" },
           ],
+        },
+        // Migration 38: the purchase orders waiting on IT's check, on their own item (was Approvals › Purchase
+        // reviews). The `roles` key is the only thing keeping it out of a viewer's sidebar: every IT-workspace role
+        // passes the /purchases path gate.
+        // Task 7 (spec §7): IT's PO queue's Sent back tab is the /purchases page's own (PURCHASE_TABS), one click away.
+        {
+          label: "Purchase orders",
+          href: "/purchases?state=WITH_IT",
+          icon: "requests",
+          badge: ["poWithIt"],
+          roles: ["admin", "it_staff"],
         },
       ],
     },
@@ -255,17 +272,21 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         HOME,
         {
-          label: "Requests",
+          label: "Purchase orders",
           href: "/purchases",
           icon: "requests",
+          // Task 7 (spec §7): the Sent back count stays on the closed link, red.
+          badge: ["poSentBack"],
           views: [
             { label: "All", href: "/purchases" },
-            { label: "My drafts", href: "/purchases?state=DRAFT", count: "prDraft" },
             // Labels match PURCHASE_TABS (purchases-list.ts), asserted in workspaces.test.ts.
-            { label: "Awaiting IT", href: "/purchases?state=SUBMITTED", count: "prSubmitted" },
-            { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED", count: "prItReviewed" },
-            { label: "Completed", href: "/purchases?state=COMPLETED" },
-            { label: "Register purchase", href: "/purchases/new" },
+            { label: "With IT", href: "/purchases?state=WITH_IT", count: "poWithIt" },
+            { label: "Sent back", href: "/purchases?state=SENT_BACK", count: "poSentBack" },
+            // Task 7: every PO with a line Purchasing can register and units left, a mixed one still with IT included
+            // (server/modules/purchases/to-register.ts); the READY tab alone hid those.
+            { label: "To register", href: "/purchases?register=1", count: "poToRegister" },
+            { label: "Cancelled", href: "/purchases?state=CANCELLED" },
+            { label: "New purchase order", href: "/purchases/new" },
           ],
         },
         {
@@ -303,10 +324,16 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Assets",
           href: "/inventory?cls=PURCHASING",
           icon: "inventory",
+          // Task 7 fix round 1: the assets sent back to Purchasing stay on the closed link, red.
+          badge: ["assetsSentBackPurchasing"],
           views: [
             { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
+            // Task 7 (spec §7, fix round 1): the assets Finance sent back to Purchasing, both classes (an asset on a
+            // sent-back PO counts through the PO, under Purchase orders › Sent back).
+            { label: "Sent back", href: "/inventory?reg=needs-correction&to=PURCHASING", count: "assetsSentBackPurchasing" },
             { label: "IT inventory", href: "/inventory?cls=IT" },
-            { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
+            // Spec §4: Purchasing registers from a purchase order (Purchase orders → Register); an admin keeps this.
+            { label: "Register assets", href: "/inventory/register", roles: ["admin"] },
           ],
         },
         // Phase 14: Purchasing approves lifecycle changes on its own class and reads the directory.
@@ -345,6 +372,16 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "work",
       items: [
         HOME,
+        {
+          // Task 6 (spec §5): the registration groups waiting for Finance — a PO's registered lines, or a direct batch.
+          // One view, so the count sits on the page it counts (NAV_COUNT_HREF); a single view is never listed.
+          label: "To review",
+          href: "/finance/review",
+          icon: "approval",
+          badge: ["finGroupsToReview"],
+          views: [{ label: "To review", href: "/finance/review", count: "finGroupsToReview" }],
+          also: ["Review groups", "Purchase orders to review"],
+        },
         {
           // Phase 46 spec §4.3: the page shows one class at a time, so To confirm has a view per class. The IT views
           // match on the page's default class (PAGE_DEFAULTS), so a Purchasing URL never lights them.
@@ -385,11 +422,10 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Purchases",
           href: "/purchases",
           icon: "requests",
-          badge: ["prItReviewed"],
+          // No badge (final review I3): Finance works from To review; Ready to register is Purchasing's and IT's work.
           views: [
             { label: "All purchases", href: "/purchases" },
-            { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED", count: "prItReviewed" },
-            { label: "Approved", href: "/purchases?state=COMPLETED" },
+            { label: "Ready to register", href: "/purchases?state=READY", count: "poReady" },
             { label: "Cancelled", href: "/purchases?state=CANCELLED" },
           ],
         },
@@ -557,16 +593,14 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Phase 14: a label sheet is each class's own artifact; the page prints only
   // the classes the role manages. Still MUST precede the general /inventory rule.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
-  // Phase 13: registering is each department's own — IT registers IT-class
-  // categories, Purchasing registers Purchasing-class ones — so BOTH
-  // workspaces are admitted here and `registerAssets` refuses the wrong class
-  // by name. This MUST still precede the general /inventory rule below,
-  // because that rule admits finance and viewer, and neither registers
-  // anything. The ORDERING is asserted only in workspaces.test.ts.
-  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // Spec §4 way 3 (2026-10-21): the direct Register is IT's and an admin's — Purchasing registers only from a
+  // purchase order (/purchases/[id]/register, under the /purchases rule). Both workspaces stay listed so an admin
+  // arriving from the Purchasing view still gets in. This MUST still precede the general /inventory rule below,
+  // because that rule admits purchasing, finance and viewer. The ORDERING is asserted only in workspaces.test.ts.
+  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff"] },
   // Same treatment as /inventory/register (spec §5): a write surface stops
-  // finance and viewer at layer 1, not only at the page's requireRole.
-  { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // the roles that may not register at layer 1, not only at the page's requireRole.
+  { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff"] },
   // Phase 15: the worklist is IT-workspace only — viewer shares that
   // workspace read-only, but purchasing and finance, who both share the
   // general /inventory rule right below, are excluded. MUST precede that
@@ -618,6 +652,13 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Phase 41 (spec §2, §9): Settings › Cris is for the two roles that have Cris. `roles` keeps viewer out of the
   // IT workspace it otherwise shares with it_staff; the page's own requireRole says the same.
   { test: /^\/settings\/cris(\/|$)/, workspaces: ["it", "admin"], roles: ["admin", "it_staff"] },
+  // Task 7 (purchase-orders spec §7): the bell's full page, for every team and for admins (any team's); a viewer
+  // has no team, so no notifications and no bell.
+  {
+    test: /^\/notifications(\/|$)/,
+    workspaces: ["it", "purchasing", "finance", "admin"],
+    roles: ["admin", "it_staff", "purchasing_staff", "finance_staff"],
+  },
 ];
 
 export function pathAllowedForRole(pathname: string, role: Role): boolean {

@@ -2,9 +2,9 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { depStartMonth, monthLabel } from "@/lib/depreciation";
 import { fmtDayMonthYear, fmtMoneyExact } from "@/lib/format";
+import { login, submitSignIn } from "./fixtures/login";
 
 /**
  * Phase 47 follow-up (spec docs/superpowers/specs/2026-10-21-finance-sort-undo-notify-design.md): Finance sorting,
@@ -60,21 +60,6 @@ test.beforeEach(async () => {
   await db.userPreference.deleteMany({ where: { key: "ui:prefs" } });
 });
 
-// Copied from e2e/phase-47-finance.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 §5.4: the first page after a sign-in rewrites the settings cookies and refreshes; wait for it.
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(users[email]);
-}
 async function waitForHydration(target: Locator) {
   const el = target.first();
   await el.waitFor({ state: "attached", timeout: 20_000 });
@@ -291,6 +276,8 @@ test.describe("Finance review: Undo, the banner and admin Reopen", () => {
       await page.clock.install();
       await page.goto(assetHref(s.id));
       await expect(banner(page)).toBeVisible();
+      // the countdown starts when the banner hydrates: run the clock only after that, or it restarts from 15
+      await waitForHydration(banner(page).getByRole("button", { name: "Undo", exact: true }));
       await page.clock.fastForward("14:00");
       await expect(banner(page)).toBeVisible();
       await expect(banner(page)).toContainText(/\([12] min left\)/);
@@ -309,12 +296,14 @@ test.describe("Finance review: Undo, the banner and admin Reopen", () => {
       await reset(tag);
       await login(page, FINANCE);
       await page.goto(assetHref(s.id));
-      const sendBack = review(page).getByRole("button", { name: "Send back to IT…" });
+      const sendBack = review(page).getByRole("button", { name: "Send back…" });
       await waitForHydration(sendBack);
       await sendBack.click();
-      const dialog = page.getByRole("dialog", { name: `Send ${tag} back to IT` });
+      const dialog = page.getByRole("dialog", { name: `Send ${tag} back` });
       await dialog.getByLabel("Cost", { exact: true }).check();
-      await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+      // Task 6 (purchase-orders spec §5): Finance picks the team
+      await dialog.getByLabel("Send to").selectOption("IT");
+      await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
       await expect(toast(page, `Sent ${tag} back to IT`)).toContainText("Flagged: Cost");
       await expect(banner(page)).toContainText(/You sent this back at \d{1,2}:\d{2}/, { timeout: 20_000 });
       const undone0 = await auditCount(s.id, "asset.return.undone");
@@ -364,13 +353,14 @@ test.describe("Finance review: Undo, the banner and admin Reopen", () => {
       const undone0 = await auditCount(s.id, "asset.return.undone");
       await login(page, FINANCE);
       await page.goto(assetHref(s.id));
-      const sendBack = review(page).getByRole("button", { name: "Send back to IT…" });
+      const sendBack = review(page).getByRole("button", { name: "Send back…" });
       await waitForHydration(sendBack);
       await sendBack.click();
-      const dialog = page.getByRole("dialog", { name: `Send ${tag} back to IT` });
+      const dialog = page.getByRole("dialog", { name: `Send ${tag} back` });
       await dialog.getByLabel("Cost", { exact: true }).check();
+      await dialog.getByLabel("Send to").selectOption("IT");
       await dialog.getByLabel("Note for IT").fill("e2e: wrong PO");
-      await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+      await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
       const t = toast(page, `Sent ${tag} back to IT`);
       await expect(t).toContainText("Flagged: Cost");
       await expect.poll(async () => (await asset(s.id)).financeReturnedAt !== null).toBe(true);
@@ -503,12 +493,7 @@ test.describe("sign-in lands on Home", () => {
     try {
       await fresh.goto(assetHref(id));
       await expect(fresh).toHaveURL(/\/login\?next=/);
-      await fresh.getByRole("link", { name: /^Log in/ }).click();
-      await fresh.locator('[data-login-ready="true"]').waitFor();
-      await fresh.getByLabel("Work email", { exact: true }).fill(FINANCE);
-      await fresh.getByRole("button", { name: "Continue", exact: true }).click();
-      await fresh.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-      await fresh.getByRole("button", { name: "Log in", exact: true }).click();
+      await submitSignIn(fresh, FINANCE);
       await expect(fresh).toHaveURL((u) => u.pathname === assetHref(id), { timeout: 30_000 });
     } finally {
       await context.close();

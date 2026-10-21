@@ -21,9 +21,11 @@ const MAP: Record<string, StatusFamily> = {
   // faults for the same reason DEFECTIVE and MISSING are.
   OPERATIONAL: "settled", STORED: "neutral", REPAIRING: "fault",
   RETIRED: "closed", SOLD: "closed", LOST: "fault",
-  // Purchase request state
+  // Purchase request state (the old request flow; still read by history and the activity feed)
   DRAFT: "neutral", SUBMITTED: "inflight", IT_REVIEWED: "inflight",
   COMPLETED: "settled", CANCELLED: "closed",
+  // Purchase order state (migration 38). CANCELLED is above.
+  WITH_IT: "inflight", SENT_BACK: "attention", READY: "inflight",
   // Purchase unit + approval (shared values agree by design: the family is
   // what the row needs from the reader, not which enum it came from).
   // PENDING and DEAD are ALSO JobStatus values (below) — this entry serves

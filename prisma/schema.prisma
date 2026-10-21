@@ -44,12 +44,28 @@ enum AssetStatus {
   LOST
 }
 
-enum PurchaseRequestState {
-  DRAFT
-  SUBMITTED
-  IT_REVIEWED
-  COMPLETED
+/// Three-team intake (spec §2, §3): the team a field, a send-back or a notification belongs to.
+/// Mirrors `Team` in src/lib/intake-rules.ts.
+enum Team {
+  IT
+  PURCHASING
+  FINANCE
+}
+
+/// Spec §3: where a purchase order sits. Replaces PurchaseRequestState (migration 38 maps the old values;
+/// legacyPoState in src/lib/po-flow.ts is the same mapping). "Registered"/"Approved" are derived, never stored.
+enum PurchaseOrderState {
+  WITH_IT
+  SENT_BACK
+  READY
   CANCELLED
+}
+
+/// Spec §7: what a bell notification is about.
+enum NotificationKind {
+  SENT_BACK
+  TO_CHECK
+  CHANGED
 }
 
 enum PurchaseUnitState {
@@ -117,6 +133,14 @@ enum NoteKind {
   CANCEL
   COMPLETE
   RECEIVE
+  // Migration 38 (spec §3): the purchase-order thread. The kinds above stay so history still renders.
+  PO_SAVED
+  PO_SENT_BACK
+  PO_RESUBMITTED
+  PO_FIXED
+  PO_REGISTERED
+  PO_LINE_CLOSED
+  PO_CANCELLED
 }
 
 enum JobType {
@@ -153,8 +177,9 @@ model User {
   createdAt                DateTime                @default(now())
   updatedAt                DateTime                @default(now()) @updatedAt
   preferences              UserPreference[]
-  purchaseRequests         PurchaseRequest[]       @relation("requestedBy")
-  reviewedRequests         PurchaseRequest[]       @relation("reviewedBy")
+  purchaseOrders           PurchaseOrder[]         @relation("requestedBy")
+  reviewedOrders           PurchaseOrder[]         @relation("reviewedBy")
+  sentBackOrders           PurchaseOrder[]         @relation("poSentBackBy")
   notes                    NoteEntry[]
   claimedApprovals         Approval[]              @relation("claimedBy")
   requestedApprovals       Approval[]              @relation("approvalRequestedBy")
@@ -179,6 +204,8 @@ model User {
   employeeNotes            EmployeeNote[]
   crisConversations        CrisConversation[]
   assetNotesAuthored       AssetNote[]             @relation("assetNoteAuthor")
+  notificationsActed       Notification[]          @relation("notificationActor")
+  notificationReads        NotificationRead[]
 }
 
 model UserPreference {
@@ -213,7 +240,7 @@ model Department {
   archivedAt    DateTime?
   employees     Employee[]
   policies      EquipmentPolicy[]
-  requests      PurchaseRequest[]
+  requests      PurchaseOrder[]
   stockIssues   StockMovement[]
   transfersFrom EmployeeTransfer[] @relation("transfersFrom")
   transfersTo   EmployeeTransfer[] @relation("transfersTo")
@@ -232,6 +259,7 @@ model AssetCategory {
   depreciationSalvagePercent Decimal?    @db.Decimal(5, 2)
   types     AssetType[]
   assets    Asset[]
+  poLines   PurchaseOrderLine[]
 }
 
 model AssetType {
@@ -277,7 +305,7 @@ model Vendor {
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @default(now()) @updatedAt
   assets          Asset[]
-  requests        PurchaseRequest[]
+  requests        PurchaseOrder[]
   documents       VendorDocument[]
   bankAccounts    VendorBankAccount[]
   stockLots       StockLot[]
@@ -323,20 +351,20 @@ model VendorDocument {
   @@index([vendorId])
 }
 
-/// Spec §2.3 — the shape of AssetDocument, owned by a purchase request.
+/// Spec §2.3 — the shape of AssetDocument, owned by a purchase order.
 model RequestDocument {
-  id           String          @id @default(cuid())
-  requestId    String
-  request      PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  id           String        @id @default(cuid())
+  orderId      String        @map("requestId")
+  order        PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
   kind         String
   fileName     String
   path         String
   checksum     String
   uploadedById String?
-  uploadedBy   User?           @relation("requestDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
-  createdAt    DateTime        @default(now())
+  uploadedBy   User?         @relation("requestDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime      @default(now())
 
-  @@index([requestId])
+  @@index([orderId])
 }
 
 // ── People ────────────────────────────────────────────────────────────
@@ -466,13 +494,14 @@ model Asset {
   assignee             Employee?        @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
   purchasedAt          DateTime?
   cost                 Decimal?         @db.Decimal(12, 2)
-  purchaseRequestId    String?
-  purchaseRequest      PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  /// Migration 38: the PO this asset was registered from (column keeps its old name).
+  purchaseOrderId      String?            @map("purchaseRequestId")
+  purchaseOrder        PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   /// Phase 18 (spec §2.5): stamped by the CSV importer on CREATE only. Provenance
-  /// is DERIVED from this and purchaseRequestId (src/lib/provenance.ts) — never stored.
+  /// is DERIVED from this and purchaseOrderId (src/lib/provenance.ts) — never stored.
   importedAt           DateTime?
-  purchaseUnitId       String?
-  purchaseUnit         PurchaseUnit?    @relation(fields: [purchaseUnitId], references: [id], onDelete: Restrict)
+  purchaseOrderLineId  String?            @map("purchaseUnitId")
+  purchaseOrderLine    PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
   warrantyUntil        DateTime?
   // repair fields (repairs view = saved filter over status=DEFECTIVE; no new enum)
   vendorId             String?
@@ -492,6 +521,8 @@ model Asset {
   financeReturnedById  String?
   financeReturnedBy    User?            @relation("financeReturnedBy", fields: [financeReturnedById], references: [id], onDelete: Restrict)
   financeReturnReason  String?
+  /// Migration 38 (spec §5): the team Finance's send-back landed on; NULL on rows returned before it.
+  financeReturnedTo    Team?
   /// Phase 35 (spec §3.2): approved by Finance as NOT capitalised — no cost, no book value, no depreciation.
   financeNotCapitalised Boolean         @default(false)
   /// Phase 35 (spec §3.3): the send-back checklist — keys of REGISTRATION_FIELDS (src/lib/registration.ts).
@@ -539,8 +570,8 @@ model Asset {
   @@index([assigneeId])
   @@index([categoryId])
   @@index([typeId])
-  @@index([purchaseRequestId])
-  @@index([purchaseUnitId])
+  @@index([purchaseOrderId])
+  @@index([purchaseOrderLineId])
   @@index([vendorId])
   @@index([financeConfirmedAt])
   @@index([financeReturnedAt])
@@ -604,10 +635,14 @@ model PurchaseRecord {
   createdById String
   createdBy   User       @relation("purchaseRecordsCreated", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt   DateTime   @default(now())
+  /// Migration 38: the PO a Register submit came from; NULL for a registration with no PO (spec §4 way 3).
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   assets      Asset[]
 
   @@index([createdAt])
   @@index([cls, createdAt])
+  @@index([purchaseOrderId])
 }
 
 model Reservation {
@@ -636,48 +671,72 @@ model Reservation {
 
 // ── Purchasing ────────────────────────────────────────────────────────
 
-model PurchaseRequest {
-  id            String               @id @default(cuid())
-  refNo         String               @unique // PR-0188
-  state         PurchaseRequestState @default(DRAFT)
+/// Migration 38 (spec §3): a purchase order records something already bought. Table keeps its old name.
+model PurchaseOrder {
+  id            String             @id @default(cuid())
+  refNo         String             @unique // PO-0188 (sequence purchase_request_ref_seq)
+  /// No default: every writer picks it (stateAfterSave / stateAfterResubmit in src/lib/po-flow.ts).
+  state         PurchaseOrderState
   requestedById String
-  requestedBy   User                 @relation("requestedBy", fields: [requestedById], references: [id])
-  /// Phase 18 (spec §5.2): one supplier per request, optional, any state.
+  requestedBy   User               @relation("requestedBy", fields: [requestedById], references: [id])
+  /// Phase 18 (spec §5.2): one supplier per order, optional, any state.
   vendorId      String?
-  vendor        Vendor?              @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  /// Phase 18 (spec §5.1): the requesting department. Nullable at the database
-  /// (pre-phase rows), REQUIRED by createDraft/saveDraft.
+  vendor        Vendor?            @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  /// Phase 18 (spec §5.1): the department it's for. Nullable at the database (pre-phase rows).
   departmentId  String?
-  department    Department?          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  department    Department?        @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   documents     RequestDocument[]
+  /// Migration 38 (spec §3): SI number, OR number, purchase date and fees. NULL on legacy rows.
+  invoiceRef    String?
+  receiptRef    String?
+  purchasedAt   DateTime?
+  fees          Decimal?           @db.Decimal(12, 2)
+  /// Migration 38 (spec §7): the open send-back — when, who, which team, which fields, why. Cleared on resubmit.
+  sentBackAt     DateTime?
+  sentBackById   String?
+  sentBackByUser User?             @relation("poSentBackBy", fields: [sentBackById], references: [id], onDelete: Restrict)
+  sentBackBy     Team?
+  sentBackFields String[]          @default([])
+  sentBackNote   String?
+  /// The old request flow's stamps — kept for history, no longer written.
   submittedAt   DateTime?
   reviewedAt    DateTime?
   reviewedById  String?
-  reviewedBy    User?                @relation("reviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedBy    User?              @relation("reviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
   completedAt   DateTime?
   cancelledAt   DateTime?
   cancelReason  String?
-  units         PurchaseUnit[]
+  lines         PurchaseOrderLine[]
   notes         NoteEntry[]
   assets        Asset[]
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @default(now()) @updatedAt
+  records       PurchaseRecord[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @default(now()) @updatedAt
 
   @@index([state])
   @@index([requestedById])
   @@index([vendorId])
   @@index([departmentId])
   @@index([updatedAt])
+  @@map("PurchaseRequest")
 }
 
-model PurchaseUnit {
+/// Migration 38: a PO line (table keeps its old name PurchaseUnit).
+model PurchaseOrderLine {
   id           String            @id @default(cuid())
-  requestId    String
-  request      PurchaseRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  orderId      String            @map("requestId")
+  order        PurchaseOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   description  String
   specs        String?
   qty          Int               @default(1)
   unitPrice    Decimal?          @db.Decimal(12, 2)
+  /// Spec §3: the line's class comes from this category. NULL on legacy lines (class picked at Register).
+  categoryId   String?
+  category     AssetCategory?    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  /// Spec §4 (partial deliveries): units that will never arrive, and why.
+  closedShort       Int          @default(0)
+  closedShortReason String?
+  /// The old request flow's per-unit fields — kept for history, no longer written.
   state        PurchaseUnitState @default(PENDING)
   itSlotNotes  String?
   financeNotes String?
@@ -685,21 +744,53 @@ model PurchaseUnit {
   updatedAt    DateTime          @default(now()) @updatedAt
   assets       Asset[]
 
-  @@index([requestId])
+  @@index([orderId])
+  @@index([categoryId])
+  @@map("PurchaseUnit")
 }
 
 // Append-only conversation thread (enforced by DB trigger, Task 4)
 model NoteEntry {
-  id        String          @id @default(cuid())
-  requestId String
-  request   PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  id        String        @id @default(cuid())
+  orderId   String        @map("requestId")
+  order     PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
   authorId  String
-  author    User            @relation(fields: [authorId], references: [id])
+  author    User          @relation(fields: [authorId], references: [id])
   kind      NoteKind
   text      String
-  createdAt DateTime        @default(now())
+  createdAt DateTime      @default(now())
 
-  @@index([requestId])
+  @@index([orderId])
+}
+
+/// Migration 38 (spec §7): a team-addressed bell notification, written in the same transaction as its cause.
+model Notification {
+  id         String             @id @default(cuid())
+  team       Team
+  kind       NotificationKind
+  title      String
+  body       String?
+  href       String
+  actorId    String?
+  actor      User?              @relation("notificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  entityType String
+  entityId   String
+  createdAt  DateTime           @default(now())
+  reads      NotificationRead[]
+
+  @@index([team, createdAt])
+}
+
+/// Per-person read state for a team notification.
+model NotificationRead {
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt         DateTime     @default(now())
+
+  @@id([notificationId, userId])
+  @@index([userId])
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────

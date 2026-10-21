@@ -135,6 +135,86 @@ function replacedEarlier(diff: unknown): boolean {
 }
 
 /**
+ * Task 6: an asset returned as part of a PO send-back (`po` in its diff names the PO). It goes back to Finance when
+ * Purchasing corrects and saves the PO, so the one asset's return can't be undone on its own.
+ */
+function poSendBack(diff: unknown): string | null {
+  const po = asDiff(diff)?.po;
+  return has(po, "to") && typeof po.to === "string" ? po.to : null;
+}
+
+/*
+ * Task 6 (spec §5): a group action — Approve all with its hold-backs — writes one entry per asset, each carrying the
+ * registration (`group`) and the action's own id (`batch`) in its diff, so the whole action can be found and undone as
+ * one. These keys, and a PO send-back's `po`, say which action an entry belongs to, not what changed: the history
+ * tables leave them out (history.ts META_KEYS, finance-history.ts HIDDEN_FIELDS).
+ */
+const metaTo = (diff: unknown, key: string): string | null => {
+  const c = asDiff(diff)?.[key];
+  return has(c, "to") && typeof c.to === "string" ? c.to : null;
+};
+
+export interface GroupUndoAsset extends UndoAsset {
+  id: string;
+  tag: string;
+}
+
+export interface GroupUndoItem {
+  assetId: string;
+  tag: string;
+  kind: UndoKind;
+  /** The asset's entry from the group action. */
+  entry: UndoEntry;
+}
+
+export type GroupUndoCheck =
+  | { ok: true; batch: string; at: Date; minutesLeft: number; items: GroupUndoItem[] }
+  | { ok: false; reason: string };
+
+/**
+ * Whether `userId` can undo their latest group action on registration `recordId` now: all of it or none (spec §5,
+ * "one action"). Each asset of the action must pass `undoCheck` — same person, within 15 minutes, still its latest
+ * finance change — and the first that doesn't refuses the whole undo with its reason. `entries` holds the assets' own
+ * entries (entityType "asset", `entityId` the asset) and the registration's ("purchase-record").
+ */
+export function groupUndoCheck(
+  recordId: string,
+  assets: readonly GroupUndoAsset[],
+  entries: ReadonlyArray<UndoEntry & { entityId: string }>,
+  userId: string,
+  now: Date,
+): GroupUndoCheck {
+  const mine = entries.filter((e) =>
+    e.entityType === "asset" && e.actorId === userId && UNDOABLE_ACTIONS[e.action] !== undefined
+    && metaTo(e.diff, "group") === recordId && metaTo(e.diff, "batch") !== null);
+  let latest: (typeof mine)[number] | null = null;
+  for (const e of mine) {
+    if (!latest || e.createdAt.getTime() > latest.createdAt.getTime()
+      || (e.createdAt.getTime() === latest.createdAt.getTime() && e.id > latest.id)) latest = e;
+  }
+  if (!latest) return { ok: false, reason: "Can't undo: there is no recent group action of yours to undo." };
+  const batch = metaTo(latest.diff, "batch")!;
+  const record = entries.filter((e) => e.entityType === "purchase-record" && e.entityId === recordId);
+
+  const items: GroupUndoItem[] = [];
+  for (const e of mine.filter((x) => metaTo(x.diff, "batch") === batch)) {
+    const a = assets.find((x) => x.id === e.entityId);
+    if (!a) return { ok: false, reason: "Can't undo: an asset from it has left this registration." };
+    const own = entries.filter((x) => x.entityType === "asset" && x.entityId === a.id);
+    const check = undoCheck(a, [...own, ...record], userId, now);
+    const why = (r: string) => ({ ok: false as const, reason: `Can't undo: ${a.tag} — ${r.replace(/^Can't undo: /, "")}` });
+    if (!check.ok) return why(check.reason);
+    if (check.entry.id !== e.id) return why("its review has changed since.");
+    items.push({ assetId: a.id, tag: a.tag, kind: check.state.kind, entry: e });
+  }
+  const left = latest.createdAt.getTime() + UNDO_WINDOW_MS - now.getTime();
+  return {
+    ok: true, batch, at: latest.createdAt, items,
+    minutesLeft: Math.max(1, Math.min(UNDO_WINDOW_MS / 60_000, Math.ceil(left / 60_000))),
+  };
+}
+
+/**
  * Settings: the override before the change, or all null (the category policy) when there was none. Null when the
  * entry did not record the earlier values (a removal saved before this follow-up).
  */
@@ -186,6 +266,8 @@ export function undoCheck(asset: UndoAsset, entries: readonly UndoEntry[], userI
   if (left <= 0) return no(`the 15 minutes to undo it ended at ${manilaTime(new Date(ends))}`);
   if (!stateMatches(k, asset)) return no("the asset's review has changed since");
   if (k === "send-back" && replacedEarlier(latest.diff)) return no("this send-back replaced an earlier one");
+  const po = k === "send-back" ? poSendBack(latest.diff) : null;
+  if (po) return no(`it went back to Purchasing with ${po} — undo the send-back on ${po} instead`);
   if (k === "settings" && settingsRestore(latest.diff) === null) return no("the earlier depreciation settings weren't recorded");
   return {
     ok: true,
@@ -204,4 +286,93 @@ export function undoCheck(asset: UndoAsset, entries: readonly UndoEntry[], userI
 export function undoState(asset: UndoAsset, entries: readonly UndoEntry[], userId: string, now: Date): UndoState | null {
   const r = undoCheck(asset, entries, userId, now);
   return r.ok ? r.state : null;
+}
+
+// ---- a PO's send-back (Task 6 fix round 1, spec §5: "the new send-backs", one action each) ---------------------------
+
+/** PO entries that never block an undo: a comment or a document changes nothing the undo puts back. */
+const PO_QUIET: readonly string[] = ["comment", "document.uploaded"];
+
+export interface PoSendBackUndoItem {
+  assetId: string;
+  tag: string;
+  /** The asset's finance.return entry from the send-back. */
+  entry: UndoEntry;
+}
+
+export type PoSendBackUndoCheck =
+  | {
+    ok: true; entry: UndoEntry; previousState: string; items: PoSendBackUndoItem[];
+    at: Date; minutesLeft: number; label: string;
+  }
+  | { ok: false; reason: string };
+
+const latestOf = <E extends UndoEntry>(list: readonly E[]): E | null => {
+  let latest: E | null = null;
+  for (const e of list) {
+    if (!latest || e.createdAt.getTime() > latest.createdAt.getTime()
+      || (e.createdAt.getTime() === latest.createdAt.getTime() && e.id > latest.id)) latest = e;
+  }
+  return latest;
+};
+
+/**
+ * Whether `userId` can undo the PO's send-back now (IT's or Finance's): the person who sent it, within 15 minutes, while
+ * the PO is still sent back and nothing was done to it since (a comment or a document aside), and — Finance's — while
+ * each asset it returned still has that return as its latest finance change. All or nothing: the first that fails
+ * refuses the undo with its reason. What it restores: the PO's state before (`state.from` in the po.send-back diff)
+ * and every asset the send-back returned (its finance.return entries carry the send-back's `batch`).
+ *
+ * `poEntries` are the PO's own entries (entityType "purchase-order"); `assetEntries` the entries of its assets.
+ */
+export function poSendBackUndoCheck(
+  po: { refNo: string; state: string },
+  poEntries: readonly UndoEntry[],
+  assets: readonly GroupUndoAsset[],
+  assetEntries: ReadonlyArray<UndoEntry & { entityId: string }>,
+  userId: string,
+  now: Date,
+): PoSendBackUndoCheck {
+  const refuse = (why: string) => ({ ok: false as const, reason: `Can't undo: ${why}.` });
+  const sent = latestOf(poEntries.filter((e) => e.action === "po.send-back"));
+  if (!sent) return refuse(`${po.refNo} has no send-back to undo`);
+  if (po.state !== "SENT_BACK") return refuse(`${po.refNo} is no longer with Purchasing`);
+  const since = latestOf(poEntries.filter((e) => !PO_QUIET.includes(e.action)));
+  if (since && since.id !== sent.id) {
+    const who = since.actorId === userId ? "you" : since.actorLabel;
+    return refuse(`${who} changed ${po.refNo} since, at ${manilaTime(since.createdAt)}`);
+  }
+  if (sent.actorId !== userId) return refuse(`only ${sent.actorLabel} can undo this`);
+  const ends = sent.createdAt.getTime() + UNDO_WINDOW_MS;
+  const left = ends - now.getTime();
+  if (left <= 0) return refuse(`the 15 minutes to undo it ended at ${manilaTime(new Date(ends))}`);
+  const d = asDiff(sent.diff);
+  const before = d?.state;
+  if (!has(before, "from") || typeof before.from !== "string" || before.from === "SENT_BACK") {
+    return refuse("the state before the send-back wasn't recorded");
+  }
+  const team = (() => {
+    const to = d?.sentBack;
+    return has(to, "to") && to.to && typeof to.to === "object" ? (to.to as { team?: unknown }).team : undefined;
+  })();
+  const batch = metaTo(sent.diff, "batch");
+  if (team === "FINANCE" && batch === null) return refuse("this send-back is from before it could be undone");
+
+  const items: PoSendBackUndoItem[] = [];
+  for (const e of assetEntries) {
+    if (e.entityType !== "asset" || e.action !== "finance.return" || batch === null || metaTo(e.diff, "batch") !== batch) continue;
+    const a = assets.find((x) => x.id === e.entityId);
+    if (!a) return refuse("an asset it returned is no longer on it");
+    const own = assetEntries.filter((x) => x.entityType === "asset" && x.entityId === a.id);
+    const latest = latestFinanceChange(own);
+    if (latest?.id !== e.id || a.financeConfirmedAt !== null || a.financeReturnedAt === null) {
+      return refuse(`${a.tag}'s review has changed since`);
+    }
+    items.push({ assetId: a.id, tag: a.tag, entry: e });
+  }
+  return {
+    ok: true, entry: sent, previousState: before.from, items, at: sent.createdAt,
+    minutesLeft: Math.max(1, Math.min(UNDO_WINDOW_MS / 60_000, Math.ceil(left / 60_000))),
+    label: `You sent ${po.refNo} back to Purchasing at ${manilaTime(sent.createdAt)}`,
+  };
 }

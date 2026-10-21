@@ -300,11 +300,11 @@ function Demos() {
           <Dialog
             open
             onClose={() => setDialogOpen(false)}
-            title="Cancel request PR-0198?"
+            title="Cancel purchase order PO-0198?"
             footer={
               <>
                 <Button variant="ghost" onClick={() => setDialogOpen(false)}>Keep it</Button>
-                <Button variant="danger" onClick={() => setDialogOpen(false)}>Cancel request</Button>
+                <Button variant="danger" onClick={() => setDialogOpen(false)}>Cancel purchase order</Button>
               </>
             }
           >

@@ -50,7 +50,7 @@ export function ArchiveControls({ id, archived }: { id: string; archived: boolea
           </div>
         )}
         {error && <Banner tone="fault" title={error} className="mb-3" />}
-        It disappears from pickers and the default list. Requests and assets that name it keep it. You can
+        It disappears from pickers and the default list. Purchase orders and assets that name it keep it. You can
         restore it any time.
       </Dialog>
     </>

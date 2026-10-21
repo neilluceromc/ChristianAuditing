@@ -4,7 +4,6 @@ import path from "node:path";
 import { ACTION_LABELS, actionLabel } from "./activity";
 import { AUDIT_ACTIONS } from "./audit-actions";
 import { APPROVAL_TYPE_LABEL } from "./labels";
-import { PURCHASE_ACTION_ROLES } from "./purchase-flow";
 
 /**
  * Final review M5: /audit renders actionLabel(row.action) as words, so every action code the server or the worker
@@ -43,8 +42,11 @@ describe("audit action codes (final review M5)", () => {
   it.each([...written])("%s (written in %s) is in AUDIT_ACTIONS", (code) => {
     expect(AUDIT_ACTIONS as readonly string[]).toContain(code);
   });
-  it("covers the codes written from a variable: purchase transitions and the worker's executions", () => {
-    for (const code of Object.keys(PURCHASE_ACTION_ROLES)) expect(AUDIT_ACTIONS as readonly string[]).toContain(code);
+  it("keeps the old purchase-request transition codes (history still renders them) and the worker's executions", () => {
+    // Migration 38 removed the transitions that wrote these from a variable; their rows stay in the log.
+    for (const code of ["submit", "it-review", "it-reject", "request-info", "cancel", "complete", "unit-update", "supplier-set"]) {
+      expect(AUDIT_ACTIONS as readonly string[]).toContain(code);
+    }
     for (const t of Object.values(APPROVAL_TYPE_LABEL)) expect(AUDIT_ACTIONS as readonly string[]).toContain(`${t} executed`);
   });
   it.each([...AUDIT_ACTIONS])("%s has a label in ACTION_LABELS", (code) => {

@@ -7,6 +7,8 @@ const h = vi.hoisted(() => ({
   historyKeys: [] as string[],
   history: {} as Record<string, (number | null)[]>,
   counts: [] as unknown[],
+  nav: {} as Record<string, number>,
+  navKeys: [] as Array<{ keys: string[]; role: string }>,
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -41,6 +43,14 @@ vi.mock("@/server/modules/inventory/queries", () => ({
 vi.mock("@/server/modules/employees/queries", () => ({
   kitGapsByGroup: async () => [{ id: "d1", name: "Acme", kind: "CLIENT", count: 4 }],
 }));
+// Task 7 (spec §7): the team cards read the nav's own counts, from state.
+vi.mock("./nav-counts", async (orig) => ({
+  ...(await orig<object>()),
+  readNavCounts: async (keys: string[], user: { role: string }) => {
+    h.navKeys.push({ keys, role: user.role });
+    return Object.fromEntries(keys.map((k) => [k, h.nav[k] ?? 0]));
+  },
+}));
 vi.mock("./queries", () => ({
   worklist: async () => [],
   claimedByYou: async () => [{ id: "c1", refNo: "APR-1", line1: "Assign", sla: { text: "1 d overdue", overdue: true } }],
@@ -56,6 +66,8 @@ beforeEach(() => {
   h.historyKeys = [];
   h.history = {};
   h.counts = [];
+  h.nav = {};
+  h.navKeys = [];
 });
 
 describe("itOverview", () => {
@@ -113,6 +125,25 @@ describe("itOverview", () => {
 
   it("a viewer holds no claims", async () => {
     const o = await itOverview(user("viewer"), NOW);
+    expect(o.needsYou).toEqual([]);
+  });
+
+  it("the IT overview includes \"1 sent back to you\" and what waits for IT's check, first (Task 7, spec §7)", async () => {
+    h.nav = { itSentBack: 1, poWithIt: 3 };
+    const o = await itOverview(user("it_staff"), NOW);
+    expect(o.needsYou.map((n) => [n.tone, n.title, n.href])).toEqual([
+      ["bad", "1 sent back to you", "/inventory?reg=needs-correction&to=IT"],
+      ["bad", "APR-1 · Assign", "/approvals/c1"],
+      ["warn", "3 to check", "/purchases?state=WITH_IT"],
+    ]);
+    expect(h.navKeys).toEqual([{ keys: ["itSentBack", "poWithIt"], role: "it_staff" }]);
+  });
+
+  it("no card at 0, and a viewer (who can fix nothing) gets none", async () => {
+    let o = await itOverview(user("it_staff"), NOW);
+    expect(o.needsYou.map((n) => n.title)).toEqual(["APR-1 · Assign"]);
+    h.nav = { itSentBack: 2, poWithIt: 1 };
+    o = await itOverview(user("viewer"), NOW);
     expect(o.needsYou).toEqual([]);
   });
 });

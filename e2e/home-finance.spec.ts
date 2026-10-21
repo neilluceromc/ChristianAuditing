@@ -2,28 +2,18 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { regWhere } from "@/lib/registration";
+import { kpiValue } from "@/components/home/overview/chart-math";
+import { login } from "./fixtures/login";
 
 const db = new PrismaClient();
 
-async function login(page: Page, email: string) {
-  // /logout clears the session cookie and redirects to /login — going there
-  // directly (rather than /login) keeps this helper safe to call a second
-  // time mid-test to switch users (see auth-shell.spec.ts / approvals-audit.spec.ts).
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+  }).toPass({ timeout: 20_000 });
 }
 
 async function expectNoSeriousAxe(page: Page) {
@@ -38,8 +28,9 @@ async function expectNoSeriousAxe(page: Page) {
 //   BR-LT-0027 is MISSING. APR-2040 breached SLA, APR-2025 EXECUTION_FAILED,
 //   Dennis Ong offboarding, Karen Uy / Nina Robles recent hires short a
 //   required slot.
-//   PR-0198 SUBMITTED (bounced back from finance) · PR-0201 DRAFT ·
-//   PR-0195 IT_REVIEWED (₱45,000, reviewed 3 days ago).
+//   Purchase orders (migration 38): PO-0202 SENT_BACK by IT (J. Sarmiento) ·
+//   PO-0201 SENT_BACK, a pre-PO draft never sent · PO-0198 WITH_IT, whose last
+//   word is Finance's old request-info (L. Domingo).
 // Rows never reference raw cuids: the DB can be reseeded between runs and ids
 // are cuids that change on every seed.
 //
@@ -136,7 +127,11 @@ test.describe("home — claims sit above the pool", () => {
     const rows = await needsItems(page).evaluateAll((els) =>
       els.map((e) => ({ tone: e.getAttribute("data-tone"), claim: (e.textContent ?? "").includes("claimed by you"), apr: (e.textContent ?? "").includes("APR-2039") })));
     const at = rows.findIndex((r) => r.apr);
-    expect(rows.slice(0, at).filter((r) => r.tone === tone && !r.claim)).toEqual([]);
+    // Purchase orders (spec §7): the team's own cards ("N sent back to you", "N to check") lead the list; among the
+    // worklist's items, claims still come first within a tone.
+    const team = await needsItems(page).evaluateAll((els) =>
+      els.map((e) => /sent back to you|\d+ (purchase orders? )?to check/.test(e.textContent ?? "")));
+    expect(rows.slice(0, at).filter((r, i) => r.tone === tone && !r.claim && !team[i])).toEqual([]);
   });
 });
 
@@ -163,42 +158,67 @@ test.describe("home — viewer is read-only", () => {
 });
 
 test.describe("home — purchasing to-do", () => {
-  test("PR-0198 reads as bounced back, not merely waiting on IT; PR-0201 reads as still a draft", async ({ page }) => {
+  test("the Sent back card leads; PO-0202 reads as sent back by IT; PO-0201 is with you", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/");
 
-    const row0198 = needsItem(page, "PR-0198");
-    await expect(row0198).toContainText("came back from L. Domingo");
-    // A bounced request needs attention; a draft is only to do.
-    await expect(row0198).toHaveAttribute("data-tone", "warn");
-    await expect(row0198.getByRole("link", { name: /^Fix and resubmit/ })).toBeVisible();
+    // Spec §7: "N sent back to you", linked to the Sent back tab — the count is the tab's (state, never the bell).
+    const card = needsItem(page, "sent back to you");
+    await expect(card.first()).toContainText("2 purchase orders sent back to you");
+    await expect(card.first()).toHaveAttribute("data-tone", "bad");
+    await expect(card.first().getByRole("link", { name: /^Fix/ })).toHaveAttribute("href", "/purchases?state=SENT_BACK");
 
-    const row0201 = needsItem(page, "PR-0201");
-    await expect(row0201).toContainText("still a draft");
+    const row0202 = needsItem(page, "PO-0202");
+    await expect(row0202).toContainText("came back from J. Sarmiento");
+    // A PO that came back needs attention; a never-sent one is only to do.
+    await expect(row0202).toHaveAttribute("data-tone", "warn");
+    await expect(row0202.getByRole("link", { name: /^Fix and resubmit/ })).toBeVisible();
+
+    const row0201 = needsItem(page, "PO-0201");
+    await expect(row0201).toContainText("with you");
     await expect(row0201).toHaveAttribute("data-tone", "info");
-    await expect(row0201.getByRole("link", { name: /^Submit/ })).toBeVisible();
   });
 });
 
 test.describe("home — finance leads with money, not counts", () => {
-  test("the first tile reads ₱45,000 waiting on you, oldest 3 days; PR-0195 is to review", async ({ page }) => {
+  test("the first tile is the money waiting; Groups to review and N to check both open To review", async ({ page }) => {
     await login(page, "finance@thebackroomop.com");
     await page.goto("/");
 
-    // Spec §3.2: Finance's first tile is the money waiting, a plain card (no page shows that total).
+    // Spec §3.2: Finance's first tile is the money waiting, a plain card (no page shows that total). Purchase orders
+    // (Task 6): it is what the registration groups waiting in To review add up to — every asset with Finance that is
+    // not on a sent-back PO (REVIEW_GROUP_WHERE in server/modules/finance/groups.ts, built on the same regWhere), and
+    // the oldest group's age counts from its registration (the purchase record), or the asset when it has none.
+    const waiting = await db.asset.findMany({
+      where: {
+        AND: [
+          regWhere("with-finance"),
+          { OR: [{ purchaseOrderId: null }, { purchaseOrder: { is: { state: { not: "SENT_BACK" } } } }] },
+        ],
+      },
+      select: { cost: true, createdAt: true, purchaseRecord: { select: { createdAt: true } } },
+    });
+    expect(waiting.length, "the seed has assets waiting for Finance").toBeGreaterThan(0);
+    const total = waiting.reduce((s, a) => s + (a.cost === null ? 0 : Number(a.cost)), 0);
+    const oldest = Math.min(...waiting.map((a) => (a.purchaseRecord?.createdAt ?? a.createdAt).getTime()));
+    const days = Math.max(0, Math.round((Date.now() - oldest) / 86_400_000));
+    const { shown, exact } = kpiValue({ value: Math.round(total * 100) / 100, money: true });
+
     const first = page.locator("[data-kpis] > [data-kpi]").first();
     await expect(first).toHaveAttribute("data-kpi", "fin.waitingC");
     await expect(first).toContainText("Waiting on you");
-    await expect(first.locator("[data-kpi-value]")).toHaveText("₱45,000");
-    await expect(first).toContainText("oldest 3 days");
+    await expect(first.locator("[data-kpi-value]")).toHaveText(shown + (exact ?? ""));
+    await expect(first).toContainText(`oldest ${days} ${days === 1 ? "day" : "days"}`);
     await expect(page.locator('a[data-kpi="fin.waitingC"]')).toHaveCount(0);
-    // The count is the supporting tile beside it, linked to the requests it counts.
-    await expect(page.locator('a[data-kpi="fin.waitingCount"]')).toHaveAttribute("href", "/purchases?state=IT_REVIEWED");
+    // The count is the supporting tile beside it, linked to the queue it counts.
+    const count = page.locator('a[data-kpi="fin.waitingCount"]');
+    await expect(count).toHaveAttribute("href", "/finance/review");
+    await expect(count).toContainText("Groups to review");
 
-    const pr0195 = needsItem(page, "PR-0195");
-    await expect(pr0195).toBeVisible();
-    await expect(pr0195).toContainText("₱45,000");
-    await expect(pr0195.getByRole("link", { name: /^Review/ })).toBeVisible();
+    // Spec §7: the team card "N to check" leads Needs you and opens the same queue.
+    const toCheck = needsItem(page, "to check");
+    await expect(toCheck.first()).toHaveAttribute("data-tone", "warn");
+    await expect(toCheck.first().getByRole("link", { name: /^Review/ })).toHaveAttribute("href", "/finance/review");
   });
 });
 
@@ -258,21 +278,22 @@ test.describe("home — /finance/assets, the register", () => {
 
 test.describe("home — /finance/activity", () => {
   test("rows render with a domain pill (PURCHASE / ASSET)", async ({ page }) => {
-    // A freshly reseeded DB has NO AuditEntry rows at all — the seed script
-    // only ever inserts entityType "asset" entries directly; entityType
-    // "purchase-request" entries are written exclusively by real purchase
-    // actions. So "Finance activity" legitimately reads "No money has moved
-    // yet" until something actually moves — this is the same reason
-    // purchases.spec.ts's own activity check runs LAST in that file, after
-    // its serial block has performed real transitions. This file reseeds
-    // independently, so it needs its own transition: IT marks PR-0198
-    // reviewed, which writes one entityType "purchase-request" AuditEntry.
+    // A freshly reseeded DB has NO purchase AuditEntry rows — the seed only
+    // inserts entityType "asset" entries directly; "purchase-order" entries are
+    // written exclusively by real purchase actions. This file reseeds
+    // independently, so it needs its own transition: IT sends PO-0198 back to
+    // Purchasing, which writes one entityType "purchase-order" AuditEntry.
     await login(page, "it@thebackroomop.com");
     await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "Mark IT-reviewed" }).click();
-    await expect(page.locator("main header").first()).toContainText("IT_REVIEWED", { timeout: 15_000 });
+    await page.getByRole("link", { name: "PO-0198" }).click();
+    await expect(page.getByRole("heading", { name: "PO-0198" })).toBeVisible({ timeout: 15_000 });
+    const sendBack = page.getByRole("button", { name: "Send back to Purchasing" });
+    await waitForHydration(sendBack);
+    await sendBack.click();
+    const dialog = page.getByRole("dialog", { name: "Send PO-0198 back to Purchasing" });
+    await dialog.getByLabel("SI number").check();
+    await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+    await expect(page.locator("main header").first()).toContainText("Sent back to Purchasing", { timeout: 15_000 });
 
     await login(page, "finance@thebackroomop.com");
     await page.goto("/finance/activity");
@@ -281,7 +302,7 @@ test.describe("home — /finance/activity", () => {
     const rows = page.locator("ol li");
     await expect(rows.first()).toBeVisible();
     await expect(page.getByText("PURCHASE").first()).toBeVisible();
-    await expect(rows.filter({ hasText: "PR-0198" }).first()).toBeVisible();
+    await expect(rows.filter({ hasText: "PO-0198" }).first()).toBeVisible();
   });
 });
 

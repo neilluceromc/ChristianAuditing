@@ -16,7 +16,7 @@ export default async function NewSupplierPage() {
       <PageHeader
         title="New supplier"
         breadcrumb={[
-          { label: "Purchase requests", href: "/purchases" },
+          { label: "Purchase orders", href: "/purchases" },
           { label: "Suppliers", href: "/purchases/suppliers" },
           { label: "New" },
         ]}

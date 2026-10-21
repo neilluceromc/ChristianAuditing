@@ -201,3 +201,90 @@ export function reopenReasonError(reason: string): string | null {
   const n = cleanReason(reason).length;
   return n < REOPEN_REASON_MIN || n > REOPEN_REASON_MAX ? REOPEN_REASON_MESSAGE : null;
 }
+
+// ---- a registration group (Task 6, spec §5) --------------------------------------------------------------------------
+
+/**
+ * Approve all on a group: "Approved 3 from PO-0214 · 1 held back", and Undo for the whole action (approvals and
+ * hold-backs together, undoGroupAction). With nothing approved it says what went back instead.
+ */
+export function groupApproveToast(
+  r: { recordId: string; refNo: string | null; approved: number; heldBack: number },
+  undo: (recordId: string) => void,
+): ToastSpec {
+  const from = r.refNo ? `from ${r.refNo}` : "from this registration";
+  const message = r.approved > 0
+    ? `Approved ${r.approved} ${from}${r.heldBack > 0 ? ` · ${r.heldBack} held back` : ""}`
+    : `Sent ${r.heldBack} ${from} back`;
+  return { message, actions: [{ label: "Undo", onAction: () => undo(r.recordId) }] };
+}
+
+/**
+ * Why an asset can't be approved with this "Not capitalised" setting (the server's rule, approveRefusal): not
+ * capitalised means no cost, and an asset with no cost can't be capitalised. Null when it fits.
+ */
+export function groupNotCapIssue(a: { cost: number | null; notCapitalised: boolean }): string | null {
+  if (a.notCapitalised && a.cost !== null) return "Has a cost, so it is capitalised";
+  if (!a.notCapitalised && a.cost === null) return "No cost: approve it as not capitalised, or hold it back";
+  return null;
+}
+
+/** Undo on a group (the toast's or the banner's): the server re-checks everything, all or nothing. */
+export async function runGroupUndo(
+  recordId: string,
+  deps: {
+    call: (input: { recordId: string }) => Promise<ActionResult<{ undone: number; refNo: string | null }>>;
+    toast: (message: string, tone: "settled" | "fault") => void;
+    refresh: () => void;
+  },
+): Promise<boolean> {
+  let res: ActionResult<{ undone: number; refNo: string | null }>;
+  try {
+    res = await deps.call({ recordId });
+  } catch {
+    deps.toast("Couldn't undo: the server didn't answer. Reload and try again.", "fault");
+    return false;
+  }
+  if (res.ok) {
+    deps.toast(`Undid the review of ${res.data.undone} ${res.data.refNo ? `from ${res.data.refNo}` : "from this registration"}`, "settled");
+    deps.refresh();
+    return true;
+  }
+  if (res.kind === "rate_limited") deps.toast(`Too many changes just now. Try Undo again in ${res.retryAfterSec ?? 60} s.`, "fault");
+  else deps.toast(Object.values(res.fieldErrors ?? {})[0] ?? res.message, "fault");
+  return false;
+}
+
+// ---- a PO's send-back (Task 6 fix round 1) ---------------------------------------------------------------------------
+
+/** "PO-0214 sent back to Purchasing", with Undo for the whole send-back (undoPoSendBack). */
+export function poSendBackToast(r: { id: string; refNo: string }, undo: (poId: string) => void): ToastSpec {
+  return { message: `${r.refNo} sent back to Purchasing`, actions: [{ label: "Undo", onAction: () => undo(r.id) }] };
+}
+
+/** Undo on a PO's send-back (the toast's or the banner's): the server re-checks everything, all or nothing. */
+export async function runPoSendBackUndo(
+  poId: string,
+  deps: {
+    call: (input: { id: string }) => Promise<ActionResult<{ refNo: string; undone: number }>>;
+    toast: (message: string, tone: "settled" | "fault") => void;
+    refresh: () => void;
+  },
+): Promise<boolean> {
+  let res: ActionResult<{ refNo: string; undone: number }>;
+  try {
+    res = await deps.call({ id: poId });
+  } catch {
+    deps.toast("Couldn't undo: the server didn't answer. Reload and try again.", "fault");
+    return false;
+  }
+  if (res.ok) {
+    const back = res.data.undone > 0 ? ` · ${res.data.undone} ${res.data.undone === 1 ? "asset" : "assets"} back to To review` : "";
+    deps.toast(`Undid sending ${res.data.refNo} back${back}`, "settled");
+    deps.refresh();
+    return true;
+  }
+  if (res.kind === "rate_limited") deps.toast(`Too many changes just now. Try Undo again in ${res.retryAfterSec ?? 60} s.`, "fault");
+  else deps.toast(Object.values(res.fieldErrors ?? {})[0] ?? res.message, "fault");
+  return false;
+}

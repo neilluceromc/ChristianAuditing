@@ -7,7 +7,7 @@ import type { Prisma } from "@prisma/client";
  */
 
 const h = vi.hoisted(() => ({
-  prWheres: [] as Prisma.PurchaseRequestWhereInput[],
+  prWheres: [] as Prisma.PurchaseOrderWhereInput[],
   approvalWheres: [] as Prisma.ApprovalWhereInput[],
   deliveryArgs: [] as unknown[],
   completed: [] as unknown[],
@@ -16,10 +16,10 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/server/db/client", () => ({
   prisma: {
-    purchaseRequest: {
-      findMany: async ({ where }: { where: Prisma.PurchaseRequestWhereInput }) => {
+    purchaseOrder: {
+      findMany: async ({ where }: { where: Prisma.PurchaseOrderWhereInput }) => {
         h.prWheres.push(where);
-        return where.state === "COMPLETED" ? h.completed : [];
+        return where.state === "READY" ? h.completed : [];
       },
       groupBy: async () => [],
     },
@@ -62,13 +62,13 @@ beforeEach(() => {
 });
 
 describe("completedSpend", () => {
-  it("completedSpend reads COMPLETED requests since the bound and values each one", async () => {
-    h.completed = [{ completedAt: new Date("2026-10-19T02:00:00Z"), units: units(10.5), vendor: { name: "Acme" }, department: { name: "Ops" } }];
+  it("completedSpend reads the old COMPLETED requests (READY, migration 38) since the bound and values each one", async () => {
+    h.completed = [{ completedAt: new Date("2026-10-19T02:00:00Z"), lines: units(10.5), vendor: { name: "Acme" }, department: { name: "Ops" } }];
     const since = new Date("2026-10-01T00:00:00Z");
     expect(await completedSpend(since)).toEqual([
       { at: new Date("2026-10-19T02:00:00Z"), amount: 10.5, supplier: "Acme", department: "Ops" },
     ]);
-    expect(h.prWheres).toEqual([{ state: "COMPLETED", completedAt: { gte: since } }]);
+    expect(h.prWheres).toEqual([{ state: "READY", completedAt: { gte: since } }]);
   });
 });
 

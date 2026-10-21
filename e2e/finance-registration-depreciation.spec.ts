@@ -3,10 +3,10 @@ import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { asOfMonth, depStartMonth, depreciate, manilaMonth, monthLabel, resolvePolicy, type MonthIndex } from "@/lib/depreciation";
 import { fmtMoneyExact } from "@/lib/format";
 import { COLUMN_PREF_KEYS, INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 35, Task 12: registration review + Finance asset register + depreciation, twelve independent cases.
@@ -70,24 +70,6 @@ async function chooseRegistrationColumn(email: string) {
   }
 }
 
-// Copied from e2e/queues-records-ux.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
-
 async function expectNoSeriousAxe(page: Page) {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(700);
@@ -101,6 +83,20 @@ async function waitForHydration(target: Locator) {
   await expect(async () => {
     expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
   }).toPass({ timeout: 20_000 });
+}
+
+/** Finance's "Fix money details" on its asset page: a cost with a reason (purchase-orders spec §5). */
+async function fixCostOnFinancePage(page: Page, id: string, tag: string, cost: string) {
+  await page.goto(`/finance/assets/${id}`);
+  const fix = page.getByRole("button", { name: "Fix money details" });
+  await waitForHydration(fix);
+  await fix.click();
+  const dialog = page.getByRole("dialog", { name: `Fix money details on ${tag}` });
+  await dialog.getByLabel("Cost ₱").fill(cost);
+  await dialog.getByRole("textbox", { name: "Reason" }).fill("e2e: the invoice shows a price after all");
+  await dialog.getByRole("button", { name: "Save fix" }).click();
+  await expect(page.locator("[data-toast-id]").filter({ hasText: `${tag}: fixed the money details` })).toBeVisible();
+  await expect.poll(async () => (await db.asset.findUniqueOrThrow({ where: { id } })).financeConfirmedAt).toBeNull();
 }
 
 /** Opens a menu (retried until its island has hydrated) and returns the open menu. */
@@ -183,6 +179,7 @@ const thisYear = () => Math.floor(manilaMonth(new Date()) / 12);
 
 test.describe("Phase 35 — registration review, the Finance register, depreciation", () => {
   test("1. registration round trip: send back with a checklist, Edit flags, Mark corrected with a reply, Approve", async ({ page }) => {
+    test.setTimeout(90_000); // several sign-ins on a cold dev server
     const tag = "BR-HS-0502";
     const before = await snap(tag);
     try {
@@ -200,16 +197,18 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await page.goto(`/finance/assets/${id}`);
       const review = page.getByRole("region", { name: "Review" });
       await expect(review).toBeVisible();
-      const sendBack = review.getByRole("button", { name: "Send back to IT…" });
+      const sendBack = review.getByRole("button", { name: "Send back…" });
       await waitForHydration(sendBack);
       await sendBack.click();
-      const dialog = page.getByRole("dialog", { name: `Send ${tag} back to IT` });
+      const dialog = page.getByRole("dialog", { name: `Send ${tag} back` });
       await expect(dialog).toBeVisible();
       await dialog.getByLabel("Cost", { exact: true }).check();
       await dialog.getByLabel("Sales invoice").check();
+      // Task 6 (purchase-orders spec §5): Finance picks the team; money on a direct registration goes to IT here.
+      await dialog.getByLabel("Send to").selectOption("IT");
       await dialog.getByLabel("Note for IT").fill("Invoice is for another PO");
       await expect(dialog).toContainText("2 ticked");
-      await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+      await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
       await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${tag} back to IT` })).toBeVisible();
 
       await login(page, IT);
@@ -255,7 +254,10 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     }
   });
 
-  test("2. no cost: Approve as not capitalised, the chip, then IT's cost reopens Finance's review", async ({ page }) => {
+  // Purchase orders (spec §5): once approved, money locks for IT and Purchasing — the "a cost reopens a not-capitalised
+  // approval" path is now Finance's own fix, with a reason.
+  test("2. no cost: Approve as not capitalised, the chip, then Finance's cost fix reopens the review", async ({ page }) => {
+    test.setTimeout(90_000); // several sign-ins on a cold dev server
     const tag = "BR-MN-0911";
     const before = await snap(tag);
     try {
@@ -277,14 +279,9 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await expect(page.getByRole("navigation", { name: "Finance state" }).getByRole("link", { name: /^Not capitalised/ })).toHaveAttribute("aria-current", "page");
       await expect(row(page, tag)).toBeVisible();
 
-      await login(page, IT);
-      await page.goto(`/inventory/${id}/edit`);
-      const cost = page.getByLabel(/^Cost/);
-      await waitForHydration(cost);
-      await cost.fill("500");
-      await page.getByRole("button", { name: "Save changes" }).click();
-      await page.waitForURL((u) => u.pathname === `/inventory/${id}`);
+      await fixCostOnFinancePage(page, id, tag, "500");
 
+      await login(page, IT);
       await page.goto(`/inventory?q=${listQ(tag)}`);
       await expect(row(page, tag)).toContainText("With Finance");
       const after = await db.asset.findUniqueOrThrow({ where: { id } });
@@ -601,10 +598,10 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await expectNoSeriousAxe(page);
 
       await page.goto(`/finance/assets/${before.id}`);
-      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back…" });
       await waitForHydration(sendBack);
       await sendBack.click();
-      await expect(page.getByRole("dialog", { name: `Send ${tag} back to IT` })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: `Send ${tag} back` })).toBeVisible();
       await expectNoSeriousAxe(page);
     } finally {
       // Put IT's column choice back exactly as it was (the file's starting choice, with Registration).
@@ -615,7 +612,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await restore(tag, before);
     }
   });
-  test("13. legacy approval with no cost (confirmed, flag off): IT adding a cost reopens Finance's review", async ({ page }) => {
+  test("13. legacy approval with no cost (confirmed, flag off): Finance adding a cost reopens the review", async ({ page }) => {
     const tag = "BR-MN-0910";
     const before = await snap(tag);
     try {
@@ -624,19 +621,15 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       const id = before.id;
       const reopened0 = await auditCount(id, "finance.reopened");
 
-      await login(page, IT);
-      await page.goto(`/inventory/${id}/edit`);
-      const cost = page.getByLabel(/^Cost/);
-      await waitForHydration(cost);
-      await cost.fill("750");
-      await page.getByRole("button", { name: "Save changes" }).click();
-      await page.waitForURL((u) => u.pathname === `/inventory/${id}`);
+      await login(page, FINANCE);
+      await fixCostOnFinancePage(page, id, tag, "750");
 
       const after = await db.asset.findUniqueOrThrow({ where: { id } });
       expect(after.financeConfirmedAt).toBeNull();
       expect(after.financeConfirmedById).toBeNull();
       expect(after.financeNotCapitalised).toBe(false);
       expect(await auditCount(id, "finance.reopened")).toBe(reopened0 + 1);
+      await login(page, IT);
       await page.goto(`/inventory?q=${listQ(tag)}`);
       await expect(row(page, tag)).toContainText("With Finance");
     } finally {

@@ -56,7 +56,7 @@ function asset(extra: Row = {}): Row {
     warrantyCoveredBy: "Dell PH", warrantyContact: null, purchaseRecordId: "pr1",
     category: { name: "Laptops", depreciationLifeMonths: 36, depreciationSalvagePercent: "10" },
     assignee: { name: "Carla Diaz" }, vendor: { name: "Octagon" },
-    purchaseRequest: { id: "req1", refNo: "PR-2025-0012", requestedBy: { name: "Pia Lim" }, units: [{ qty: 3, unitPrice: "36000.00" }] },
+    purchaseOrder: { id: "req1", refNo: "PR-2025-0012", requestedBy: { name: "Pia Lim" }, units: [{ qty: 3, unitPrice: "36000.00" }] },
     purchaseRecord: { id: "pr1", fees: "1500.00", quantity: 3 },
     documents: [
       { id: "d1", kind: "invoice", fileName: "invoice.pdf", size: 120_000, createdAt: new Date("2026-01-01T00:00:00Z") },

@@ -10,11 +10,13 @@ import { writeAudit } from "@/server/audit";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import type { AuditDiff } from "@/lib/audit-diff";
 import { cleanReason } from "@/lib/reason";
-import { fieldLabels } from "@/lib/registration";
 import {
-  approveRestore, REOPEN_REASON_MAX, REOPEN_REASON_MESSAGE, REOPEN_REASON_MIN, sendBackRestore, settingsRestore, undoCheck,
+  groupUndoCheck, REOPEN_REASON_MAX, REOPEN_REASON_MESSAGE, REOPEN_REASON_MIN, settingsRestore, undoCheck,
   UNDO_KINDS, UNDONE_ACTION, type UndoKind,
 } from "@/lib/finance-undo";
+import { lockPo } from "@/server/modules/purchases/po-lock";
+import { undoOne } from "./review-writes";
+import { GROUP_ASSET_SELECT, lockGroupAssets, revalidateGroup, StaleGroupError } from "./group-shared";
 
 /*
  * Finance follow-up (spec §3): Undo for Finance's review actions, and the admin's Reopen review. Every rule runs here,
@@ -97,57 +99,34 @@ export async function undoFinanceAction(input: unknown): Promise<ActionResult<{ 
     }
     const original = check.entry;
 
-    let diff: AuditDiff;
-    let hit: { count: number };
-    if (kind === "approve") {
-      const back = approveRestore(original.diff);
-      // State-guarded like the approval itself: the approval read above, by this person, is the one being undone.
-      hit = await tx.asset.updateMany({
-        where: { id: asset.id, financeConfirmedAt: asset.financeConfirmedAt, financeConfirmedById: user.id, financeReturnedAt: null },
-        data: {
-          financeConfirmedAt: null, financeConfirmedById: null,
-          financeNotCapitalised: back.notCapitalised, financeResubmitNote: back.resubmitNote,
-        },
-      });
-      diff = {
-        financeConfirmed: { from: user.name, to: null },
-        review: { from: "Approved", to: "To review" },
-        ...(asset.financeNotCapitalised !== back.notCapitalised
-          ? { notCapitalised: { from: asset.financeNotCapitalised, to: back.notCapitalised } } : {}),
-      };
-    } else if (kind === "send-back") {
-      const back = sendBackRestore(original.diff);
-      hit = await tx.asset.updateMany({
-        where: { id: asset.id, financeConfirmedAt: null, financeReturnedAt: asset.financeReturnedAt, financeReturnedById: user.id },
-        data: {
-          financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null, financeReturnFields: [],
-          financeResubmitNote: back.resubmitNote,
-        },
-      });
-      diff = {
-        review: { from: "Sent back", to: "To review" },
-        flagged: { from: fieldLabels(asset.financeReturnFields), to: null },
-      };
-    } else {
-      const back = settingsRestore(original.diff)!; // undoCheck refused an entry without its earlier values
-      if (back.lifeMonths !== null && (asset.cost === null || back.salvage! >= Number(asset.cost))) {
-        failure = conflict(`Can't undo: the earlier salvage no longer fits ${asset.tag}'s cost.`);
+    if (kind !== "settings") {
+      // Approve or send back: the shared per-asset undo (review-writes.ts), state-guarded like the action itself — the
+      // one read above, by this person, is the one being undone. The group undo runs the same write per asset.
+      if (!(await undoOne(tx, asset, kind, original.diff, user))) {
+        failure = conflict(RACE(asset.tag));
         return;
       }
-      hit = await tx.asset.updateMany({
-        where: {
-          id: asset.id, depreciationLifeMonths: asset.depreciationLifeMonths, depreciationSalvage: asset.depreciationSalvage,
-          depreciationNote: asset.depreciationNote,
-        },
-        data: { depreciationLifeMonths: back.lifeMonths, depreciationSalvage: back.salvage, depreciationNote: back.note },
-      });
-      const salvageNow = asset.depreciationSalvage === null ? null : Number(asset.depreciationSalvage);
-      diff = {
-        lifeMonths: { from: asset.depreciationLifeMonths, to: back.lifeMonths },
-        salvage: { from: salvageNow, to: back.salvage },
-        depreciationNote: { from: asset.depreciationNote, to: back.note },
-      };
+      out = { tag: asset.tag, id: asset.id };
+      return;
     }
+    const back = settingsRestore(original.diff)!; // undoCheck refused an entry without its earlier values
+    if (back.lifeMonths !== null && (asset.cost === null || back.salvage! >= Number(asset.cost))) {
+      failure = conflict(`Can't undo: the earlier salvage no longer fits ${asset.tag}'s cost.`);
+      return;
+    }
+    const hit = await tx.asset.updateMany({
+      where: {
+        id: asset.id, depreciationLifeMonths: asset.depreciationLifeMonths, depreciationSalvage: asset.depreciationSalvage,
+        depreciationNote: asset.depreciationNote,
+      },
+      data: { depreciationLifeMonths: back.lifeMonths, depreciationSalvage: back.salvage, depreciationNote: back.note },
+    });
+    const salvageNow = asset.depreciationSalvage === null ? null : Number(asset.depreciationSalvage);
+    const diff: AuditDiff = {
+      lifeMonths: { from: asset.depreciationLifeMonths, to: back.lifeMonths },
+      salvage: { from: salvageNow, to: back.salvage },
+      depreciationNote: { from: asset.depreciationNote, to: back.note },
+    };
     if (hit.count === 0) {
       failure = conflict(RACE(asset.tag));
       return;
@@ -216,5 +195,149 @@ export async function reopenFinanceReview(input: unknown): Promise<ActionResult<
 
   if (failure) return failure;
   revalidateAsset(assetId);
+  return ok(out!);
+}
+
+// ---- a whole group (Task 6, spec §5) -------------------------------------------------------------------------------
+
+const groupSchema = z.object({ recordId: z.string().min(1) });
+const reopenGroupSchema = z.object({
+  recordId: z.string().min(1),
+  reason: z.string().overwrite(cleanReason).min(REOPEN_REASON_MIN, REOPEN_REASON_MESSAGE).max(REOPEN_REASON_MAX, REOPEN_REASON_MESSAGE),
+});
+
+/** Enough of a group's audit trail to find the person's latest group action and each asset's latest finance change. */
+const GROUP_ENTRIES = 500;
+
+/** The registration, and — a PO group — its PO row locked first, then the group's asset rows (the approve's order). */
+async function lockGroup(tx: Prisma.TransactionClient, recordId: string) {
+  const record = await tx.purchaseRecord.findUnique({ where: { id: recordId }, select: { id: true, purchaseOrderId: true } });
+  if (!record) return null;
+  let refNo: string | null = null;
+  if (record.purchaseOrderId) {
+    await lockPo(tx, record.purchaseOrderId);
+    refNo = (await tx.purchaseOrder.findUnique({ where: { id: record.purchaseOrderId }, select: { refNo: true } }))?.refNo ?? null;
+  }
+  await lockGroupAssets(tx, recordId);
+  const assets = await tx.asset.findMany({ where: { purchaseRecordId: recordId }, select: GROUP_ASSET_SELECT });
+  return { poId: record.purchaseOrderId, refNo, assets };
+}
+
+/**
+ * Undo the person's own latest Approve all on a group — its approvals and its hold-backs — as one action (spec §5): within
+ * 15 minutes, and only while each asset's entry from it is still that asset's latest finance change (`groupUndoCheck`
+ * runs `undoCheck` per asset). The first asset that fails refuses the whole undo, with its reason; nothing is written.
+ * Each asset gets its own undone entry. A PO that the action completed keeps its `completedAt`: its webhooks have gone,
+ * and approving again must not send them twice.
+ */
+export async function undoGroupAction(input: unknown): Promise<ActionResult<{ undone: number; refNo: string | null }>> {
+  const user = await actionRole("admin", "finance_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = groupSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { recordId } = parsed.data;
+
+  type Out = { undone: number; refNo: string | null };
+  let out: Out | null = null;
+  let failure: ActionResult<Out> | null = null;
+  let poId: string | null = null;
+  let ids: string[] = [];
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const group = await lockGroup(tx, recordId);
+      if (!group) { failure = validationError({ recordId: "Unknown registration" }); return; }
+      poId = group.poId;
+      const entries = await tx.auditEntry.findMany({
+        where: {
+          OR: [
+            { entityType: "asset", entityId: { in: group.assets.map((a) => a.id) } },
+            { entityType: "purchase-record", entityId: recordId },
+          ],
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: GROUP_ENTRIES,
+        select: { id: true, actorId: true, actorLabel: true, entityType: true, entityId: true, action: true, diff: true, createdAt: true },
+      });
+      const check = groupUndoCheck(recordId, group.assets, entries, user.id, new Date());
+      if (!check.ok) { failure = conflict(check.reason); return; }
+
+      const meta = { group: { from: null, to: recordId } };
+      for (const item of check.items) {
+        const asset = group.assets.find((a) => a.id === item.assetId)!;
+        if (item.kind === "settings") throw new StaleGroupError(asset.tag); // a group action never changes settings
+        if (!(await undoOne(tx, asset, item.kind, item.entry.diff, user, meta))) throw new StaleGroupError(asset.tag);
+      }
+      ids = check.items.map((i) => i.assetId);
+      out = { undone: check.items.length, refNo: group.refNo };
+    });
+  } catch (err) {
+    if (err instanceof StaleGroupError) return conflict(RACE(err.tag));
+    throw err;
+  }
+
+  if (failure) return failure;
+  revalidateGroup(recordId, ids, poId);
+  revalidatePath("/inventory");
+  return ok(out!);
+}
+
+/**
+ * An admin reopens every approved asset of a group at once (spec §5, "also available for a whole group"), with a
+ * reason, at any time: each goes back to To review with its own `finance.confirm.reopened` entry, as the per-asset
+ * Reopen review writes.
+ */
+export async function reopenGroup(input: unknown): Promise<ActionResult<{ reopened: number; refNo: string | null }>> {
+  const user = await actionRole("admin");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = reopenGroupSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { recordId, reason } = parsed.data;
+
+  type Out = { reopened: number; refNo: string | null };
+  let out: Out | null = null;
+  let failure: ActionResult<Out> | null = null;
+  let poId: string | null = null;
+  let ids: string[] = [];
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const group = await lockGroup(tx, recordId);
+      if (!group) { failure = validationError({ recordId: "Unknown registration" }); return; }
+      poId = group.poId;
+      const approved = group.assets.filter((a) => a.financeConfirmedAt !== null);
+      if (approved.length === 0) { failure = conflict("Nothing in this group is approved, so there is no review to reopen."); return; }
+      for (const a of approved) {
+        const hit = await tx.asset.updateMany({
+          where: { id: a.id, financeConfirmedAt: { not: null } },
+          data: { financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false },
+        });
+        if (hit.count === 0) throw new StaleGroupError(a.tag);
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: a.id,
+          action: "finance.confirm.reopened",
+          diff: {
+            review: { from: "Approved", to: "To review" },
+            ...(a.financeNotCapitalised ? { notCapitalised: { from: true, to: false } } : {}),
+            group: { from: null, to: recordId },
+          },
+          reason, source: "web",
+        });
+      }
+      ids = approved.map((a) => a.id);
+      out = { reopened: approved.length, refNo: group.refNo };
+    });
+  } catch (err) {
+    if (err instanceof StaleGroupError) return conflict(RACE(err.tag));
+    throw err;
+  }
+
+  if (failure) return failure;
+  revalidateGroup(recordId, ids, poId);
+  revalidatePath("/inventory");
   return ok(out!);
 }

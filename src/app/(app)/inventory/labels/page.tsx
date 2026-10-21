@@ -9,7 +9,7 @@ import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
 import { LabelSheet, QR_NOTE, type LabelRow } from "@/components/inventory/label-sheet";
 import { TagsBox } from "@/components/inventory/tags-box";
-import { NewEquipmentTabs } from "@/components/inventory/new-equipment-tabs";
+import { NewEquipmentTabs, registerLink } from "@/components/inventory/new-equipment-tabs";
 import { LabelQueueForm } from "@/components/inventory/label-queue-form";
 import { PrintLabelsButton } from "@/components/inventory/print-labels-button";
 import { labelQueue, labelScope, queueCount } from "@/server/modules/inventory/label-queue";
@@ -19,7 +19,7 @@ import { qrBase } from "@/lib/label-qr";
 import { parseTagPaste } from "@/lib/tag-paste";
 import { categoryNoun } from "@/lib/register-catalog";
 import type { AssetClass } from "@prisma/client";
-import { MANAGEABLE_CLASSES, parseCls, withClsQS } from "@/lib/asset-class";
+import { MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, parseCls, withClsQS } from "@/lib/asset-class";
 
 type Params = Record<string, string | string[] | undefined>;
 type SheetRow = LabelRow & { id: string; cls: AssetClass };
@@ -90,6 +90,8 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
     return [{ label: listLabel, href: listHref }, { label: "Labels" }];
   };
   const waiting = await queueCount(manageable, user.id);
+  // Spec §4: Purchasing registers only from a purchase order, so its "register more" goes to its POs.
+  const direct = REGISTRABLE_CLASSES[user.role].length > 0;
 
   // Refuse, never slice (the defect §8 records for the export route's ?ids=).
   // The same sentence for a pasted list as for a selection (spec §10).
@@ -98,7 +100,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
     return (
       <>
         <PageHeader title="New equipment" breadcrumb={crumbFor(cls)} />
-        <NewEquipmentTabs active="labels" cls={cls} waiting={waiting} />
+        <NewEquipmentTabs active="labels" cls={cls} waiting={waiting} direct={direct} />
         <Banner tone="fault" title={`That selection is ${asked} assets, over the ${BULK_MAX}-asset label cap. Narrow the selection and try again. Nothing was printed.`} />
         {tags.length > 0 && (
           <div className="pt-4"><TagsBox mode="tags" tags={tagsRaw} start={start} cls={cls} /></div>
@@ -162,7 +164,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
     <>
       <div className="print:hidden">
         <PageHeader title="New equipment" breadcrumb={crumbFor(cls)} />
-        <NewEquipmentTabs active="labels" cls={cls} waiting={waiting} />
+        <NewEquipmentTabs active="labels" cls={cls} waiting={waiting} direct={direct} />
         <div className="flex flex-col gap-2 pb-4 empty:hidden">
           {docsFailed > 0 && (
             <Banner tone="attention" title={`${plural(docsFailed, "document")} could not be attached.`}>
@@ -247,7 +249,7 @@ export default async function LabelsPage({ searchParams }: { searchParams: Promi
             <p className="text-[13px] text-fg">{summaryLine(rows.length, start, sheets)}</p>
             <div className="flex flex-wrap gap-2">
               <PrintLabelsButton count={rows.length} waitingAssetIds={stampIds} />
-              <ButtonLink href={"/inventory/register" + withClsQS("", cls)}>Register more</ButtonLink>
+              <ButtonLink href={registerLink(direct, cls).href}>Register more</ButtonLink>
             </div>
           </div>
         </div>

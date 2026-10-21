@@ -43,7 +43,7 @@ export default async function SuppliersPage({
     <>
       <PageHeader
         title="Suppliers"
-        breadcrumb={[{ label: "Purchase requests", href: "/purchases" }, { label: "Suppliers" }]}
+        breadcrumb={[{ label: "Purchase orders", href: "/purchases" }, { label: "Suppliers" }]}
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={actions}
       />

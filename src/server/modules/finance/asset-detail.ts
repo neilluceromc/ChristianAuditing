@@ -24,6 +24,8 @@ export interface FinanceAssetDetail {
   approvedBy: string | null; approvedAt: Date | null; notCapitalised: boolean;
   /** When Finance last sent it back (`financeReturnedAt`): the Undo banner's rules read it (finance-undo.ts). */
   returnedAt: Date | null;
+  /** Task 6: the team Finance sent it back to; null when not sent back or sent back before teams were recorded. */
+  returnedTo: "IT" | "PURCHASING" | "FINANCE" | null;
   costC: number | null; result: DepResult | null; note: string | null; policyText: string; custom: boolean;
   lifeMonths: number | null; salvageC: number | null;
   startLabel: string | null; endLabel: string | null; monthsUsed: number | null;
@@ -61,7 +63,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       category: true,
       assignee: { select: { name: true } },
       vendor: { select: { name: true } },
-      purchaseRequest: {
+      purchaseOrder: {
         select: { id: true, refNo: true, requestedBy: { select: { name: true } } },
       },
       purchaseRecord: { select: { id: true, fees: true, quantity: true } },
@@ -120,7 +122,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
             entityType: "asset", entityId: a.id,
             OR: [
               // asset.return.undone: the send-back's undo (finance follow-up); the other undos start with finance./depreciation.
-              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update", "asset.return.undone"] } },
+              // asset.money.fixed: a PO-level money fix reaching this asset (spec §6), with its reason
+              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update", "asset.return.undone", "asset.money.fixed"] } },
               { action: { startsWith: "finance." } },
               { action: { startsWith: "depreciation." } },
               { action: { startsWith: "document." } },
@@ -163,6 +166,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     returnSummary: returnSummary(a), resubmitNote: a.financeResubmitNote,
     approvedBy: a.financeConfirmedBy?.name ?? null, approvedAt: a.financeConfirmedAt, notCapitalised: a.financeNotCapitalised,
     returnedAt: a.financeReturnedAt,
+    returnedTo: a.financeReturnedAt ? a.financeReturnedTo : null,
     costC, result, note, policyText, custom: policy?.basis === "custom",
     lifeMonths: policy?.lifeMonths ?? null, salvageC: policy?.salvage ?? null,
     startLabel: startOk ? monthLabel(start) : null,
@@ -178,8 +182,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       baseC: costC !== null && policy ? costC - policy.salvage : null,
     },
     purchase: {
-      pr: a.purchaseRequest ? { id: a.purchaseRequest.id, refNo: a.purchaseRequest.refNo } : null,
-      requestedBy: a.purchaseRequest?.requestedBy.name ?? null,
+      pr: a.purchaseOrder ? { id: a.purchaseOrder.id, refNo: a.purchaseOrder.refNo } : null,
+      requestedBy: a.purchaseOrder?.requestedBy.name ?? null,
       supplier: a.vendor?.name ?? null,
       invoiceRef: a.invoiceRef, receiptRef: a.receiptRef, purchasedAt: a.purchasedAt,
       warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy,

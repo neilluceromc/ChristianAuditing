@@ -6,6 +6,12 @@ import type { ListConfig, ListState } from "./url-state";
 export const ACTIVITY_FEEDS = ["inventory", "employees", "finance", "purchases"] as const;
 export type ActivityFeed = (typeof ACTIVITY_FEEDS)[number];
 
+/**
+ * Migration 38: purchase orders write entityType "purchase-order"; the old requests' history says "purchase-request".
+ * Every reader treats the two alike, so history keeps its links.
+ */
+export const PURCHASE_ENTITY_TYPES = ["purchase-order", "purchase-request"] as const;
+
 export const ACTIVITY_LIST_CONFIG: ListConfig = { facets: ["action"], sortable: [], defaultSort: [] };
 
 /**
@@ -22,8 +28,8 @@ export function feedWhere(feed: ActivityFeed, hidden: HiddenAuditRefs): Prisma.A
   switch (feed) {
     case "inventory": return assetRows();
     case "employees": return { entityType: "employee" };
-    case "finance": return { OR: [{ entityType: "purchase-request" }, assetRows({ diff: { path: ["cost"], not: Prisma.DbNull } })] };
-    case "purchases": return { entityType: "purchase-request" };
+    case "finance": return { OR: [{ entityType: { in: [...PURCHASE_ENTITY_TYPES] } }, assetRows({ diff: { path: ["cost"], not: Prisma.DbNull } })] };
+    case "purchases": return { entityType: { in: [...PURCHASE_ENTITY_TYPES] } };
   }
 }
 

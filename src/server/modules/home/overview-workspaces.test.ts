@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   spendSince: [] as Date[],
   capitalizedSince: [] as Date[],
   directSince: [] as Date[],
+  nav: {} as Record<string, number>,
+  navKeys: [] as string[][],
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -28,12 +30,20 @@ vi.mock("@/server/db/client", () => ({
         return JSON.stringify(where).includes('"cls":"PURCHASING"') ? 6 : 5;
       },
     },
-    purchaseRequest: {
-      findMany: async ({ where }: { where: Prisma.PurchaseRequestWhereInput }) =>
+    purchaseOrder: {
+      findMany: async ({ where }: { where: Prisma.PurchaseOrderWhereInput }) =>
         "createdAt" in where
           ? [{ createdAt: new Date("2026-10-19T02:00:00Z") }, { createdAt: new Date("2026-10-18T02:00:00Z") }, { createdAt: new Date("2026-10-12T02:00:00Z") }]
           : [{ completedAt: new Date("2026-10-19T02:00:00Z") }],
     },
+  },
+}));
+// Task 7: the team cards and Purchasing's To register read the nav's own counts (from state).
+vi.mock("./nav-counts", async (orig) => ({
+  ...(await orig<object>()),
+  readNavCounts: async (keys: string[]) => {
+    h.navKeys.push(keys);
+    return Object.fromEntries(keys.map((k) => [k, h.nav[k] ?? 0]));
   },
 }));
 vi.mock("@/server/modules/metrics/history", () => ({
@@ -43,7 +53,7 @@ vi.mock("@/server/modules/metrics/history", () => ({
   },
 }));
 vi.mock("@/server/modules/purchases/queries", () => ({
-  stateCounts: async () => ({ ALL: 50, DRAFT: 1, SUBMITTED: 21, IT_REVIEWED: 22, COMPLETED: 6, CANCELLED: 0 }),
+  stateCounts: async () => ({ ALL: 50, WITH_IT: 21, SENT_BACK: 1, READY: 22, CANCELLED: 6 }),
 }));
 vi.mock("@/server/modules/stock/queries", () => ({
   stockHomeSignals: async () => ({ low: 31, expiringLots: 32, stocktakesOverdue: 33 }),
@@ -97,14 +107,15 @@ vi.mock("./queries", async (orig) => ({
     { id: "p1", refNo: "PR-1", what: "still a draft", meta: "₱100 · 1 d", href: "/purchases/p1", action: "Submit", bounced: false },
     { id: "p2", refNo: "PR-2", what: "came back from Ina", meta: "₱200 · 3 d", href: "/purchases/p2", action: "Fix and resubmit", bounced: true },
   ],
+  // Task 6: Finance's review groups (reviewGroups), oldest first
   financeWaitingRows: async () => [
     {
-      id: "w1", refNo: "PR-10", reviewedAt: new Date("2026-10-17T02:00:00Z"), updatedAt: new Date("2026-10-17T02:00:00Z"),
-      requestedBy: { name: "Ina" }, units: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }],
+      key: "rec1", recordId: "rec1", assetId: null, refNo: "PO-0010", title: "2 laptops", count: 2, total: "2000.20",
+      registeredAt: new Date("2026-10-17T02:00:00Z"), team: "IT",
     },
     {
-      id: "w2", refNo: "PR-11", reviewedAt: null, updatedAt: new Date("2026-10-19T02:00:00Z"),
-      requestedBy: { name: "Bo" }, units: [{ qty: 3, unitPrice: "0.30" }],
+      key: "asset:a9", recordId: null, assetId: "a9", refNo: null, title: "BR-LT-0009 · Desk", count: 1, total: "0.90",
+      registeredAt: new Date("2026-10-19T02:00:00Z"), team: "PURCHASING",
     },
   ],
   directChangeRows: async (since: Date) => {
@@ -134,20 +145,32 @@ beforeEach(() => {
   h.spendSince = [];
   h.capitalizedSince = [];
   h.directSince = [];
+  h.nav = { poSentBack: 4, assetsSentBackPurchasing: 1, poToRegister: 17 };
+  h.navKeys = [];
 });
 
 describe("purchasingOverview", () => {
   it("six tiles; the linked ones open the page whose count they are", async () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
-      ["Awaiting IT", 21, "/purchases?state=SUBMITTED"],
-      ["Awaiting finance", 22, "/purchases?state=IT_REVIEWED"],
+      ["With IT", 21, "/purchases?state=WITH_IT"],
+      ["To register", 17, "/purchases?register=1"],
       ["Spend this month", 1550.1, undefined],
       ["Below reorder", 31, "/stock?low=1"],
       ["Lots expiring", 32, "/stock/reports/expiry?days=30&tab=expiring"],
       ["Stocktakes overdue", 33, undefined],
     ]);
+    // Task 7: pr.itReviewed snapshots this same To register count again, so the tile has its history back
     expect(h.historyKeys).toEqual(["pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
+    expect(h.navKeys).toEqual([["poSentBack", "assetsSentBackPurchasing", "poToRegister"]]);
+  });
+
+  it("To register: the spark ends at the live value, with pr.itReviewed's history", async () => {
+    h.history["pr.itReviewed"] = [1, 2, 3, 4, 5, 6, 15, 16];
+    const o = await purchasingOverview(user("purchasing_staff"), NOW);
+    expect(o.kpis[1]).toMatchObject({
+      key: "pr.itReviewed", hint: "Lines Purchasing can register", spark: [1, 2, 3, 4, 5, 6, 15, 17], delta: { kind: "count", value: 2 },
+    });
   });
 
   it("Spend this month: Manila month to date, weekly sparkline, this week vs last week in percent", async () => {
@@ -155,7 +178,7 @@ describe("purchasingOverview", () => {
     expect(h.spendSince.map((d) => d.toISOString())).toEqual([SPARK_START]);
     // Sep 30 23:30 Manila is September: in the sparkline's week (today−20), not in the month's value
     expect(o.kpis[2]).toMatchObject({
-      money: true, display: "₱1,550", hint: "3 requests completed",
+      money: true, display: "₱1,550", hint: "3 purchase orders registered",
       spark: [0, 0, 0, 0, 0, 700, 50, 1000.1], delta: { kind: "week", value: 1900, unit: "pct" }, upIs: "neutral",
     });
   });
@@ -170,6 +193,9 @@ describe("purchasingOverview", () => {
   it("needs-you, trend, make-up and breakdown", async () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(o.needsYou.map((n) => [n.tone, n.title, n.href])).toEqual([
+      // Task 7 (spec §7; fix round 1): the team's two Sent back cards, from state
+      ["bad", "4 purchase orders sent back to you", "/purchases?state=SENT_BACK"],
+      ["bad", "1 asset sent back to you", "/inventory?reg=needs-correction&to=PURCHASING"],
       ["bad", "STK-0003 · Pantry", "/stock/stocktakes/s1"],
       ["warn", "31 items below reorder level", "/stock?low=1"],
       ["warn", "PR-2 · came back from Ina", "/purchases/p2"],
@@ -177,12 +203,12 @@ describe("purchasingOverview", () => {
     ]);
     expect(o.needsYouHref).toBe("/purchases");
     expect(o.trend.labels).toHaveLength(12);
-    expect(o.trend.series.map((s) => [s.name, s.values.slice(-2)])).toEqual([["Created", [1, 2]], ["Completed", [0, 1]]]);
+    expect(o.trend.series.map((s) => [s.name, s.values.slice(-2)])).toEqual([["Created", [1, 2]], ["Registered", [0, 1]]]);
     expect(o.makeUp.rows.map((r) => [r.label, r.value, r.href])).toEqual([
-      ["Drafts", 1, "/purchases?state=DRAFT"],
-      ["Awaiting IT", 21, "/purchases?state=SUBMITTED"],
-      ["Awaiting finance", 22, "/purchases?state=IT_REVIEWED"],
-      ["Completed", 6, "/purchases?state=COMPLETED"],
+      ["With IT", 21, "/purchases?state=WITH_IT"],
+      ["Sent back", 1, "/purchases?state=SENT_BACK"],
+      ["Ready to register", 22, "/purchases?state=READY"],
+      ["Cancelled", 6, "/purchases?state=CANCELLED"],
     ]);
     // from the one spend read, this Manila month only: Bolt's Sep 30 23:30 (Manila) completion is September's
     expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Acme", value: 1050.1 }, { label: "No supplier", value: 500 }] });
@@ -191,12 +217,23 @@ describe("purchasingOverview", () => {
   });
 });
 
+describe("purchasingOverview: the Sent back cards (Task 7 fix round 1)", () => {
+  it("one card per tab, each left out at 0, singular at 1", async () => {
+    h.nav = { poSentBack: 0, assetsSentBackPurchasing: 3, poToRegister: 0 };
+    let o = await purchasingOverview(user("purchasing_staff"), NOW);
+    expect(o.needsYou.filter((n) => n.title.includes("sent back to you")).map((n) => n.title)).toEqual(["3 assets sent back to you"]);
+    h.nav = { poSentBack: 1, assetsSentBackPurchasing: 0, poToRegister: 0 };
+    o = await purchasingOverview(user("purchasing_staff"), NOW);
+    expect(o.needsYou.filter((n) => n.title.includes("sent back to you")).map((n) => n.title)).toEqual(["1 purchase order sent back to you"]);
+  });
+});
+
 describe("financeOverview", () => {
   it("six tiles; To confirm sums both classes and links to the IT view; Book value is a plain card (rulings)", async () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
       ["Waiting on you", 2001.1, undefined],
-      ["Requests waiting", 2, "/purchases?state=IT_REVIEWED"],
+      ["Groups to review", 2, "/finance/review"],
       ["Approved this month", 3, undefined],
       ["Capitalized this month", 55_000, undefined],
       ["Book value", 48_442_000, undefined],
@@ -254,12 +291,14 @@ describe("financeOverview", () => {
   it("needs-you, trend, make-up and breakdown", async () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.needsYou.map((n) => [n.title, n.href])).toEqual([
+      // Task 7 (spec §7): the review queue's own count
+      ["2 to check", "/finance/review"],
       ["5 IT registrations to confirm", "/finance/assets?fin=with-finance"],
       ["6 Purchasing registrations to confirm", "/finance/assets?cls=PURCHASING&fin=with-finance"],
-      ["PR-10 · from Ina", "/purchases/w1"],
-      ["PR-11 · from Bo", "/purchases/w2"],
+      ["PO-0010 · 2 laptops from IT", "/finance/review/rec1"],
+      ["No PO · BR-LT-0009 · Desk", "/finance/assets/a9"],
     ]);
-    expect(o.needsYouHref).toBe("/purchases?state=IT_REVIEWED");
+    expect(o.needsYouHref).toBe("/finance/review");
     expect(o.trend).toMatchObject({ title: "Capitalized per month", unit: "₱" });
     expect(o.trend.labels).toEqual(expect.arrayContaining(["Nov 2025", "Oct 2026"]));
     expect(o.trend.series).toHaveLength(1);

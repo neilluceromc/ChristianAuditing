@@ -6,6 +6,6 @@ const BANK_REVEAL_ROLES: readonly Role[] = ["admin", "purchasing_staff", "financ
 
 export function canManageSuppliers(role: Role): boolean { return SUPPLIER_MANAGER_ROLES.includes(role); }
 export function canRevealBank(role: Role): boolean { return BANK_REVEAL_ROLES.includes(role); }
-export function canAttachToRequest(role: Role): boolean { return role !== "viewer"; }
-/** Same set as canManageSuppliers today; named apart because it gates a REQUEST, not a supplier. */
-export function canSetRequestSupplier(role: Role): boolean { return canManageSuppliers(role); }
+/** Purchase orders (spec §2): Purchasing, IT and Finance can all upload or re-upload a PO's documents; a viewer cannot. */
+const PO_DOCUMENT_ROLES: readonly Role[] = ["admin", "purchasing_staff", "it_staff", "finance_staff"];
+export function canAttachToRequest(role: Role): boolean { return PO_DOCUMENT_ROLES.includes(role); }

@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { BULK_MAX } from "@/lib/inventory-list";
 import { INVENTORY_COLUMNS_SEEN_KEY } from "@/lib/column-prefs";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 45 — the Inventory and Employees lists redesign (spec §2–§4), end to end:
@@ -78,24 +78,6 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/inventory-ux.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid). Wait for it, so a cookie this spec seeds next is not overwritten.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // Copied from e2e/inventory-ux.spec.ts.
 async function expectNoSeriousAxe(page: Page) {

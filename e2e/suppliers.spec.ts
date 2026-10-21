@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 18, Task 8 — Purchasing: suppliers (spec §8.2, 11 cases). Covers the
@@ -38,25 +38,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/custody.spec.ts:38-44 — house rule: never import helpers
-// across spec files, since each file reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // Copied from e2e/custody.spec.ts:61-66 — the mouse-move-then-settle step
 // guards against the same phantom SERIOUS contrast violation measured there
@@ -296,11 +277,15 @@ test.describe.serial("suppliers", () => {
     await page.goto("/purchases/suppliers?archived=1");
     await expect(page.getByRole("link", { name: "Bayside Networks" })).toBeVisible({ timeout: 10_000 });
 
-    // PR-0198 (seeded SUBMITTED request) — its Supplier picker no longer
-    // offers the archived supplier as an option.
+    // PO-0198 (seeded, with IT) — the Supplier picker on its edit form no
+    // longer offers the archived supplier as an option (migration 38: the
+    // supplier is set on Purchasing's PO form).
     await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("link", { name: "PO-0198" }).click();
+    await expect(page.getByRole("heading", { name: "PO-0198" })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await page.waitForURL(/\/purchases\/[^/]+\/edit$/, { timeout: 20_000 });
+    await expect(page.getByRole("main").getByLabel("Supplier")).toBeVisible();
     await expect(
       page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Bayside Networks" }),
     ).toHaveCount(0);
@@ -372,7 +357,7 @@ test.describe.serial("suppliers", () => {
   test("9. The command palette finds Bayside Networks and opens its profile", async ({ page }) => {
     await login(page, PURCHASING);
     await page.goto("/purchases/suppliers");
-    const paletteTrigger = page.getByRole("button", { name: /Search assets, people, requests/ });
+    const paletteTrigger = page.getByRole("button", { name: /Search assets, people, purchase orders/ });
     await waitForHydration(paletteTrigger);
     await paletteTrigger.click();
     // Scoped to the palette dialog: "Suppliers" is ALSO the sidebar nav's

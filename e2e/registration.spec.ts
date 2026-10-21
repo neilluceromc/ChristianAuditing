@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 16 — registration. Seven cases per spec §9.2 rows 1–6 plus one added
@@ -11,9 +11,9 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  * live duplicate-serial check before submit, the batch page's Purchasing
  * fields with one invoice document shared across every unit in the batch,
  * duplicate-serial refusal (both in-batch and against the fleet), IT's nav
- * link to the batch page, and — case 7 — Purchasing attaching an invoice to
- * an IT-class batch it registers, which `canManageClass` alone could not do
- * (D-19). Case 4 also axe-checks the batch success panel (D-20).
+ * link to the batch page, and — case 7 — Purchasing turned away from the
+ * direct Register (purchase orders, spec §4 way 3: it registers from a PO).
+ * Case 4 also axe-checks the batch success panel (D-20).
  *
  * Cases run serial but each registers its own fresh assets — none of them
  * shares or depends on state another case wrote, so the ordering only
@@ -37,25 +37,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/direct-lifecycle.spec.ts:24-51 — house rule: never import
-// helpers across spec files, since each file reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // idOf (also part of the shared helper block at e2e/direct-lifecycle.spec.ts:24-51)
 // is not needed here — every case below looks assets up by tag directly — so
@@ -164,6 +145,9 @@ async function landedRecord(page: Page): Promise<string> {
 
 const IT = "it@thebackroomop.com";
 const P = "purchasing@thebackroomop.com";
+// Purchase orders (spec §4 way 3): the direct Register is IT's and an admin's — Purchasing registers only from a PO.
+// The Purchasing-class batches below (Vehicles) are registered directly by an admin, who keeps everything.
+const ADMIN = "admin@thebackroomop.com";
 
 test.describe.serial("registration", () => {
   test("1. picking a category suggests no tag; a typed tag in a batch row survives", async ({ page }) => {
@@ -249,8 +233,8 @@ test.describe.serial("registration", () => {
   });
 
   test("4. the batch page registers 3 units with the Purchasing fields and one invoice on each", async ({ page }) => {
-    await login(page, P);
-    await page.goto("/inventory/register");
+    await login(page, ADMIN);
+    await page.goto("/inventory/register?cls=PURCHASING");
     await pickCategory(page, "Vehicle");
     await pickModel(page, "Toyota Vios (e2e batch)", await firstType("Vehicle"));
     await setQuantity(page, 3);
@@ -297,8 +281,8 @@ test.describe.serial("registration", () => {
     const seededSerial = "SN-E2E-0166";
     await db.asset.update({ where: { id: target.id }, data: { serial: seededSerial } });
 
-    await login(page, P);
-    await page.goto("/inventory/register");
+    await login(page, ADMIN);
+    await page.goto("/inventory/register?cls=PURCHASING");
     await pickCategory(page, "Vehicle");
     await pickModel(page, "Dup test", await firstType("Vehicle"));
     await setQuantity(page, 2);
@@ -334,38 +318,15 @@ test.describe.serial("registration", () => {
     await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
   });
 
-  // Final-review fix wave, ruling R14: `REGISTRABLE_CLASSES.purchasing_staff`
-  // includes IT (Phase 14), but the batch invoice upload used to gate on
-  // `canManageClass`, so a Purchasing-registered IT batch always ended
-  // "Registered — the invoice did not attach." `canAttachDocuments` fixes it.
-  test("7. Purchasing attaches an invoice to an IT batch it registers", async ({ page }) => {
+  // Final-review fix wave, ruling R14 (Purchasing attaching an invoice to an IT batch it registered directly) is gone
+  // with purchase orders: Purchasing no longer registers directly at all (spec §4 way 3). What it registers from a PO —
+  // documents on the PO — is e2e/po-intake.spec.ts.
+  test("7. Purchasing can't open the direct Register: it registers from a purchase order", async ({ page }) => {
     await login(page, P);
     await page.goto("/inventory/register");
-    await pickCategory(page, "Laptop");
-    await pickModel(page, "ThinkPad E14 (e2e R14)", await firstType("Laptop"));
-    await setQuantity(page, 2);
-    // Phase 34: every IT unit needs a serial, whoever registers it.
-    const stamp = `E2E-REG-7-${Date.now()}`;
-    for (const i of [1, 2]) await page.getByLabel(`Serial ${i}`, { exact: true }).fill(`${stamp}-${i}`);
-    await openPurchase(page);
-    await page.getByLabel("Sales invoice", { exact: true }).setInputFiles({
-      name: "it-inv.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 it-inv"),
-    });
-    const tags = await fillTags(page, 2);
-    await page.getByRole("button", { name: "Register 2 laptops", exact: true }).click();
-    await landedRecord(page);
-    // The invoice attached: a batch whose file failed lands with `docsFailed` (the old "did not attach" banner).
-    expect(new URL(page.url()).searchParams.get("docsFailed")).toBeNull();
-
-    const rows = await db.asset.findMany({ where: { tag: { in: tags } }, include: { documents: true } });
-    expect(rows).toHaveLength(2);
-    for (const r of rows) {
-      expect(r.cls).toBe("IT");
-      // Purchasing does not manage IT, so the asset is never self-checked —
-      // it still awaits IT's check even though its invoice is attached.
-      expect(r.itVerifiedAt).toBeNull();
-      expect(r.documents.map((d) => d.kind)).toEqual(["invoice"]);
-    }
+    await expect(page).toHaveURL(/\/purchases$/);
+    await page.goto("/inventory");
+    await expect(page.getByRole("main").getByRole("link", { name: "Register assets" })).toHaveCount(0);
   });
 
   // Phase 30 review R11: a file staged at quantity 1 is not lost when the

@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { toXlsxBuffer } from "@/server/xlsx/write";
 import { ASSET_EXPORT_COLUMNS } from "@/lib/export-columns";
 import { ROLE_LANDING } from "@/lib/workspaces";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 13 — asset classes. Twenty cases across six surfaces: Purchasing
@@ -27,25 +27,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-// Copied from e2e/receiving.spec.ts — the helper that actually works against
-// this login page (the plan's own draft was untested against the real form).
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: { tag }, select: { id: true } })).id;
 
@@ -114,22 +95,29 @@ test.describe("registration — each class is its own department's", () => {
 
   test("1. Purchasing registers a Vehicle → PURCHASING, STORED, prefix VH", async ({ page }) => {
     registeredTag = tagOf("VH", (await highestNumber("VH")) + 1);
+    // Purchase orders (spec §4 way 2): Purchasing registers from a purchase order — a non-IT one is ready for it.
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: "purchasing@thebackroomop.com" } });
+    const po = await db.purchaseOrder.create({
+      data: {
+        refNo: "PO-0991", state: "READY", requestedById: purchasing.id, invoiceRef: "SI-0991", purchasedAt: new Date(),
+        lines: { create: [{ description: "Company car", categoryId: vehicleCategoryId, qty: 1, unitPrice: 1_250_000 }] },
+      },
+    });
     await login(page, "purchasing@thebackroomop.com");
-    await page.goto("/inventory/register");
+    await page.goto(`/purchases/${po.id}/register`);
 
-    await pickCategory(page, "Vehicle");
-    // Phase 34: the model sets the type; a new Vehicle model picks it (ruling R8 note: Vehicle has several types).
-    const model = page.getByRole("combobox", { name: "Model", exact: true });
-    await model.fill("Toyota Corolla Cross (e2e)");
-    await page.getByRole("option", { name: /^\+ Add .Toyota Corolla Cross \(e2e\). as a new model$/ }).click();
+    const card = page.getByRole("region", { name: /^Line 01 · Company car/ });
+    const count = card.getByLabel("How many arrived now");
+    await waitForHydration(count);
+    // One line: it starts at everything left.
+    await expect(count).toHaveValue("1");
     // Phase 36: the type is always asked (never set by the model) and staff type their own tag.
-    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "Sedan" });
-    await expect(page.getByRole("textbox", { name: "How many", exact: true })).toHaveValue("1");
-    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(registeredTag);
+    await card.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "Sedan" });
+    await card.getByRole("combobox", { name: "Model", exact: true }).fill("Toyota Corolla Cross (e2e)");
+    await card.getByLabel("Tag 1", { exact: true }).fill(registeredTag);
 
-    // Phase 30 (plan P-13): quantity 1 is one asset through createAsset;
     // Phase 34 (plan P-5): it lands on Labels with its purchase record ticked, in Purchasing's class.
-    await page.getByRole("button", { name: "Register 1 vehicle", exact: true }).click();
+    await page.getByRole("button", { name: "Register 1 asset", exact: true }).click();
     await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
     expect(new URL(page.url()).searchParams.get("cls")).toBe("PURCHASING");
     await expect(page.getByRole("checkbox", { name: new RegExp(registeredTag) })).toBeChecked();
@@ -143,13 +131,11 @@ test.describe("registration — each class is its own department's", () => {
     expect(a.financeConfirmedAt).toBeNull();
   });
 
-  test("2. Purchasing is offered both classes' categories; IT only its own (Phase 14)", async ({ page }) => {
+  test("2. Purchasing has no direct Register: it registers from a purchase order (spec §4 way 3)", async ({ page }) => {
     const before = await db.asset.count();
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/register");
-    const options = await categoryNames(page);
-    expect(options).toContain("Vehicle");
-    expect(options).toContain("Laptop");
+    await expect(page).toHaveURL(new RegExp(`${ROLE_LANDING.purchasing_staff}$`));
     expect(await db.asset.count()).toBe(before);
   });
 
@@ -378,15 +364,8 @@ test.describe("the inventory view", () => {
     await expect(page.getByRole("heading", { name: "Purchasing assets", level: 1 })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toHaveCount(0);
-    // Register assets names the viewed class even on the default view, so the form opens narrowed.
-    const registerLink = page.getByRole("main").getByRole("link", { name: "Register assets" });
-    await expect(registerLink).toHaveAttribute("href", "/inventory/register?cls=PURCHASING");
-    await registerLink.click();
-    await expect(page).toHaveURL(/\/inventory\/register\?cls=PURCHASING$/, { timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
-    const purchasingOptions = await categoryNames(page);
-    expect(purchasingOptions).toContain("Vehicle");
-    expect(purchasingOptions).not.toContain("Laptop");
+    // Purchase orders (spec §4 way 3): Purchasing registers from a PO, so its list offers no direct Register.
+    await expect(page.getByRole("main").getByRole("link", { name: "Register assets" })).toHaveCount(0);
     await page.goto("/inventory?cls=IT");
     await expect(page.getByRole("link", { name: "BR-LT-0148" })).toBeVisible();
     await expect(page.getByRole("link", { name: "BR-VH-0001" })).toHaveCount(0);
@@ -457,14 +436,16 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     // Confirm details / Send back. The checklist dialog speaks the class ("Purchasing").
     await page.goto(`/finance/assets/${id}`);
     const review = page.getByRole("region", { name: "Review" });
-    const sendBack = review.getByRole("button", { name: "Send back to Purchasing…", exact: true });
+    // Task 6 (purchase-orders spec §5): one "Send back…" with a team picker; a Purchasing asset defaults to Purchasing.
+    const sendBack = review.getByRole("button", { name: "Send back…", exact: true });
     await expect(sendBack).toBeVisible();
     await page.waitForTimeout(500);
     await sendBack.click();
-    const dialog = page.getByRole("dialog", { name: "Send BR-FN-0003 back to Purchasing" });
+    const dialog = page.getByRole("dialog", { name: "Send BR-FN-0003 back" });
     await dialog.getByLabel("Cost", { exact: true }).check();
+    await expect(dialog.getByLabel("Send to")).toHaveValue("PURCHASING");
     await dialog.getByLabel("Note for Purchasing").fill("e2e — wrong cost recorded");
-    await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+    await dialog.getByRole("button", { name: "Send back to Purchasing", exact: true }).click();
     await expect(page.locator("[data-toast-id]").filter({ hasText: "Sent BR-FN-0003 back to Purchasing" })).toBeVisible();
     await expect(page.getByText(/Sent back to Purchasing: Cost/)).toContainText("e2e — wrong cost recorded");
 
@@ -520,6 +501,7 @@ test.describe("page gates speak the class", () => {
   });
 
   test("18. /inventory/new offers each role its own categories", async ({ page }) => {
+    test.setTimeout(90_000); // four sign-ins and four Register pages
     // Phase 30 (spec §5.1): /inventory/new redirects to the one Register flow,
     // keeping ?cls=. The redirect can land after page.goto resolves (the page
     // streams under inventory/loading.tsx), so each read waits for the form's
@@ -529,18 +511,14 @@ test.describe("page gates speak the class", () => {
       await expect(page.getByRole("heading", { name: "New equipment", level: 1 })).toBeVisible();
       return categoryNames(page);
     };
+    // Purchase orders (spec §4 way 3): Purchasing registers from a PO, so /inventory/new turns it away too.
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/inventory/new");
-    let options = await categoryOptions(/\/inventory\/register$/);
-    expect(options).toContain("Vehicle");
-    expect(options).toContain("Laptop");
-    // Both classes offered → both classes' cards (Phase 34: cards replace the optgroups).
-    await expect(categoryCard(page, "Laptop")).toBeVisible();
-    await expect(categoryCard(page, "Vehicle")).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`${ROLE_LANDING.purchasing_staff}$`));
 
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory/new");
-    options = await categoryOptions(/\/inventory\/register$/);
+    let options = await categoryOptions(/\/inventory\/register$/);
     expect(options).toContain("Laptop");
     expect(options).not.toContain("Vehicle");
     // Only IT's cards: none of Purchasing's.

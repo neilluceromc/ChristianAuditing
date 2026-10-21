@@ -2,8 +2,8 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { fmtDate } from "@/lib/format";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 40 (spec §7, migration 33): offboarding removes IT access. A leaver whose Argus is Done holds nothing and
@@ -37,23 +37,6 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-// Copied from e2e/it-work-ux.spec.ts — house rule: never import helpers across spec files.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 async function expectNoSeriousAxe(page: Page) {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(700);
@@ -229,15 +212,17 @@ test.describe("phase 40 — readable asset history", () => {
       // The real send-back: its audit value is an OBJECT ({ fields, note }), the thing that printed "[object Object]".
       await login(page, FINANCE);
       await page.goto(`/finance/assets/${id}`);
-      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back…" });
       await waitForHydration(sendBack);
       await sendBack.click();
-      const dialog = page.getByRole("dialog", { name: `Send ${tag} back to IT` });
+      const dialog = page.getByRole("dialog", { name: `Send ${tag} back` });
       await expect(dialog).toBeVisible();
       await dialog.getByLabel("Cost", { exact: true }).check();
       await dialog.getByLabel("Sales invoice").check();
       await dialog.getByLabel("Note for IT").fill("Invoice is for another PO");
-      await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+      // Task 6 (purchase-orders spec §5): Finance picks the team
+      await dialog.getByLabel("Send to").selectOption("IT");
+      await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
       await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${tag} back to IT` })).toBeVisible();
 
       // An edit records ids (categoryId, assigneeId) — written as updateAsset does — plus one id that no longer exists.
@@ -303,7 +288,7 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     const palette = page.getByRole("dialog", { name: "Command palette" });
     const input = palette.getByRole("combobox", { name: "Search" });
     await expect(input).toBeFocused();
-    await expect(input).toHaveAttribute("placeholder", "Search assets, people, requests…");
+    await expect(input).toHaveAttribute("placeholder", "Search assets, people, purchase orders…");
     await page.keyboard.press("Escape");
     await expect(palette).toHaveCount(0);
 
@@ -444,7 +429,7 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
 test.describe("phase 40 — palette search", () => {
   async function openPalette(page: Page) {
     await page.goto("/inventory");
-    const trigger = page.getByRole("button", { name: /Search assets, people, requests/ });
+    const trigger = page.getByRole("button", { name: /Search assets, people, purchase orders/ });
     await waitForHydration(trigger);
     await trigger.click();
     const palette = page.getByRole("dialog", { name: "Command palette" });

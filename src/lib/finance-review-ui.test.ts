@@ -5,6 +5,7 @@ import type { UndoAsset, UndoEntry } from "./finance-undo";
 import {
   approveDetail, approveToast, canReopenReview, minutesLeftAt, reopenReasonError, runFinanceUndo, sendBackToast, settingsToast,
   startUndoCountdown,
+  groupApproveToast, groupNotCapIssue, poSendBackToast, runGroupUndo, runPoSendBackUndo,
   undoBanner, type ReviewToastDeps,
 } from "./finance-review-ui";
 
@@ -218,5 +219,65 @@ describe("Reopen review", () => {
     expect(reopenReasonError("abcd")).toBe("Give a reason of 5 to 300 characters");
     expect(reopenReasonError("  ab​  ")).toBe("Give a reason of 5 to 300 characters");
     expect(reopenReasonError("x".repeat(301))).toBe("Give a reason of 5 to 300 characters");
+  });
+});
+
+describe("group review (Task 6, spec §5)", () => {
+  it("groupApproveToast: 'Approved 3 from PO-0214 · 1 held back', with Undo for the whole action", () => {
+    const undo = vi.fn();
+    const t = groupApproveToast({ recordId: "rec1", refNo: "PO-0214", approved: 3, heldBack: 1 }, undo);
+    expect(t.message).toBe("Approved 3 from PO-0214 · 1 held back");
+    expect(t.actions?.map((a) => a.label)).toEqual(["Undo"]);
+    t.actions![0].onAction();
+    expect(undo).toHaveBeenCalledWith("rec1");
+    expect(groupApproveToast({ recordId: "r", refNo: null, approved: 1, heldBack: 0 }, undo).message).toBe("Approved 1 from this registration");
+    expect(groupApproveToast({ recordId: "r", refNo: "PO-0214", approved: 0, heldBack: 2 }, undo).message).toBe("Sent 2 from PO-0214 back");
+  });
+
+  it("groupNotCapIssue: not capitalised only without a cost, capitalised only with one", () => {
+    expect(groupNotCapIssue({ cost: 100, notCapitalised: true })).toBe("Has a cost, so it is capitalised");
+    expect(groupNotCapIssue({ cost: null, notCapitalised: false })).toBe("No cost: approve it as not capitalised, or hold it back");
+    expect(groupNotCapIssue({ cost: null, notCapitalised: true })).toBeNull();
+    expect(groupNotCapIssue({ cost: 0, notCapitalised: false })).toBeNull();
+  });
+
+  it("runGroupUndo: done → a toast and a refresh; refused → the server's reason, kept until dismissed", async () => {
+    const toast = vi.fn();
+    const refresh = vi.fn();
+    const ok = await runGroupUndo("rec1", {
+      call: async () => ({ ok: true, data: { undone: 3, refNo: "PO-0214" } }), toast, refresh,
+    });
+    expect(ok).toBe(true);
+    expect(toast).toHaveBeenCalledWith("Undid the review of 3 from PO-0214", "settled");
+    expect(refresh).toHaveBeenCalled();
+    const no = await runGroupUndo("rec1", {
+      call: async () => ({ ok: false, kind: "conflict", message: "Can't undo: BR-LT-0205 — the 15 minutes to undo it ended at 10:57." }),
+      toast, refresh,
+    });
+    expect(no).toBe(false);
+    expect(toast).toHaveBeenLastCalledWith("Can't undo: BR-LT-0205 — the 15 minutes to undo it ended at 10:57.", "fault");
+  });
+});
+
+describe("a PO's send-back (Task 6 fix round 1)", () => {
+  it("poSendBackToast: 'PO-0214 sent back to Purchasing', with Undo", () => {
+    const undo = vi.fn();
+    const t = poSendBackToast({ id: "po1", refNo: "PO-0214" }, undo);
+    expect(t.message).toBe("PO-0214 sent back to Purchasing");
+    expect(t.actions?.map((a) => a.label)).toEqual(["Undo"]);
+    t.actions![0].onAction();
+    expect(undo).toHaveBeenCalledWith("po1");
+  });
+
+  it("runPoSendBackUndo: done → a toast and a refresh; refused → the server's reason", async () => {
+    const toast = vi.fn();
+    const refresh = vi.fn();
+    expect(await runPoSendBackUndo("po1", { call: async () => ({ ok: true, data: { refNo: "PO-0214", undone: 2 } }), toast, refresh })).toBe(true);
+    expect(toast).toHaveBeenCalledWith("Undid sending PO-0214 back · 2 assets back to To review", "settled");
+    expect(refresh).toHaveBeenCalled();
+    expect(await runPoSendBackUndo("po1", {
+      call: async () => ({ ok: false, kind: "conflict", message: "Can't undo: PO-0214 is no longer with Purchasing." }), toast, refresh,
+    })).toBe(false);
+    expect(toast).toHaveBeenLastCalledWith("Can't undo: PO-0214 is no longer with Purchasing.", "fault");
   });
 });

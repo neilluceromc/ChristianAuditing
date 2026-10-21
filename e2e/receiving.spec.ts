@@ -2,12 +2,13 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { ROLE_LANDING } from "@/lib/workspaces";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 12, Task 7 (third revision). Two surfaces: registration (Task 5 — IT
- * registers already-purchased assets with auto-numbered tags, no purchase
- * request required) and Finance review (Task 6's confirm, Task 7a's C-7
+ * registers already-purchased assets directly, with no purchase order: way 3
+ * of the purchase-orders spec; registering FROM a PO is e2e/po-intake.spec.ts)
+ * and Finance review (Task 6's confirm, Task 7a's C-7
  * send-back/mark-corrected).
  *
  * Receiving (`receiveUnits`, `receivableUnits`, `outstanding`,
@@ -44,23 +45,6 @@ test.beforeAll(() => {
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 /** The highest number currently in use by the BR-LT- prefix. Never hardcode
  * 0210/0211 — an earlier test in this very file may have registered more. */
@@ -265,7 +249,7 @@ test.describe("registration — the primary path", () => {
 
   // The PATH_RULES ordering guard. Hitting /inventory/register itself would
   // NOT isolate this: the page also carries its own requireRole("admin",
-  // "it_staff", "purchasing_staff"), which would redirect both roles to the
+  // "it_staff"), which would redirect these roles to the
   // same landing even if the PATH_RULES entry were deleted or moved after the
   // general /inventory
   // rule — exactly the "either layer may be the one that refuses" trap
@@ -275,10 +259,12 @@ test.describe("registration — the primary path", () => {
   // or deleted rule shows up as a 200 with no redirect at all. This really is
   // the only test in the suite that observes the ordering. Both roles are
   // asserted — do not assume one implies the other.
-  test("neither viewer nor finance_staff can reach /inventory/register", async ({ page }) => {
+  // Purchase orders (spec §4 way 3): Purchasing registers only from a purchase order now, so it is turned away too.
+  test("neither viewer, finance_staff nor purchasing_staff can reach /inventory/register", async ({ page }) => {
     for (const [email, landing] of [
       ["finance@thebackroomop.com", ROLE_LANDING.finance_staff],
       ["viewer@thebackroomop.com", ROLE_LANDING.viewer],
+      ["purchasing@thebackroomop.com", ROLE_LANDING.purchasing_staff],
     ] as const) {
       await login(page, email);
       const res = await page.goto("/inventory/register/no-such-page");
@@ -365,7 +351,7 @@ test.describe("Finance review — confirm", () => {
     await page.goto(`/finance/assets/${asset.id}`);
     expect(new URL(page.url()).pathname.startsWith("/finance")).toBe(false);
     await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /Approve|Send back to IT…/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Approve|Send back…/ })).toHaveCount(0);
   });
 });
 
@@ -379,15 +365,17 @@ test.describe("Finance review — send back and correct", () => {
     // so "Cost" arrives pre-ticked.
     await page.goto(`/finance/assets/${assetReturn.id}`);
 
-    const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+    const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back…" });
     await expect(sendBack).toBeVisible();
     await page.waitForTimeout(500);
     await sendBack.click();
-    const dialog = page.getByRole("dialog", { name: `Send ${assetReturn.tag} back to IT` });
+    const dialog = page.getByRole("dialog", { name: `Send ${assetReturn.tag} back` });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("Cost", { exact: true })).toBeChecked();
+    // Task 6 (purchase-orders spec §5): Finance picks the team — these direct registrations go back to IT.
+    await dialog.getByLabel("Send to").selectOption("IT");
     await dialog.getByLabel("Note for IT").fill(reason);
-    await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+    await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
     await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${assetReturn.tag} back to IT` })).toBeVisible();
 
     // Finance's own page says what went back to whom.
@@ -416,13 +404,14 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/finance/assets/${assetShortReason.id}`);
 
-    const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+    const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back…" });
     await expect(sendBack).toBeVisible();
     await page.waitForTimeout(500);
     await sendBack.click();
-    const dialog = page.getByRole("dialog", { name: `Send ${assetShortReason.tag} back to IT` });
+    const dialog = page.getByRole("dialog", { name: `Send ${assetShortReason.tag} back` });
+    await dialog.getByLabel("Send to").selectOption("IT");
     await dialog.getByLabel("Note for IT").fill("x");
-    await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+    await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
 
     // A validation-kind failure keeps the dialog open with an inline field
     // error — a dialog that stays open proves nothing about the database on
@@ -440,7 +429,7 @@ test.describe("Finance review — send back and correct", () => {
     await page.goto(`/finance/assets/${assetShortReason.id}`);
     expect(new URL(page.url()).pathname.startsWith("/finance")).toBe(false);
     await expect(page.getByRole("region", { name: "Review" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Send back to IT…" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Send back…" })).toHaveCount(0);
   });
 
   // Same UI-unreachability as "Confirming twice", and the same fix: canConfirm
@@ -454,12 +443,13 @@ test.describe("Finance review — send back and correct", () => {
     await login(page, "finance@thebackroomop.com");
     await page.goto(`/finance/assets/${assetConfirmed.id}`);
 
-    const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+    const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back…" });
     await expect(sendBack).toBeVisible();
     await page.waitForTimeout(500);
     await sendBack.click();
-    const dialog = page.getByRole("dialog", { name: `Send ${assetConfirmed.tag} back to IT` });
+    const dialog = page.getByRole("dialog", { name: `Send ${assetConfirmed.tag} back` });
     await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Send to").selectOption("IT");
     await dialog.getByLabel("Note for IT").fill(reason);
 
     await db.asset.update({
@@ -467,7 +457,7 @@ test.describe("Finance review — send back and correct", () => {
       data: { financeConfirmedAt: new Date(), financeConfirmedById: financeUserId },
     });
 
-    await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+    await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
     // Phase 30 (F-RECORD-14): the refusal renders inside the dialog, which stays open.
     await expect(
       dialog.getByText(`${assetConfirmed.tag} is already confirmed and cannot be sent back.`),

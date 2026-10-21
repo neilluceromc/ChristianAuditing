@@ -1,25 +1,41 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { PrismaClient } from "@prisma/client";
+import { login } from "./fixtures/login";
 
-async function login(page: Page, email: string) {
-  // /logout clears the session cookie and redirects to /login — going there
-  // directly (rather than /login) keeps this helper safe to call a second
-  // time mid-test to switch users (see auth-shell.spec.ts / approvals-audit.spec.ts).
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  await expect
-    .poll(async () => (await page.context().cookies()).some((c) => c.name === "br.uid"), { timeout: 30_000 })
-    .toBe(true);
+/**
+ * Purchase orders (migration 38, spec docs/superpowers/specs/2026-10-21-purchase-orders-intake-design.md §3): the list,
+ * its ?state= tabs and the sidebar views, a sent-back PO's page, saving a new PO (no drafts: saving sends it), Purchasing
+ * editing its own PO while IT has it, cancelling, the viewer, and the audit trail. The full three-team intake (send
+ * back, register, Finance's group review, the bell) is e2e/po-intake.spec.ts.
+ *
+ * Seeded fixtures this file depends on (prisma/seed.ts), all @thebackroomop.com / SEED_PASSWORD:
+ *   admin@ · it@ (J. Sarmiento) · purchasing@ (A. Reyes) · finance@ (L. Domingo) · viewer@
+ *   PO-0201 SENT_BACK, a pre-PO draft with no sender ("Not sent yet")
+ *   PO-0202 SENT_BACK by IT — "Price is per box, not per unit", flagged Unit price
+ *   PO-0198 / PO-0195 WITH_IT · PO-0188 READY (completed, legacy) · PO-0203 READY (4 office chairs, non-IT)
+ *   PO-0183 CANCELLED
+ * Rows never reference raw cuids: the DB is reseeded per file and ids change.
+ */
+
+const db = new PrismaClient();
+
+// Spec files share one database and run in alphabetical order — each file reseeds so no file inherits another's mutations.
+test.beforeAll(() => {
+  execSync("npm run db:seed", { timeout: 120_000 });
+});
+
+test.afterAll(async () => {
+  await db.$disconnect();
+});
+
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+  }).toPass({ timeout: 20_000 });
 }
 
 async function expectNoSeriousAxe(page: Page) {
@@ -27,112 +43,94 @@ async function expectNoSeriousAxe(page: Page) {
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 }
 
-// Seeded fixtures this file depends on (see prisma/seed.ts), all
-// @thebackroomop.com / SEED_PASSWORD:
-//   admin@ (admin) · it@ (J. Sarmiento, it_staff) · purchasing@ (A. Reyes,
-//   purchasing_staff) · finance@ (L. Domingo, finance_staff) · viewer@ (viewer)
-//   PR-0201 DRAFT — 1 unit, untouched by this file (used for the viewer check)
-//   PR-0198 SUBMITTED — the bounce-back: 2 units, thread SUBMIT -> IT_REVIEW
-//     -> REQUEST_INFO ("Unit 02: quote exceeds standing rate…")
-//   PR-0195 IT_REVIEWED — 1 APPROVED unit ("Wireless headsets")
-//   PR-0188 COMPLETED · PR-0183 CANCELLED — untouched by this file
-// Rows never reference raw cuids: the DB can be reseeded between runs and ids
-// are cuids that change on every seed.
+const toast = (page: Page, text: string | RegExp) => page.locator("[data-toast-id]").filter({ hasText: text });
+const header = (page: Page) => page.locator("main header").first();
+const poId = async (refNo: string) => (await db.purchaseOrder.findUniqueOrThrow({ where: { refNo } })).id;
 
-// Spec files share one database and run in alphabetical order — each file
-// reseeds so no file inherits another's mutations.
-test.beforeAll(() => {
-  execSync("npm run db:seed", { timeout: 120_000 });
-});
-
-test.describe("purchases — ?state= tab contract & sidebar", () => {
-  test("tabs write ?state=; the sidebar's Requests views share the same highlight", async ({ page }) => {
+test.describe("purchase orders — ?state= tab contract & sidebar", () => {
+  test("tabs write ?state=; the sidebar's Purchase orders views share the same highlight", async ({ page }) => {
     // The sidebar only renders at the lg: breakpoint.
     await page.setViewportSize({ width: 1280, height: 900 });
     await login(page, "purchasing@thebackroomop.com");
-    // Phase 42 (spec §3.2): the state links are views under Requests, shown while Requests is current — on /purchases.
     await page.goto("/purchases");
+    await expect(page.getByRole("heading", { name: "Purchase orders", level: 1 })).toBeVisible();
 
     const main = page.locator("main");
     const sidebar = page.getByRole("navigation", { name: "Workspace" });
 
-    // fresh seed: exactly one SUBMITTED request (PR-0198)
-    await expect(main.getByRole("link", { name: /^Awaiting IT/ })).toContainText("1");
+    // fresh seed: PO-0201 (a pre-PO draft) and PO-0202 (IT sent it back) are with Purchasing
+    await expect(main.getByRole("link", { name: /^Sent back/ })).toContainText("2");
+    await main.getByRole("link", { name: /^Sent back/ }).click();
+    await expect(page).toHaveURL(/state=SENT_BACK/);
+    await expect(main.getByRole("link", { name: /^Sent back/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("row", { name: /PO-0202/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PO-0198/ })).toHaveCount(0); // WITH_IT, not sent back
+    await expect(sidebar.getByRole("link", { name: /^Sent back/ })).toHaveAttribute("aria-current", "page");
 
-    await main.getByRole("link", { name: /^Awaiting IT/ }).click();
-    await expect(page).toHaveURL(/state=SUBMITTED/);
-    await expect(main.getByRole("link", { name: /^Awaiting IT/ })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toBeVisible();
-    await expect(page.getByRole("row", { name: /PR-0201/ })).toHaveCount(0); // DRAFT, not SUBMITTED
-    await expect(sidebar.getByRole("link", { name: /^Awaiting IT/ })).toHaveAttribute("aria-current", "page");
+    // The sidebar's With IT view targets the identical ?state= contract and lands on the same tab.
+    await sidebar.getByRole("link", { name: /^With IT/ }).click();
+    await expect(page).toHaveURL(/state=WITH_IT/);
+    await expect(sidebar.getByRole("link", { name: /^With IT/ })).toHaveAttribute("aria-current", "page");
+    await expect(main.getByRole("link", { name: /^With IT/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("row", { name: /PO-0198/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PO-0195/ })).toBeVisible();
 
-    // The sidebar's Requests view targets the identical ?state= contract
-    // and lands on the same tab — both light up together. Its name carries
-    // its count ("Awaiting finance 1 awaiting finance"), hence the anchor.
-    await sidebar.getByRole("link", { name: /^Awaiting finance/ }).click();
-    await expect(page).toHaveURL(/state=IT_REVIEWED/);
-    await expect(sidebar.getByRole("link", { name: /^Awaiting finance/ })).toHaveAttribute("aria-current", "page");
-    await expect(main.getByRole("link", { name: /^Awaiting finance/ })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("row", { name: /PR-0195/ })).toBeVisible();
+    // Task 7: To register is a filter, not a state: the non-IT PO-0203 is in it, the completed PO-0188 is not.
+    await sidebar.getByRole("link", { name: /^To register/ }).click();
+    await expect(page).toHaveURL(/register=1/);
+    await expect(page.getByRole("row", { name: /PO-0203/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PO-0188/ })).toHaveCount(0);
+
+    // "New purchase order" replaces "Register purchase"
+    await expect(sidebar.getByRole("link", { name: "New purchase order" })).toHaveAttribute("href", "/purchases/new");
   });
 });
 
-test.describe("purchases — list dwell line", () => {
-  test("PR-0198's row reads back from finance", async ({ page }) => {
+test.describe("purchase orders — search and empty states", () => {
+  test("an old PR- number still finds its PO; a filter matching nothing offers Clear filters", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
-    await page.goto("/purchases");
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toContainText("back from finance");
-  });
-});
+    await page.goto("/purchases?q=PR-0188");
+    await expect(page.getByRole("row", { name: /PO-0188/ })).toBeVisible();
 
-test.describe("purchases — empty states", () => {
-  test("a filter matching nothing offers Clear filters back to /purchases", async ({ page }) => {
-    await login(page, "purchasing@thebackroomop.com");
-    await page.goto("/purchases?q=zzz-no-such-request-zzz");
-    await expect(page.getByText("No request matches this filter")).toBeVisible();
-
+    await page.goto("/purchases?q=zzz-no-such-order-zzz");
+    await expect(page.getByText("No purchase order matches this filter")).toBeVisible();
     await page.getByRole("link", { name: "Clear filters" }).click();
     await expect(page).toHaveURL(/\/purchases$/);
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toBeVisible(); // back to the full list
+    await expect(page.getByRole("row", { name: /PO-0198/ })).toBeVisible();
   });
 });
 
-test.describe("purchases — bounce-back centrepiece (PR-0198)", () => {
-  test("banner names finance, quotes the reason, shows the honest transition and the loop; thread is oldest-first", async ({ page }) => {
+test.describe("purchase orders — a PO sent back by IT (PO-0202)", () => {
+  test("the banner names IT and its note, lists the flagged field, and offers Fix and reply; the thread is oldest-first", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible();
+    await page.getByRole("link", { name: "PO-0202" }).click();
+    await expect(page.getByRole("heading", { name: "PO-0202" })).toBeVisible();
+    await expect(header(page)).toContainText("Sent back to Purchasing");
 
-    // scoped past Next.js's own (empty, always-present) role="alert" route
-    // announcer — see the identical note in auth-shell.spec.ts.
-    const banner = page.getByRole("alert").filter({ hasText: "sent this back" });
-    await expect(banner).toContainText("Finance sent this back — L. Domingo");
-    await expect(banner).toContainText("Unit 02: quote exceeds standing rate — attach vendor quote.");
-    await expect(banner).toContainText("IT_REVIEWED → SUBMITTED · nothing was cleared");
-    await expect(banner.getByRole("link", { name: "Jump to unit 02" })).toBeVisible();
-    await expect(banner.getByRole("link", { name: "Reply in thread" })).toBeVisible();
+    // a status, not an alert: it is part of the page every time it opens
+    const banner = page.getByRole("status").filter({ hasText: "Sent back by IT" });
+    await expect(banner).toContainText("Sent back by IT — J. Sarmiento");
+    await expect(banner).toContainText("Price is per box, not per unit");
+    await expect(banner).toContainText("Flagged: Unit price");
+    await expect(banner.getByRole("link", { name: "Fix and reply" })).toHaveAttribute("href", /\/edit$/);
 
-    const stepper = page.getByRole("list", { name: "Request progress" });
-    await expect(stepper).toContainText("NOW · 2nd time");
-    await expect(stepper).toContainText("← sent back");
-
-    // The three-party thread renders oldest-first: SUBMIT (purchasing) -> IT_REVIEW (IT) -> REQUEST_INFO (finance).
     const notes = page.locator("#thread").getByRole("listitem");
-    await expect(notes).toHaveCount(3);
+    await expect(notes).toHaveCount(2);
     await expect(notes.nth(0)).toContainText("A. Reyes");
-    await expect(notes.nth(0)).toContainText("SUBMITTED");
     await expect(notes.nth(1)).toContainText("J. Sarmiento");
-    await expect(notes.nth(1)).toContainText("IT REVIEW");
-    await expect(notes.nth(2)).toContainText("L. Domingo");
-    await expect(notes.nth(2)).toContainText("SENT BACK");
+    await expect(notes.nth(1)).toContainText("Price is per box, not per unit");
+  });
+
+  test("a pre-PO draft (PO-0201) says it was never sent", async ({ page }) => {
+    await login(page, "purchasing@thebackroomop.com");
+    await page.goto(`/purchases/${await poId("PO-0201")}`);
+    await expect(page.getByRole("status").filter({ hasText: "Not sent yet" })).toBeVisible();
   });
 });
 
-// Runs here, before the IT/finance serial block below mutates PR-0198, so
-// "the bounced one" scanned for a11y is still actually bounced back.
-test.describe("purchases — axe", () => {
-  test("list, new, the bounced detail page, activity — no serious/critical violations", async ({ page }) => {
+test.describe("purchase orders — axe", () => {
+  test("list, new, the sent-back detail page, activity — no serious/critical violations", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/purchases");
     await expectNoSeriousAxe(page);
@@ -140,9 +138,8 @@ test.describe("purchases — axe", () => {
     await page.goto("/purchases/new");
     await expectNoSeriousAxe(page);
 
-    await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible();
+    await page.goto(`/purchases/${await poId("PO-0202")}`);
+    await expect(page.getByRole("heading", { name: "PO-0202" })).toBeVisible();
     await expectNoSeriousAxe(page);
 
     await page.goto("/purchases/activity");
@@ -150,168 +147,124 @@ test.describe("purchases — axe", () => {
   });
 });
 
-test.describe("purchases — drafting, autosave, submit", () => {
-  test("fill a line, autosave saves it, centavos survive the Decimal(12,2) round trip, then submit", async ({ page }) => {
+test.describe("purchase orders — saving", () => {
+  test.describe.configure({ mode: "serial" });
+  let id = "";
+  let refNo = "";
+
+  test("a missing price is refused in the form; nothing is sent", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/purchases/new");
-
-    await page.getByLabel("Line 1 description").fill("Wireless mice");
-    await page.getByLabel("Line 1 quantity").fill("3");
-    await page.getByLabel("Line 1 unit price").fill("18500.50");
-    // Phase 18 Task 6: the draft cannot autosave until a department is chosen.
-    await page.getByLabel("Requesting department").selectOption({ label: "IT" });
-
-    await expect(page.getByText(/DRAFT · SAVED \d{2}:\d{2}/)).toBeVisible({ timeout: 10_000 });
-
-    // Scoped by visible text (PR-####), not just an "/purchases/" href prefix
-    // — the sidebar's "Register purchase" link (/purchases/new) also matches
-    // that prefix and would otherwise win as the first DOM match.
-    const refLink = page.getByRole("link", { name: /^PR-\d{4}$/ });
-    const refNo = (await refLink.textContent())?.trim();
-    const href = await refLink.getAttribute("href");
-    const id = href?.replace("/purchases/", "");
-    expect(id).toBeTruthy();
-
-    // Reload through the DRAFT edit form: its price input is populated
-    // straight from what Postgres holds, so if the centavos survived the
-    // Decimal(12,2) round trip they show up here as exactly "18500.5" — not
-    // "18500" (truncated) and not "18500.4999…" (float drift).
-    await page.goto(`/purchases/${id}/edit`);
-    await expect(page.getByLabel("Line 1 unit price")).toHaveValue("18500.5");
-
-    await page.getByRole("button", { name: "Submit for IT review" }).click();
-    await page.waitForURL(new RegExp(`/purchases/${id}$`));
-    await expect(page.getByRole("heading", { name: refNo })).toBeVisible();
-    await expect(page.locator("main header").first()).toContainText("SUBMITTED");
-  });
-});
-
-test.describe("purchases — unpriced line refused", () => {
-  test("submitting with an unpriced line is refused client-side", async ({ page }) => {
-    await login(page, "purchasing@thebackroomop.com");
-    await page.goto("/purchases/new");
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    await waitForHydration(save);
+    const before = await db.purchaseOrder.count();
 
     await page.getByLabel("Line 1 description").fill("Docking stations");
-    // Phase 18 Task 6: a department must be chosen before the price check
-    // ever runs — pick one so this test still exercises the unpriced-line
-    // refusal it names, not the (also real) missing-department refusal.
-    await page.getByLabel("Requesting department").selectOption({ label: "IT" });
+    await page.getByLabel("Line 1 category").selectOption({ label: "Other" });
     // price deliberately left blank
-    await page.getByRole("button", { name: "Submit for IT review" }).click();
+    await save.click();
+    await expect(page.getByText("Every line needs its unit price.")).toBeVisible();
+    await expect(page).toHaveURL(/\/purchases\/new$/);
+    expect(await db.purchaseOrder.count()).toBe(before);
+  });
 
-    await expect(
-      page.getByText("Every line needs a price — IT review sharpens specs, it doesn't invent budgets."),
-    ).toBeVisible();
-    await expect(page).toHaveURL(/\/purchases\/new$/); // never left the form
+  test("an IT line saves straight to IT; centavos survive the Decimal(12,2) round trip", async ({ page }) => {
+    await login(page, "purchasing@thebackroomop.com");
+    await page.goto("/purchases/new");
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    await waitForHydration(save);
+
+    await page.getByRole("main").getByLabel("Supplier").selectOption({ label: "TechServe PH" });
+    await page.getByRole("main").getByLabel("SI number").fill("SI-50001");
+    await page.getByRole("main").getByLabel("Purchase date").fill("2026-10-19");
+    await page.getByRole("main").getByLabel("Department").selectOption({ label: "IT" });
+    await page.getByLabel("Line 1 description").fill("Wireless mice");
+    await page.getByLabel("Line 1 category").selectOption({ label: "Mouse" });
+    await page.getByLabel("Line 1 quantity").fill("3");
+    await page.getByLabel("Line 1 unit price").fill("1850.50");
+    await save.click();
+
+    await page.waitForURL(/\/purchases\/(?!new)[^/]+$/, { timeout: 30_000 });
+    id = new URL(page.url()).pathname.split("/").pop()!;
+    refNo = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
+    expect(refNo).toMatch(/^PO-\d{4}$/);
+    await expect(toast(page, `${refNo} saved`)).toBeVisible();
+    // no drafts: saving sends IT gear to IT
+    await expect(header(page)).toContainText("With IT");
+
+    // The edit form's price input reads straight from what Postgres holds: exactly "1850.5", not truncated or drifted.
+    await page.goto(`/purchases/${id}/edit`);
+    await expect(page.getByLabel("Line 1 unit price")).toHaveValue("1850.5");
+    const row = await db.purchaseOrder.findUniqueOrThrow({ where: { id }, include: { lines: true } });
+    expect(row.state).toBe("WITH_IT");
+    expect(row.invoiceRef).toBe("SI-50001");
+    expect(Number(row.lines[0].unitPrice)).toBe(1850.5);
+  });
+
+  test("Purchasing edits its own PO while IT has it — no reason needed", async ({ page }) => {
+    await login(page, "purchasing@thebackroomop.com");
+    await page.goto(`/purchases/${id}`);
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await page.waitForURL(new RegExp(`/purchases/${id}/edit$`));
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    await waitForHydration(save);
+    await page.getByLabel("Line 1 quantity").fill("4");
+    await save.click();
+    await page.waitForURL(new RegExp(`/purchases/${id}$`), { timeout: 30_000 });
+    await expect(page.locator("#unit-1")).toContainText("4");
+    await expect(header(page)).toContainText("With IT");
+  });
+
+  test("Cancel asks for a reason, and the PO reads Cancelled with it", async ({ page }) => {
+    await login(page, "purchasing@thebackroomop.com");
+    await page.goto(`/purchases/${id}`);
+    const cancel = page.getByRole("button", { name: "Cancel purchase order" });
+    await waitForHydration(cancel);
+    await cancel.click();
+    const dialog = page.getByRole("dialog", { name: "Cancel purchase order" });
+    await dialog.getByRole("textbox", { name: "Reason" }).fill("Ordered twice by mistake");
+    await dialog.getByRole("button", { name: "Cancel purchase order" }).click();
+    await expect(toast(page, `${refNo} cancelled`)).toBeVisible();
+    await expect(header(page)).toContainText("Cancelled");
+    await expect(page.getByRole("main")).toContainText("Ordered twice by mistake");
+    await expect(page.getByRole("button", { name: "Cancel purchase order" })).toHaveCount(0);
   });
 });
 
-// Tests 7–9 hand work to each other: this one moves PR-0198 SUBMITTED ->
-// IT_REVIEWED, and the "finance completes" test later in this block acts on
-// that same now-IT_REVIEWED PR-0198. The "finance bounces one back" test
-// operates on the independently-seeded PR-0195, but stays in this same
-// serial block per the task brief so nobody parallelizes or reorders this
-// three-party chain by accident.
-test.describe("purchases — IT review, finance bounce-back, finance completes", () => {
-  test.describe.configure({ mode: "serial" });
-
-  test("IT edits a unit's IT slot note on PR-0198; saving does not transition; then marks it reviewed", async ({ page }) => {
-    await login(page, "it@thebackroomop.com");
-    await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible();
-
-    // Unit 1 ("27-inch monitors") has no IT slot note yet in the seed.
-    const unit1 = page.locator("#unit-1");
-    await unit1.getByLabel("IT slot note").fill("Wall-mount kit needed for the 27s.");
-    await unit1.getByRole("button", { name: "Save line" }).click();
-    await expect(unit1).toContainText("IT: Wall-mount kit needed for the 27s.");
-
-    // Saving a line is NOT a transition — "Mark IT-reviewed" only renders
-    // while the request is still SUBMITTED, so its continued presence here
-    // IS the proof the state didn't move.
-    await expect(page.getByRole("button", { name: "Mark IT-reviewed" })).toBeVisible();
-
-    await page.getByRole("button", { name: "Mark IT-reviewed" }).click();
-    await expect(page.locator("main header").first()).toContainText("IT_REVIEWED");
-    await expect(page.getByRole("button", { name: "Mark IT-reviewed" })).toHaveCount(0);
-  });
-
-  test("finance bounces PR-0195 back via Request more info; the already-APPROVED unit keeps its state", async ({ page }) => {
-    await login(page, "finance@thebackroomop.com");
-    await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0195" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0195" })).toBeVisible();
-    await expect(page.locator("#unit-1")).toContainText("APPROVED");
-
-    await page.getByRole("button", { name: "Request more info" }).click();
-    const dialog = page.getByRole("dialog", { name: "Request more info" });
-    await expect(dialog).toBeVisible();
-    await dialog.getByLabel("Reason").fill("e2e: vendor quote missing for the headset batch.");
-    await dialog.getByRole("button", { name: "Request more info" }).click();
-
-    const banner = page.getByRole("alert").filter({ hasText: "sent this back" });
-    await expect(banner).toContainText("Finance sent this back — L. Domingo");
-    await expect(banner).toContainText("e2e: vendor quote missing for the headset batch.");
-    await expect(banner).toContainText("IT_REVIEWED → SUBMITTED · nothing was cleared");
-
-    // Nothing was cleared: the unit finance already approved stays APPROVED.
-    await expect(page.locator("#unit-1")).toContainText("APPROVED");
-    await expect(page.locator("main header").first()).toContainText("SUBMITTED");
-  });
-
-  test("finance completes PR-0198", async ({ page }) => {
-    await login(page, "finance@thebackroomop.com");
-    await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible();
-    await expect(page.locator("main header").first()).toContainText("IT_REVIEWED");
-
-    await page.getByRole("button", { name: "Complete" }).click();
-    await expect(page.locator("main header").first()).toContainText("COMPLETED");
-
-    await page.goto("/purchases?state=COMPLETED");
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toBeVisible();
-  });
-});
-
-test.describe("purchases — viewer is read-only", () => {
-  test("no New request, no transition buttons, no comment box; READ-ONLY badge shows", async ({ page }) => {
+test.describe("purchase orders — viewer is read-only", () => {
+  test("no New purchase order, no action buttons, no comment box; READ-ONLY badge shows", async ({ page }) => {
     await login(page, "viewer@thebackroomop.com");
     await page.goto("/purchases");
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
-    await expect(page.getByRole("link", { name: "New request" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "New purchase order" })).toHaveCount(0);
 
-    await page.getByRole("link", { name: "PR-0201" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0201" })).toBeVisible();
+    await page.getByRole("link", { name: "PO-0198" }).click();
+    await expect(page.getByRole("heading", { name: "PO-0198" })).toBeVisible();
     await expect(page.getByText("READ-ONLY · VIEWER")).toBeVisible();
 
-    // RequestActions (Edit draft, every transition button) is omitted
-    // entirely for a viewer — not merely disabled.
-    // Phase 28 puts a Back control in every header that has a parent, and a
-    // viewer gets it too: it is navigation, not a transition, so it is the ONE
-    // button allowed here — anything else would be an action leaking through.
-    const headerButtons = page.locator("main header").first().getByRole("button");
+    // The actions bar is omitted for a viewer — not merely disabled. Phase 28's Back control is navigation, the one
+    // button allowed in the header.
+    const headerButtons = header(page).getByRole("button");
     await expect(headerButtons).toHaveCount(1);
     await expect(headerButtons).toHaveAccessibleName("Back");
-    await expect(page.getByRole("link", { name: "Edit draft" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Edit", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Register", exact: true })).toHaveCount(0);
 
-    // The thread's composer is gated the same way.
     await expect(page.getByLabel("Add a comment")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Post comment" })).toHaveCount(0);
   });
 });
 
-test.describe("purchases — audit trail", () => {
-  test("/purchases/activity shows a purchase sentence; /audit resolves entries to PR-#### links", async ({ page }) => {
+test.describe("purchase orders — audit trail", () => {
+  test("/purchases/activity shows a PO sentence; /audit resolves purchase entries to PO-#### links", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/purchases/activity");
     await expect(page.getByRole("heading", { name: "Purchasing activity" })).toBeVisible();
-    await expect(page.locator("ol")).toContainText(/PR-\d{4}/);
+    await expect(page.locator("ol")).toContainText(/PO-\d{4}/);
 
-    await page.goto("/audit?entity=purchase-request");
-    await expect(page).toHaveURL(/entity=purchase-request/);
+    await page.goto("/audit?entity=purchase-order");
+    await expect(page).toHaveURL(/entity=purchase-order/);
     const table = page.locator("table");
-    await expect(table.getByRole("link", { name: /^PR-\d{4}$/ }).first()).toBeVisible();
+    await expect(table.getByRole("link", { name: /^PO-\d{4}$/ }).first()).toBeVisible();
   });
 });

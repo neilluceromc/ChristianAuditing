@@ -579,3 +579,95 @@ describe("Phase 47 — the shared asset notes and attachments read as sentences"
     expect(actionLabel("attachment.uploaded")).toBe("Attachment added");
   });
 });
+
+describe("Task 8 (spec §6) — purchase orders and money fixes read as sentences, with the reason", () => {
+  const s = (action: string, diff: unknown, opts?: { omitEntity?: boolean }, reason: string | null = null, actorLabel = "Ana (Finance)") =>
+    auditSentence({ actorLabel, action, diff, entityLabel: "PO-0214", reason }, opts);
+
+  it("po.fix names the field and the reason, on the PO", () => {
+    expect(s("po.fix", { invoiceRef: { from: "0012", to: "0021" } }, undefined, "typo on receipt"))
+      .toBe("Ana (Finance) fixed the SI number on PO-0214: 'typo on receipt'");
+    expect(s("po.fix", { invoiceRef: { from: "0012", to: "0021" } }, { omitEntity: true }, "typo on receipt"))
+      .toBe("Ana (Finance) fixed the SI number: 'typo on receipt'");
+  });
+  it("po.fix lists several fields in friendly words, and a unit price once however many lines changed", () => {
+    expect(s("po.fix", {
+      vendorId: { from: "v1", to: "v2" }, receiptRef: { from: null, to: "OR-9" }, purchasedAt: { from: null, to: "2026-10-01" },
+      fees: { from: 0, to: 50 }, "line1.unitPrice": { from: 1, to: 2 }, "line2.unitPrice": { from: 3, to: 4 },
+    }, undefined, "wrong figures")).toBe(
+      "Ana (Finance) fixed the supplier, OR number, purchase date, fees and unit price on PO-0214: 'wrong figures'",
+    );
+  });
+  it("po.fix without a reason has no dangling separator", () => {
+    expect(s("po.fix", { fees: { from: 0, to: 50 } })).toBe("Ana (Finance) fixed the fees on PO-0214");
+  });
+
+  it("asset.money.fixed names the field, old and new value and the reason, in the asset's history", () => {
+    expect(s("asset.money.fixed", { invoiceRef: { from: "0012", to: "0021" } }, { omitEntity: true }, "typo on receipt"))
+      .toBe("Ana (Finance) changed the SI number from 0012 to 0021: 'typo on receipt'");
+    expect(auditSentence({ actorLabel: "Ana (Finance)", action: "asset.money.fixed", diff: { invoiceRef: { from: "0012", to: "0021" } }, entityLabel: "BR-LT-0042", reason: "typo on receipt" }))
+      .toBe("Ana (Finance) changed the SI number from 0012 to 0021 on BR-LT-0042: 'typo on receipt'");
+  });
+  it("asset.money.fixed shows money, dates and empty values as words, and never a raw supplier id", () => {
+    expect(s("asset.money.fixed", { cost: { from: 30000, to: 36000 }, receiptRef: { from: null, to: "OR-9" } }, { omitEntity: true }))
+      .toBe("Ana (Finance) changed the OR number from nothing to OR-9 and the unit price from ₱30,000.00 to ₱36,000.00");
+    expect(s("asset.money.fixed", { vendorId: { from: "cmv1", to: "cmv2" } }, { omitEntity: true }, "wrong supplier"))
+      .toBe("Ana (Finance) changed the supplier: 'wrong supplier'");
+    expect(s("asset.money.fixed", { purchasedAt: { from: "2026-09-30T00:00:00.000Z", to: "2026-10-01T00:00:00.000Z" } }, { omitEntity: true }))
+      .toBe("Ana (Finance) changed the purchase date from 30 Sept 2026 to 01 Oct 2026");
+  });
+  it("a reason is only read from the row's reason, and is dropped when blank", () => {
+    expect(s("po.cancel", { state: { from: "WITH_IT", to: "CANCELLED" } }, undefined, "  ")).toBe("Ana (Finance) cancelled PO-0214");
+  });
+
+  it("send-backs name the team they go back to, what to fix and the note", () => {
+    expect(s("po.send-back", { sentBack: { from: null, to: { team: "IT", fields: [], note: null } } }, undefined, null, "Ben (IT)"))
+      .toBe("Ben (IT) sent PO-0214 back to Purchasing");
+    expect(s("po.send-back", { sentBack: { from: null, to: { team: "FINANCE", fields: ["SI number", "OR number"], note: "does not match" } } },
+      undefined, "does not match", "Ana (Finance)"))
+      .toBe("Ana (Finance) sent PO-0214 back to Purchasing to fix the SI number and OR number: 'does not match'");
+    expect(s("po.send-back", { sentBack: { from: null, to: { team: "FINANCE", fields: [], note: null } } }, { omitEntity: true }))
+      .toBe("Ana (Finance) sent back to Purchasing");
+    expect(s("po.send-back.undone", null, undefined, null, "Ben (IT)")).toBe("Ben (IT) undid sending PO-0214 back to Purchasing");
+  });
+  it("po.resubmit says who it went back to, with Purchasing's reply", () => {
+    expect(s("po.resubmit", { state: { from: "SENT_BACK", to: "WITH_IT" } }, undefined, "fixed the serials", "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) corrected PO-0214 and sent it back to IT: 'fixed the serials'");
+    expect(s("po.resubmit", { state: { from: "SENT_BACK", to: "READY" } }, undefined, null, "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) corrected PO-0214 and sent it back to Finance");
+  });
+
+  it("po.save reads as a create or a save, and says where it went", () => {
+    expect(s("po.save", { state: { from: null, to: "WITH_IT" } }, undefined, null, "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) created PO-0214 and sent it to IT to check");
+    expect(s("po.save", { state: { from: null, to: "READY" } }, undefined, null, "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) created PO-0214, ready to register");
+    expect(s("po.save", { vendorId: { from: "a", to: "b" } }, undefined, null, "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) saved changes to PO-0214");
+    expect(s("po.save", { state: { from: "READY", to: "WITH_IT" } }, { omitEntity: true }, null, "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) saved changes and sent it to IT to check");
+  });
+
+  it("po.cancel, po.line-closed and po.register", () => {
+    expect(s("po.cancel", { state: { from: "READY", to: "CANCELLED" } }, undefined, "Ordered by mistake", "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) cancelled PO-0214: 'Ordered by mistake'");
+    expect(s("po.line-closed", { line: { from: null, to: "Dell Latitude" }, closedShort: { from: 1, to: 3 } }, undefined, "Supplier cancelled", "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) closed 2 of Dell Latitude short on PO-0214: 'Supplier cancelled'");
+    expect(s("po.register", { registered: { from: null, to: 3 }, group: { from: null, to: "g1" } }, undefined, null, "Ben (IT)"))
+      .toBe("Ben (IT) registered 3 assets from PO-0214");
+    expect(s("po.register", { registered: { from: null, to: 1 } }, { omitEntity: true }, null, "Ben (IT)"))
+      .toBe("Ben (IT) registered 1 asset from the purchase order");
+  });
+
+  it("auditPhrase leaves the actor and the PO out but keeps the reason", () => {
+    expect(auditPhrase({ action: "po.fix", diff: { invoiceRef: { from: "0012", to: "0021" } }, reason: "typo on receipt" }))
+      .toBe("fixed the SI number: 'typo on receipt'");
+  });
+
+  it("every one of the new codes has an Action facet label and a sentence (never the raw code)", () => {
+    for (const code of ["po.save", "po.resubmit", "po.send-back", "po.send-back.undone", "po.fix", "po.cancel", "po.line-closed", "po.register", "asset.money.fixed"]) {
+      expect(ACTION_LABELS[code], code).toBeTruthy();
+      expect(s(code, null), code).not.toContain(code);
+    }
+  });
+});

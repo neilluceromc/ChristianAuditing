@@ -1,9 +1,9 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
 import { localDateISO, fmtMoneyExact } from "@/lib/format";
 import { unitsLabel } from "@/lib/stock-balance";
+import { login } from "./fixtures/login";
 
 /**
  * Phase 22, Task 8 — Stock control D2 lots/reports actions (spec §9.2, 8
@@ -42,25 +42,6 @@ test.afterAll(async () => {
   execSync("npm run db:seed", { timeout: 120_000 });
   await db.$disconnect();
 });
-
-// Copied from e2e/stock.spec.ts:45-51 — house rule: never import helpers
-// across spec files, since each file reseeds independently.
-async function login(page: Page, email: string) {
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 // Copied from e2e/stock.spec.ts:67-75.
 async function waitForHydration(target: Locator) {

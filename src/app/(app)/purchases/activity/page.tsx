@@ -11,7 +11,7 @@ export default async function PurchasingActivityPage({ searchParams }: { searchP
       title="Purchasing activity"
       base="/purchases/activity"
       emptyTitle="Nothing has happened yet"
-      emptyDescription="Drafts, submissions and decisions all land here."
+      emptyDescription="Saved purchase orders, send-backs, fixes and registrations all land here."
       searchParams={searchParams}
     />
   );

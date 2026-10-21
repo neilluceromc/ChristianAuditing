@@ -6,7 +6,7 @@ import type { CountKey } from "@/lib/workspaces";
 import { parseListState } from "@/lib/url-state";
 import { buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { buildEmployeeWhere, EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
-import { parsePurchaseState, purchaseWhere } from "@/lib/purchases-list";
+import { parsePurchaseState, purchaseWhere, TO_REGISTER_HREF } from "@/lib/purchases-list";
 import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
 import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { parseCls } from "@/lib/asset-class";
@@ -17,7 +17,9 @@ import { deliveryTabWhere, parseDeliveryTab } from "@/lib/webhooks";
 import { localDateISO } from "@/lib/format";
 import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
 import { financeViewWhere } from "@/server/modules/finance/queries";
-import { purchaseReviewCount, worklistCount } from "./queries";
+import { reviewGroupCount } from "@/server/modules/finance/groups";
+import { purchasingToRegisterCount } from "@/server/modules/purchases/to-register";
+import { worklistCount } from "./queries";
 
 /**
  * The view each list count stands for (spec §4.3: the count equals the page's row count for that URL). Asserted
@@ -28,15 +30,24 @@ export const NAV_COUNT_HREF = {
   itSpare: "/inventory?status=SPARE",
   itDefective: "/inventory?status=DEFECTIVE&sort=defectiveSince",
   itMissing: "/inventory?status=MISSING",
+  // Task 7 (spec §7): what Finance sent back to IT / to Purchasing, from state (the asset's return), never from the
+  // bell's reads. A Sent back view spans both classes (sentBackToTeamWhere), so the class these URLs open on is moot.
+  itSentBack: "/inventory?reg=needs-correction&to=IT",
+  assetsSentBackPurchasing: "/inventory?reg=needs-correction&to=PURCHASING",
   leaving: "/employees?employment=OFFBOARDING",
-  prDraft: "/purchases?state=DRAFT",
-  prSubmitted: "/purchases?state=SUBMITTED",
-  prItReviewed: "/purchases?state=IT_REVIEWED",
+  // Migration 38: the purchase-order tabs (prDraft → poSentBack, prSubmitted → poWithIt, prItReviewed → poReady).
+  poSentBack: "/purchases?state=SENT_BACK",
+  poWithIt: "/purchases?state=WITH_IT",
+  poReady: "/purchases?state=READY",
+  // Task 7: Purchasing's To register view; the page lists exactly purchasingToRegisterIds(), which this counts.
+  poToRegister: TO_REGISTER_HREF,
   // Phase 46 spec §4.3
   stockLow: "/stock?low=1",
   suppliersRenewing: "/purchases/suppliers?renewing=30",
   finToConfirmIt: "/finance/assets?fin=with-finance",
   finToConfirmPurchasing: "/finance/assets?cls=PURCHASING&fin=with-finance",
+  // Task 6 (spec §5): Finance's group queue; the page lists exactly reviewGroups(), which reviewGroupCount counts.
+  finGroupsToReview: "/finance/review",
   usersDisabled: "/admin/users?disabled=1",
   deadDeliveries: "/admin/webhooks/deliveries?state=DEAD",
   flagsUnavailable: "/admin/flags?state=unavailable",
@@ -97,14 +108,19 @@ async function readItStatusCounts(keys: ItStatusKey[]): Promise<Array<[ItStatusK
   }
 }
 
+// Task 7 (spec §7): /inventory's own where for a Sent back view: the needs-correction state narrowed to what went back
+// to the team (sentBackToTeamWhere), both classes. It drops when someone fixes it and sends it on, not when read.
+const sentBack = (key: "itSentBack" | "assetsSentBackPurchasing") => () =>
+  prisma.asset.count({ where: buildAssetWhere(parseListState(paramsOf(key), INVENTORY_LIST_CONFIG), null, "IT") });
+
 // /employees: parseListState → buildEmployeeWhere(state); pageEmployees counts that where (no gaps, no loadout sort).
 const employees = (key: "leaving") => () =>
   prisma.employee.count({ where: buildEmployeeWhere(parseListState(paramsOf(key), EMPLOYEES_LIST_CONFIG)) });
 
 // /purchases: parsePurchaseState(state) → purchaseWhere(state, q = "", no department, no supplier); listPurchases
 // counts that where.
-const purchases = (key: "prDraft" | "prSubmitted" | "prItReviewed") => () =>
-  prisma.purchaseRequest.count({ where: purchaseWhere(parsePurchaseState(paramsOf(key).get("state")), "") });
+const purchases = (key: "poSentBack" | "poWithIt" | "poReady") => () =>
+  prisma.purchaseOrder.count({ where: purchaseWhere(parsePurchaseState(paramsOf(key).get("state")), "") });
 
 // Phase 46 spec §4.3: each new count reads its view's URL the way the page does.
 
@@ -136,21 +152,24 @@ const deadDeliveries = () =>
 const flagsUnavailable = () =>
   Promise.resolve(filterFlags(FLAG_SPECS, parseFlagsState(paramsOf("flagsUnavailable").get("state"))).length);
 
-// Spec §5.3 / Phase 40 §6: the Worklist and Purchase reviews counts are admin's and IT's only, as before.
+// Spec §5.3 / Phase 40 §6: the Worklist count is admin's and IT's only, as before.
 const reviewer = (user: User) => user.role === "admin" || user.role === "it_staff";
 
 const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<number>> = {
   worklist: (user) => (reviewer(user) ? worklistCount(user.id, user.role) : Promise.resolve(0)),
-  purchaseReviews: (user) => (reviewer(user) ? purchaseReviewCount() : Promise.resolve(0)),
   leaving: employees("leaving"),
-  prDraft: purchases("prDraft"),
-  prSubmitted: purchases("prSubmitted"),
-  prItReviewed: purchases("prItReviewed"),
+  poSentBack: purchases("poSentBack"),
+  poWithIt: purchases("poWithIt"),
+  poReady: purchases("poReady"),
+  itSentBack: sentBack("itSentBack"),
+  assetsSentBackPurchasing: sentBack("assetsSentBackPurchasing"),
+  poToRegister: () => purchasingToRegisterCount(),
   stockLow,
   stocktakesOverdue,
   suppliersRenewing,
   finToConfirmIt: toConfirm("finToConfirmIt"),
   finToConfirmPurchasing: toConfirm("finToConfirmPurchasing"),
+  finGroupsToReview: () => reviewGroupCount(),
   usersDisabled,
   deadDeliveries,
   flagsUnavailable,

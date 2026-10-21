@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { SEED_PASSWORD } from "../prisma/fixtures";
+import { login } from "./fixtures/login";
 
 // Phase 27, Task 6: the audit-hygiene case at the foot of the "audit log"
 // describe builds its own class-bearing fixtures, so this file gains the
@@ -11,26 +11,6 @@ const db = new PrismaClient();
 test.afterAll(async () => {
   await db.$disconnect();
 });
-
-async function login(page: Page, email: string) {
-  // /logout clears the session cookie and redirects to /login (see
-  // src/app/logout/route.ts) — going there directly, rather than /login,
-  // keeps this helper safe to call a second time mid-test to switch users.
-  await page.goto("/logout");
-  await page.getByRole("link", { name: /^Log in/ }).click();
-  await page.locator('[data-login-ready="true"]').waitFor();
-  await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  // Phase 47 (spec §5.4): the first page after a sign-in rewrites the settings cookies from the person's saved prefs
-  // (UiPrefsSync → restoreUiPrefs, stamping br.uid) and refreshes; wait for it, so the next step never races that refresh.
-  const { id } = await db.user.findUniqueOrThrow({ where: { email: email.toLowerCase() }, select: { id: true } });
-  await expect
-    .poll(async () => (await page.context().cookies()).find((c) => c.name === "br.uid")?.value, { timeout: 30_000 })
-    .toBe(id);
-}
 
 async function expectNoSeriousAxe(page: Page) {
   const results = await new AxeBuilder({ page }).analyze();
@@ -47,18 +27,6 @@ async function pressInQueue(page: Page, ...keys: string[]) {
   const group = page.getByRole("group", { name: /Approval queue/ });
   await group.focus();
   for (const key of keys) await group.press(key);
-}
-
-/**
- * Phase 42 spec §4.3 (builder-check ruling): IT's Approvals badge label. With no purchase reviews waiting it is
- * exactly the old "{n} open approvals[, some past SLA]"; otherwise "{sum} waiting: {a} open approval(s), {b}
- * purchase review(s)[, some approvals past SLA]". Copied, not imported — house rule.
- */
-function itApprovalsLabel(open: number, reviews: number, overdue: boolean): string {
-  if (reviews === 0) return `${open} open approvals${overdue ? ", some past SLA" : ""}`;
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  return `${open + reviews} waiting: ${plural(open, "open approval")}, ${plural(reviews, "purchase review")}`
-    + (overdue ? ", some approvals past SLA" : "");
 }
 
 // Seeded refNos this file depends on (see prisma/seed.ts):
@@ -165,10 +133,9 @@ test.describe.serial("approvals lifecycle — it@", () => {
   });
 
   test("keyboard claim + approve: c claims (owner J. Sarmiento), a approves (row leaves, badge decrements)", async ({ page }) => {
-    // Phase 42 (spec §4.3): IT's Approvals link badge is the open approvals plus the purchase reviews waiting for
-    // IT (the seed's PR-0198). While Approvals is the current link its badge steps aside and its Open view
-    // carries the open count alone.
-    const reviews = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
+    // Phase 42 (spec §4.3): IT's Approvals link badge is the open approvals (migration 38 moved the purchase
+    // orders waiting for IT onto their own Purchase orders link). While Approvals is the current link its badge
+    // steps aside and its Open view carries the open count.
     const nav = 'nav[aria-label="Workspace"]';
     // Phase 46 (spec §4.2): the link sits in a row with its "{Link} views" toggle (li > div > a), so the top-level
     // link is "not inside a view list" rather than a direct child of its li.
@@ -176,8 +143,8 @@ test.describe.serial("approvals lifecycle — it@", () => {
     const sidebarBadge = page.locator(`${nav} li li a[href="/approvals"] span[aria-label*="open approval"]`);
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
-    await expect(linkBadge).toHaveText(String(3 + reviews));
-    await expect(linkBadge).toHaveAttribute("aria-label", itApprovalsLabel(3, reviews, true));
+    await expect(linkBadge).toHaveText("3");
+    await expect(linkBadge).toHaveAttribute("aria-label", "3 open approvals, some past SLA");
 
     await page.goto("/approvals");
     await expect(linkBadge).toHaveCount(0);
@@ -194,10 +161,10 @@ test.describe.serial("approvals lifecycle — it@", () => {
     await expect(page.getByRole("row", { name: /APR-2041/ })).toHaveCount(0);
     await expect(sidebarBadge).toHaveText("2");
 
-    // … and the closed link's sum drops by the same one (APR-2040 is still past SLA).
+    // … and the closed link's badge drops by the same one (APR-2040 is still past SLA).
     await page.goto("/inventory");
-    await expect(linkBadge).toHaveText(String(2 + reviews));
-    await expect(linkBadge).toHaveAttribute("aria-label", itApprovalsLabel(2, reviews, true));
+    await expect(linkBadge).toHaveText("2");
+    await expect(linkBadge).toHaveAttribute("aria-label", "2 open approvals, some past SLA");
   });
 
   test("worker executes: APR-2041 -> EXECUTED, /inventory redirect + history, APR-2035 -> EXECUTION_FAILED", async ({ page }) => {

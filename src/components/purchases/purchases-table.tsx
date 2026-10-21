@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Table, TBody, THead, Th, Td, Tr } from "@/components/ui/table";
 import { StatusDot, StatusPill } from "@/components/ui/status";
+import { PO_STATE_LABEL } from "@/lib/po-flow";
 import type { PurchaseListRow } from "@/server/modules/purchases/queries";
 
 /**
@@ -15,7 +16,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
         <Tr>
           <Th width={26} aria-label="Status colour" />
           <Th width={104}>Ref</Th>
-          <Th>Request</Th>
+          <Th>Purchase order</Th>
           <Th width={78} align="right">Items</Th>
           <Th width={124} align="right">Value</Th>
           {/* the department sits under the requester's name: one column, so State fits at 1280 px */}
@@ -51,7 +52,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
             <Td>{row.supplier ? <span className="block max-w-[11rem] truncate" title={row.supplier}>{row.supplier}</span> : <span className="text-fg-faint">—</span>}</Td>
             <Td>
               <span className="flex flex-col gap-0.5 py-1.5">
-                <StatusPill value={row.state} className="self-start" />
+                <StatusPill value={row.state} label={PO_STATE_LABEL[row.state]} className="self-start" />
                 <span className="font-mono text-[10px] text-fg-muted">{row.dwell}</span>
               </span>
             </Td>

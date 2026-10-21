@@ -13,7 +13,7 @@ import { conflict, forbidden, ok, rateLimited, validationError, type ActionResul
 
 /**
  * Spec §5.3/facts R3. Mirrors `purchases/document-actions.ts`'s
- * `uploadRequestDocument` field for field, with `lotId` in place of
+ * `uploadPoDocument` field for field, with `lotId` in place of
  * `requestId` and `stock-lots/<lotId>` in place of `requests/<id>` as the
  * upload directory. The audit stays on `entityType: "stock-item"` (the
  * lot's item), naming the lot in the diff — no `stock-lot` audit entity

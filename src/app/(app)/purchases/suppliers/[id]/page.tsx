@@ -52,7 +52,7 @@ export default async function SupplierProfilePage({
       <PageHeader
         title={detail.name}
         breadcrumb={[
-          { label: "Purchase requests", href: "/purchases" },
+          { label: "Purchase orders", href: "/purchases" },
           { label: "Suppliers", href: "/purchases/suppliers" },
           { label: detail.name },
         ]}
@@ -127,10 +127,10 @@ export default async function SupplierProfilePage({
         <SupplierDocumentsCard vendorId={id} docs={detail.documents} canUpload={manage} />
 
         <Card>
-          <CardHeader title="Purchase requests" />
+          <CardHeader title="Purchase orders" />
           <CardBody className="flex flex-col gap-3">
             {detail.requests.rows.length === 0 ? (
-              <p className="py-2 text-center text-xs text-fg-muted">No purchase requests name this supplier yet.</p>
+              <p className="py-2 text-center text-xs text-fg-muted">No purchase orders name this supplier yet.</p>
             ) : (
               <>
                 <Table>

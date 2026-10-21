@@ -31,7 +31,7 @@ export function KeyboardShortcutsButton({ className }: { className?: string }) {
 export function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
   const search = useSearchShortcutLabel();
   const rows: Array<{ keys: string[]; what: string }> = [
-    { keys: [search], what: "Search assets, people, requests" },
+    { keys: [search], what: "Search assets, people, purchase orders" },
     { keys: ["/"], what: "Focus this page's search box" },
     { keys: ["["], what: "Collapse or expand the sidebar" },
     { keys: ["J", "K"], what: "Approvals: move down or up the queue" },

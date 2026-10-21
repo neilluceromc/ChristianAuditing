@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Step } from "./login-steps";
 
-// The real actions pull in next-auth and Prisma; the card only needs their identities.
+// The real actions pull in next-auth and Prisma; the page only needs their identities.
 vi.mock("@/server/auth/actions", () => ({
   signInWithCredentials: async () => ({}),
   signUp: async () => ({}),
@@ -10,64 +10,95 @@ vi.mock("@/server/auth/actions", () => ({
 }));
 
 const { LoginExperience } = await import("./login-experience");
+type Card = Parameters<typeof LoginExperience>[0]["card"];
 
-const card = {
+const base: Card = {
   domain: "thebackroomop.com",
   microsoftAction: null,
   quick: null,
-  viewerLanding: "/inventory",
+  viewerLanding: "/",
 };
 
-function render(initialStep: Step): string {
+function render(initialStep: Step, card: Partial<Card> = {}): string {
   return renderToStaticMarkup(
-    <LoginExperience page="login" initialStep={initialStep} world="<svg></svg>" card={card} />,
+    <LoginExperience page={initialStep === "login" ? "login" : "signup"} initialStep={initialStep} card={{ ...base, ...card }} />,
   );
 }
 
 const heroTag = (html: string) => html.match(/<div[^>]*class="lw-hero[^"]*"[^>]*>/)?.[0] ?? "";
 
-describe("LoginExperience focus mode (server render)", () => {
-  it("renders Welcome unfocused: the room Cris shows and the forward Cris is out of sight", () => {
-    const html = render("welcome");
+describe("LoginExperience (server render)", () => {
+  it("opens /login on the stage, not in focus mode, with the day log's first scene", () => {
+    const html = render("login");
     expect(heroTag(html)).toMatch(/class="lw-hero"/);
-    expect(heroTag(html)).not.toContain("data-snap");
-    expect(html).toMatch(/class="lw-crisw"/);
-    expect(html).toMatch(/class="lw-guide lw-preset"/);
-    expect(heroTag(html)).not.toContain("--lw-dx");
+    expect(html).toMatch(/class="lw-stage lw-ph-scan"/);
+    expect(html).toContain("Checking in a returned laptop");
+    expect(html.match(/class="lw-dot[ "]/g)).toHaveLength(6);
   });
 
-  it("renders a direct load focused, placed without animating, the room Cris hidden", () => {
-    for (const step of ["login-email", "signup-name"] as Step[]) {
-      const html = render(step);
-      expect(heroTag(html)).toMatch(/class="lw-hero lw-focus"/);
-      expect(heroTag(html)).toContain('data-snap="all"');
-      expect(html).toMatch(/class="lw-crisw lw-gone"/);
-    }
+  it("opens /signup in focus mode", () => {
+    expect(heroTag(render("signup-name"))).toMatch(/class="lw-hero lw-focus"/);
   });
 
-  it("renders a direct load with the forward Cris already beside the card, placed by CSS until measured", () => {
-    for (const step of ["login-email", "signup-name"] as Step[]) {
-      const html = render(step);
-      const guideTag = html.match(/<div class="lw-guide[^"]*"[^>]*>/)?.[0] ?? "";
-      expect(guideTag).toMatch(/class="lw-guide lw-preset lw-on"/);
-      // No inline position: the .lw-preset CSS default stands Cris at the focus point.
-      expect(guideTag).not.toMatch(/left:|top:|transform:/);
-      // No inline card shift: the CSS default (worked out from the card's geometry) centres the card.
-      expect(heroTag(html)).not.toContain("--lw-dx");
-    }
+  it("hides the whole stage from assistive tech and puts the card first after it", () => {
+    const html = render("login");
+    expect(html).toMatch(/<div class="lw-left" aria-hidden="true">/);
+    const stageEnd = html.indexOf("<main");
+    expect(html.indexOf('class="lw-left"')).toBeLessThan(stageEnd);
+    // Nothing focusable inside the hidden stage.
+    const stage = html.slice(html.indexOf('class="lw-left"'), stageEnd);
+    expect(stage).not.toMatch(/<(button|a|input|select)\b/);
   });
 
-  it("keeps the forward Cris and its bubble outside the scene, hidden from assistive tech, after the day log", () => {
-    const html = render("login-email");
-    const mainEnd = html.indexOf("</main>");
-    const dayLog = html.indexOf('aria-label="Cris&#x27;s day"');
-    const guide = html.indexOf('class="lw-guide');
-    const bubble = html.indexOf('class="lw-bubble lw-gb');
-    expect(mainEnd).toBeGreaterThan(0);
-    expect(dayLog).toBeGreaterThan(mainEnd);
-    expect(guide).toBeGreaterThan(dayLog);
-    expect(bubble).toBeGreaterThan(guide);
-    expect(html).toMatch(/<div class="lw-guide[^"]*"[^>]*aria-hidden="true"/);
-    expect(html).toMatch(/<div class="lw-bubble lw-gb"[^>]*aria-hidden="true"/);
+  it("draws Cris with the app's gold orb, and the room svg once", () => {
+    const html = render("login");
+    expect(html).toContain('<use href="#cris-gold"');
+    expect(html).toContain('<symbol id="cris-gold"');
+    expect(html.match(/class="lw-f-wall"/g)).toHaveLength(1);
+    expect(html).toContain("PO-1042");
+    expect(html).not.toContain("PR-1042");
+  });
+
+  it("has a Pause control for the motion and a polite status for the signed-in sequence", () => {
+    const html = render("login");
+    expect(html).toMatch(/<button type="button" class="lw-pause" aria-pressed="false">.*Pause motion<\/button>/);
+    expect(html).toMatch(/<div class="lw-enter" role="status" aria-live="polite">/);
+  });
+
+  it("shows the STAGING pill only when quick sign-in is on, closed unless a quick sign-in was refused", () => {
+    expect(render("login")).not.toContain("lw-secret");
+    const on = render("login", { quick: { accounts: [{ email: "it@x.com", label: "IT staff" }], refused: false } });
+    expect(on).toMatch(/<button type="button" class="lw-secret" aria-expanded="false" aria-controls="[^"]+">.*Staging<\/button>/);
+    expect(on).not.toContain("Quick sign-in");
+  });
+
+  it("opens the quick sign-in popover on a refusal, with the banner, the picker and next", () => {
+    const html = render("login", {
+      next: "/employees",
+      quick: {
+        accounts: [
+          { email: "it@x.com", label: "IT staff" },
+          { email: "admin@x.com", label: "Admin" },
+        ],
+        refused: true,
+      },
+    });
+    expect(html).toMatch(/aria-expanded="true"/);
+    expect(html).toContain(">Quick sign-in</h2>");
+    expect(html).toContain("One click, no password. Turned on for this server only.");
+    expect(html).toContain("That quick sign-in is not available — the account is missing or disabled.");
+    expect(html).toMatch(/<select[^>]* name="email"/);
+    expect(html.indexOf('value="it@x.com"')).toBeLessThan(html.indexOf('value="admin@x.com"'));
+    expect(html).toContain(">Account</label>");
+    expect(html).toContain('aria-label="Close quick sign-in"');
+    // `next` rides on both forms: the sign-in form and the quick sign-in.
+    expect(html.match(/<input type="hidden" name="next" value="\/employees"\/>/g)).toHaveLength(2);
+    expect(html).toMatch(/>it@x\.com<\/p>/);
+  });
+
+  it("says when none of the listed quick sign-in accounts exists", () => {
+    const html = render("login", { quick: { accounts: [], refused: true } });
+    expect(html).toContain("None of the listed accounts exists or is enabled.");
+    expect(html).not.toContain("<select");
   });
 });

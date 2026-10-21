@@ -450,14 +450,14 @@ export function monthLabels(now: Date, months: number): string[] {
 }
 
 const REQUEST_TONE: Record<string, MakeUpTone> = {
-  DRAFT: "neutral", SUBMITTED: "chart-1", IT_REVIEWED: "chart-2", COMPLETED: "chart-3", CANCELLED: "bad",
+  SENT_BACK: "neutral", WITH_IT: "chart-1", READY: "chart-2", CANCELLED: "bad",
 };
 
-/** Purchasing's make-up: requests by state in tab order, each linking to its /purchases tab (whose count it is). */
+/** Purchasing's make-up: purchase orders by state in tab order, each linking to its /purchases tab (whose count it is). */
 export function requestStateMakeUp(counts: Record<string, number>): MakeUp {
   return {
-    title: "Requests by state",
-    unit: "requests",
+    title: "Purchase orders by state",
+    unit: "purchase orders",
     rows: PURCHASE_TABS.filter((t) => t.id !== "ALL" && (counts[t.id] ?? 0) > 0).map((t) => ({
       label: t.label, value: counts[t.id], tone: REQUEST_TONE[t.id] ?? "neutral", href: t.href,
     })),
@@ -531,6 +531,41 @@ export interface OverdueStocktake {
 /** Order by tone (bad, warn, info), keeping the source order within a tone, and keep `max`. */
 function byTone(items: NeedItem[], max: number): NeedItem[] {
   return items.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]).slice(0, max);
+}
+
+/** One of a team's Home cards (Task 7, spec §7): its count — from state, never from the bell — and the tab it opens. */
+export interface TeamCard {
+  n: number;
+  href: string;
+  meta: string;
+  /** what one unit is, singular and plural ("purchase order", "purchase orders"); none reads "N sent back to you" */
+  noun?: readonly [string, string];
+}
+
+const counted = (c: TeamCard) => (c.noun ? plural(c.n, c.noun[0], c.noun[1]) : String(c.n));
+
+/**
+ * Task 7 (spec §7): each team's Home shows what was sent back to it (bad: another team returned work) and what it has
+ * to check (warn), each linking to its tab — "N sent back to you" / "N to check"; Purchasing's two Sent back tabs read
+ * "N purchase orders sent back to you" and "N assets sent back to you" (fix round 1). A card at 0 is left out. They
+ * come first within their tone, ahead of the workspace's own items, and `max` still holds.
+ */
+export function withTeamCards(
+  cards: { sentBack?: TeamCard[]; toCheck?: TeamCard; toCheckIcon?: IconName }, items: NeedItem[], max = 6,
+): NeedItem[] {
+  const out: NeedItem[] = [];
+  for (const c of cards.sentBack ?? []) {
+    if (c.n > 0) {
+      out.push({ tone: "bad", icon: "alert", title: `${counted(c)} sent back to you`, meta: c.meta, action: "Fix", href: c.href });
+    }
+  }
+  if (cards.toCheck && cards.toCheck.n > 0) {
+    out.push({
+      tone: "warn", icon: cards.toCheckIcon ?? "requests",
+      title: `${counted(cards.toCheck)} to check`, meta: cards.toCheck.meta, action: "Review", href: cards.toCheck.href,
+    });
+  }
+  return byTone([...out, ...items], max);
 }
 
 /**

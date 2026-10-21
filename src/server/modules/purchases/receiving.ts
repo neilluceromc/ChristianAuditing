@@ -9,6 +9,7 @@ import { TYPE_REQUIRED } from "@/lib/register-type";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
+import { notify } from "@/server/notifications/notify";
 import { TAG_RULE, TAG_SHAPE } from "@/lib/tag-key";
 import { identifierWhere } from "@/lib/inventory-list";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/server/action-result";
 import { serialRequired } from "@/lib/serial-rules";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
+import { categoryNoun } from "@/lib/register-catalog";
 
 // Same shape createSchema uses (inventory/actions.ts) — a malformed date
 // string is a field error at the picker, never an Invalid Date reaching
@@ -57,10 +59,8 @@ const registerSchema = z.object({
   // Accepted and ignored: a batch always lands in the class's default status. It exists so the
   // Register form can send one shape at any quantity.
   requestedStatus: z.string().optional(),
-  // OPTIONAL metadata, never a gate (C-5). If a request is named it must be
-  // COMPLETED, because linking an asset to a request still in flight would
-  // claim a provenance that is not settled.
-  requestId: z.string().optional(),
+  // No purchase order here (spec §4 way 3): a delivery against a PO registers from the PO itself
+  // (po-register.ts), which links each asset to its line. The old `requestId` is not a field any more.
 });
 
 interface Registered {
@@ -69,8 +69,13 @@ interface Registered {
   purchaseRecordId: string;
 }
 
+/**
+ * Spec §4 way 3: IT registers directly, with no PO — IT gear only (REGISTRABLE_CLASSES), an admin anything.
+ * Purchasing registers only from a purchase order (po-register.ts). The submit is one registration group (a
+ * PurchaseRecord) that reaches Finance as one group and rings Finance's bell once.
+ */
 export async function registerAssets(input: unknown): Promise<ActionResult<Registered>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff");
+  const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -89,16 +94,15 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
   if (dupAt >= 0) errors.tags = `Row ${dupAt + 1} · ${d.tags[dupAt]} appears twice in this batch`;
 
   // The category decides the class; the class decides who may register into
-  // it. Finance and viewers never reach here (actionRole above), so the only
-  // refusal this produces is IT registering a Purchasing category — named,
-  // because "forbidden" would not say what to do instead.
+  // it. Only IT and admin reach here (actionRole above), so the only refusal
+  // this produces is IT registering a Purchasing category — named, because
+  // "forbidden" would not say what to do instead.
   const category = await prisma.assetCategory.findUnique({
     where: { id: d.categoryId },
     select: { name: true, cls: true },
   });
   if (!category) errors.categoryId = "Unknown category";
-  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
-  // managing — an IT asset Purchasing registers is IT's from this moment.
+  // Spec §4 way 3: IT registers its own class directly; Purchasing's items come in from a PO.
   else if (!canRegisterClass(user.role, category.cls)) {
     errors.categoryId = `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not register ${CLASS_LABEL[category.cls]} assets.`;
   }
@@ -145,16 +149,6 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
       const first = rowSerials.find((s) => on.has(s)) as string;
       errors.serials = `Serial ${first} is already on ${on.get(first)}${more(on.size - 1)}`;
     }
-  }
-
-  // OPTIONAL metadata, never a gate (C-5) — but a named request must exist and be COMPLETED.
-  if (d.requestId) {
-    const req = await prisma.purchaseRequest.findUnique({
-      where: { id: d.requestId },
-      select: { refNo: true, state: true },
-    });
-    if (!req) errors.requestId = "Unknown request";
-    else if (req.state !== "COMPLETED") errors.requestId = `${req.refNo} is ${req.state.toLowerCase()} — only a completed request can be linked.`;
   }
 
   if (Object.keys(errors).length || !category) return validationError(errors);
@@ -207,7 +201,6 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             warrantyCoveredBy: d.warrantyCoveredBy || null,
             warrantyContact: d.warrantyContact || null,
             purchaseRecordId: record.id,
-            purchaseRequestId: d.requestId || null,
             itVerifiedAt: selfChecked ? new Date() : null,
             itVerifiedById: selfChecked ? user.id : null,
           },
@@ -236,6 +229,13 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           quantity: { from: null, to: d.tags.length },
           total: { from: null, to: (Number(d.cost || 0) * d.tags.length + Number(d.fees || 0)).toFixed(2) },
         },
+      });
+      // Spec §4 way 3: the batch reaches Finance as one group, and Finance's bell rings once.
+      await notify(tx, {
+        team: "FINANCE", kind: "TO_CHECK",
+        title: `${d.tags.length} ${categoryNoun(category.name, d.tags.length)} registered by ${user.role === "admin" ? "an admin" : "IT"}, ready to check`,
+        href: `/finance/review/${record.id}`, actorId: user.id, actorRole: user.role,
+        entityType: "purchase-record", entityId: record.id,
       });
       done = { created, ids, purchaseRecordId: record.id };
     }, {

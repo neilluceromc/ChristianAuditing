@@ -2,14 +2,30 @@ import type { AssetClass } from "@prisma/client";
 import { Tabs } from "@/components/ui/tabs";
 import { withClsQS } from "@/lib/asset-class";
 
-/** Phase 34 (spec §3, plan P-9): two real pages under one heading; the Labels tab counts what waits. */
-export function NewEquipmentTabs({ active, cls, waiting }: { active: "register" | "labels"; cls: AssetClass; waiting: number }) {
+/**
+ * Where "register more" goes: the direct Register, or — for Purchasing, which registers only from a PO — every PO.
+ * Not `?state=READY`: a mixed PO stays WITH_IT until IT's part is done, and its non-IT lines are Purchasing's to
+ * register meanwhile, so a READY-only list would hide them. There is no combined state filter, so: All.
+ */
+export function registerLink(direct: boolean, cls: AssetClass): { label: string; href: string } {
+  return direct
+    ? { label: "Register", href: "/inventory/register" + withClsQS("", cls) }
+    : { label: "Register from a PO", href: "/purchases" };
+}
+
+/**
+ * Phase 34 (spec §3, plan P-9): two real pages under one heading; the Labels tab counts what waits. `direct: false`
+ * (Purchasing, spec §4) points the first tab at the purchase orders instead of the direct Register.
+ */
+export function NewEquipmentTabs({ active, cls, waiting, direct = true }: {
+  active: "register" | "labels"; cls: AssetClass; waiting: number; direct?: boolean;
+}) {
   return (
     <Tabs
       label="New equipment"
       className="mb-4"
       items={[
-        { label: "Register", href: "/inventory/register" + withClsQS("", cls), active: active === "register" },
+        { ...registerLink(direct, cls), active: active === "register" },
         {
           label: (
             <span className="inline-flex items-center gap-1.5">

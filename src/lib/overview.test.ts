@@ -358,11 +358,11 @@ describe("monthBuckets / monthWindowStart / monthLabels — Manila months ending
 
 describe("requestStateMakeUp", () => {
   it("one row per request state in tab order, each linking to its tab; empty states are left out", () => {
-    const m = requestStateMakeUp({ ALL: 9, DRAFT: 1, SUBMITTED: 3, IT_REVIEWED: 0, COMPLETED: 4, CANCELLED: 1 });
+    const m = requestStateMakeUp({ ALL: 9, WITH_IT: 3, SENT_BACK: 1, READY: 4, CANCELLED: 1 });
     expect(m.rows).toEqual([
-      { label: "Drafts", value: 1, tone: "neutral", href: "/purchases?state=DRAFT" },
-      { label: "Awaiting IT", value: 3, tone: "chart-1", href: "/purchases?state=SUBMITTED" },
-      { label: "Completed", value: 4, tone: "chart-3", href: "/purchases?state=COMPLETED" },
+      { label: "With IT", value: 3, tone: "chart-1", href: "/purchases?state=WITH_IT" },
+      { label: "Sent back", value: 1, tone: "neutral", href: "/purchases?state=SENT_BACK" },
+      { label: "Ready to register", value: 4, tone: "chart-2", href: "/purchases?state=READY" },
       { label: "Cancelled", value: 1, tone: "bad", href: "/purchases?state=CANCELLED" },
     ]);
   });

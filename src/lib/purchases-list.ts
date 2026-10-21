@@ -1,46 +1,61 @@
-import type { Prisma, PurchaseRequestState } from "@prisma/client";
+import type { Prisma, PurchaseOrderState } from "@prisma/client";
+import { poRefSearch } from "./po-flow";
 
 /**
- * `?state=` is the tab contract (HANDOVER §6.4): the sidebar's Requests
+ * `?state=` is the tab contract (HANDOVER §6.4): the sidebar's Purchase orders
  * views target it and currentNav highlights them by it, so the tab is
  * parsed on its own rather than as a url-state facet (facets are comma-joined
  * multi-selects; this is a single value that names a nav destination).
  */
 export const PURCHASE_STATES = [
-  "DRAFT", "SUBMITTED", "IT_REVIEWED", "COMPLETED", "CANCELLED",
-] as const satisfies readonly PurchaseRequestState[];
+  "WITH_IT", "SENT_BACK", "READY", "CANCELLED",
+] as const satisfies readonly PurchaseOrderState[];
 
 export const PURCHASE_TABS = [
   { id: "ALL", label: "All", href: "/purchases" },
-  { id: "DRAFT", label: "Drafts", href: "/purchases?state=DRAFT" },
-  { id: "SUBMITTED", label: "Awaiting IT", href: "/purchases?state=SUBMITTED" },
-  { id: "IT_REVIEWED", label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED" },
-  { id: "COMPLETED", label: "Completed", href: "/purchases?state=COMPLETED" },
+  { id: "WITH_IT", label: "With IT", href: "/purchases?state=WITH_IT" },
+  { id: "SENT_BACK", label: "Sent back", href: "/purchases?state=SENT_BACK" },
+  { id: "READY", label: "Ready to register", href: "/purchases?state=READY" },
   { id: "CANCELLED", label: "Cancelled", href: "/purchases?state=CANCELLED" },
 ] as const;
 
 export type PurchaseTabId = (typeof PURCHASE_TABS)[number]["id"];
 
-export function parsePurchaseState(raw: string | null | undefined): PurchaseRequestState | null {
+/**
+ * Task 7: Purchasing's To register view — the POs (READY or WITH_IT) with a line Purchasing can register and units
+ * left (server/modules/purchases/to-register.ts). A filter, not a state tab: a mixed PO still with IT is in it.
+ */
+export const TO_REGISTER_PARAM = "register";
+export const TO_REGISTER_HREF = `/purchases?${TO_REGISTER_PARAM}=1`;
+
+export function parseToRegister(raw: string | null | undefined): boolean {
+  return raw === "1";
+}
+
+export function parsePurchaseState(raw: string | null | undefined): PurchaseOrderState | null {
   return (PURCHASE_STATES as readonly string[]).includes(raw ?? "")
-    ? (raw as PurchaseRequestState)
+    ? (raw as PurchaseOrderState)
     : null;
 }
 
 export function purchaseWhere(
-  state: PurchaseRequestState | null,
+  state: PurchaseOrderState | null,
   q: string,
   department: string | null = null,
   supplier: string | null = null,
-): Prisma.PurchaseRequestWhereInput {
-  const where: Prisma.PurchaseRequestWhereInput = {};
+): Prisma.PurchaseOrderWhereInput {
+  const where: Prisma.PurchaseOrderWhereInput = {};
   if (state) where.state = state;
+  // "Ready to register" means what it says: a completed PO (every line done and every asset approved, or an old
+  // request the old flow completed — migration 38) stays READY but has nothing left to register.
+  if (state === "READY") where.completedAt = null;
   if (q) {
     // contains-search with insensitive mode is the sanctioned use; the
     // ILIKE-wildcard hazard applies to identity/equals lookups only.
     where.OR = [
-      { refNo: { contains: q, mode: "insensitive" } },
-      { units: { some: { description: { contains: q, mode: "insensitive" } } } },
+      // an old printed PR-0188 still finds PO-0188 (poRefSearch)
+      { refNo: { contains: poRefSearch(q), mode: "insensitive" } },
+      { lines: { some: { description: { contains: q, mode: "insensitive" } } } },
     ];
   }
   // Spec §5.1: "none" is the pre-phase rows that carry no department at all.
@@ -66,11 +81,10 @@ function ago(from: Date | null, fallback: Date, now: Date): string {
 }
 
 export interface DwellRow {
-  state: PurchaseRequestState;
+  state: PurchaseOrderState;
   updatedAt: Date;
   submittedAt: Date | null;
-  reviewedAt: Date | null;
-  completedAt: Date | null;
+  sentBackAt?: Date | null;
   cancelledAt: Date | null;
   /** derived from the thread (bounceBack !== null) — not a column */
   bounced: boolean;
@@ -78,24 +92,22 @@ export interface DwellRow {
 
 /**
  * README 4d: the second line under State. "back from finance" is the fact the
- * enum can't carry — SUBMITTED reached forwards and SUBMITTED reached
- * backwards are the same value and a completely different situation.
+ * enum can't carry — a legacy request Finance bounced and one that simply
+ * waits on IT are both WITH_IT, and a completely different situation.
  */
 export function dwellLine(row: DwellRow, now: Date = new Date()): string {
-  const waiting = (d: Date | null) => since(d, row.updatedAt, now);
+  const waiting = (d: Date | null | undefined) => since(d ?? null, row.updatedAt, now);
   switch (row.state) {
-    case "DRAFT":
-      return row.bounced
-        ? `sent back by IT · ${waiting(row.updatedAt)}`
-        : `draft · edited ${ago(row.updatedAt, row.updatedAt, now)}`;
-    case "SUBMITTED":
+    case "SENT_BACK":
+      return row.bounced || row.sentBackAt
+        ? `sent back · ${waiting(row.sentBackAt)}`
+        : `with Purchasing · edited ${ago(row.updatedAt, row.updatedAt, now)}`;
+    case "WITH_IT":
       return row.bounced
         ? `back from finance · ${waiting(row.updatedAt)}`
-        : `awaiting IT · ${waiting(row.submittedAt)}`;
-    case "IT_REVIEWED":
-      return `awaiting finance · ${waiting(row.reviewedAt)}`;
-    case "COMPLETED":
-      return `completed ${ago(row.completedAt, row.updatedAt, now)}`;
+        : `with IT · ${waiting(row.submittedAt)}`;
+    case "READY":
+      return `ready to register · ${waiting(row.updatedAt)}`;
     case "CANCELLED":
       return `cancelled ${ago(row.cancelledAt, row.updatedAt, now)}`;
   }

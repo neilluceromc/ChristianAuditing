@@ -1,25 +1,21 @@
-// The sign-in card's steps, their progress, Cris's lines and the client checks (spec §5.2, §6).
-// Pure, so the rules are tested without the DOM.
+// The sign-in card's steps, Cris's lines, the signed-in sequence, her idle facts and the client checks (spec §5.2,
+// §6; Task 10's blob-style redesign). Pure, so the rules are tested without the DOM.
+import type { CrisMood } from "@/lib/cris-mood";
 import type { SignUpField } from "@/lib/signup-rules";
 
-export type Step = "welcome" | "login-email" | "login-password" | "signup-name" | "signup-password" | "signup-done";
+/** One sign-in form ("Welcome back"), then the three sign-up steps. */
+export type Step = "login" | "signup-name" | "signup-password" | "signup-done";
 
-export const STEP_PROGRESS: Record<Step, number> = {
-  welcome: 0,
-  "login-email": 50,
-  "login-password": 100,
-  "signup-name": 33,
-  "signup-password": 67,
-  "signup-done": 100,
-};
+/** The page's first step: /signup opens Sign up 1, /login the sign-in form (`?step=login` only focuses it). */
+export function initialStep(page: "login" | "signup"): Step {
+  return page === "signup" ? "signup-name" : "login";
+}
 
-/** The order of the steps within each flow; a move to an earlier one is backward. */
-const ORDER: Step[] = ["welcome", "login-email", "login-password", "signup-name", "signup-password", "signup-done"];
-
-/** The page's first step: `/login?step=login` opens Log in 1, `/signup` opens Sign up 1, anything else Welcome. */
-export function initialStep(page: "login" | "signup", stepParam: string | undefined): Step {
-  if (page === "signup") return "signup-name";
-  return stepParam === "login" ? "login-email" : "welcome";
+/** The sign-up progress bars, one per step: done, current, or still to come. None on the sign-in form. */
+export function segments(step: Step): ("done" | "on" | "")[] {
+  const at = { login: -1, "signup-name": 0, "signup-password": 1, "signup-done": 2 }[step];
+  if (at < 0) return [];
+  return [0, 1, 2].map((i) => (i < at ? "done" : i === at ? "on" : ""));
 }
 
 /** The first client check that fails for an email, or "" when it is fine. */
@@ -33,25 +29,19 @@ export function emailProblem(raw: string, domain: string | null): string {
   return "";
 }
 
-/** The local part of an email, split on '.', '_' or '-'. */
-function localParts(email: string): string[] {
-  const local = email.trim().split("@")[0] ?? "";
-  return local.split(/[._-]/).filter(Boolean);
-}
-
-/** Up to two initials from the email's local part: "neil.lucero@…" gives "NL". "?" when there is none. */
-export function initials(email: string): string {
-  const letters = localParts(email)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join("");
-  return letters || "?";
-}
-
 /** The first name in an email's local part, capitalised: "neil.lucero@…" gives "Neil". "" when there is none. */
 export function firstFromEmail(email: string): string {
-  const first = localParts(email)[0];
+  const local = email.trim().split("@")[0] ?? "";
+  const first = local.split(/[._-]/).filter(Boolean)[0];
   return first ? first[0]!.toUpperCase() + first.slice(1).toLowerCase() : "";
+}
+
+/**
+ * The email the signed-in sequence may show and greet by: a password sign-in's, as typed. A Microsoft sign-in's
+ * account is picked at Microsoft, so whatever sits in the email field is not who is signing in — it shows none.
+ */
+export function sequenceEmail(passwordSignIn: boolean, typed: string): string {
+  return passwordSignIn ? typed.trim() : "";
 }
 
 /** The first word of a name, trimmed. */
@@ -64,12 +54,13 @@ export function stepForField(field: SignUpField): Step {
   return field === "password" ? "signup-password" : "signup-name";
 }
 
-/** Cris's line for a step, or null on Welcome (no bubble). */
-export function crisLine(step: Step, ctx: { email: string; name: string }): string | null {
-  switch (step) {
-    case "welcome":
-      return null;
-    case "login-email":
+/**
+ * Cris's line beside the card. "login" is her greeting when someone starts on the sign-in form; "login-password"
+ * is what she says when they reach the password with a good email, before she looks away.
+ */
+export function crisLine(at: Step | "login-password", ctx: { email: string; name: string }): string {
+  switch (at) {
+    case "login":
       return "Hi again! What's your work email?";
     case "login-password": {
       const first = firstFromEmail(ctx.email);
@@ -93,10 +84,48 @@ export function errorLine(message: string): string {
   return `Hmm. ${message}`;
 }
 
-/** True when moving from one step to another goes back: to Welcome, or to an earlier step of the same flow. */
-export function isBackward(from: Step, to: Step): boolean {
-  if (to === "welcome") return from !== "welcome";
-  const flow = (step: Step) => (step.startsWith("login") ? "login" : step.startsWith("signup") ? "signup" : "welcome");
-  if (flow(from) !== flow(to)) return false;
-  return ORDER.indexOf(to) < ORDER.indexOf(from);
+/**
+ * The signed-in sequence (owner's decision: it plays only while the sign-in request is in flight, and never holds
+ * the redirect). Each status line, Cris's mood for it and how far the progress bar runs.
+ */
+export function enterLines(name: string): { text: string; mood: CrisMood; bar: number }[] {
+  return [
+    { text: "Checking your badge…", mood: "search", bar: 0.25 },
+    { text: "Unlocking the stockroom…", mood: "think", bar: 0.5 },
+    { text: "Counting your assets…", mood: "search", bar: 0.82 },
+    { text: name ? `Welcome back, ${name}!` : "Welcome back!", mood: "talk", bar: 1 },
+    { text: "Opening your dashboard…", mood: "idle", bar: 1 },
+  ];
+}
+
+/** A fact Cris tells when the page sits idle or she is tapped; a quiz pauses before its answer. */
+export type Fact = { q: string; a?: string; mood?: CrisMood };
+
+/**
+ * The owner's facts, minus every line that names or points at a real person (owner's decisions, 2026-10-21 and the
+ * final review, which dropped a line about the creator): only this one is left.
+ */
+export const FACTS: readonly Fact[] = [
+  { q: "My original design came from Raphael in Tensura." },
+];
+
+/**
+ * The next fact from a shuffled bag, so every fact comes up once before any repeats and never twice in a row.
+ * Returns the fact's index and the bag left over. `random` is Math.random in the page, injectable for tests.
+ */
+export function nextFact(
+  bag: number[],
+  last: number | null,
+  count: number,
+  random: () => number = Math.random,
+): { index: number; bag: number[] } {
+  let left = bag;
+  if (left.length === 0) {
+    left = Array.from({ length: count }, (_, i) => i).filter((i) => count < 2 || i !== last);
+    for (let i = left.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [left[i], left[j]] = [left[j]!, left[i]!];
+    }
+  }
+  return { index: left[0]!, bag: left.slice(1) };
 }

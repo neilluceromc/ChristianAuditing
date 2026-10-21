@@ -21,9 +21,12 @@ import { storeUpload, validateUpload } from "@/server/uploads";
  * filename is sanitized to a safe charset — the original name survives only
  * as display text.
  */
+/** Who may upload at all, before the asset's own rule (canAttachDocuments): the departments, and Finance (Task 6). */
+const mayUpload = (role: Parameters<typeof isApprover>[0]) => isApprover(role) || role === "finance_staff";
+
 export async function uploadDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
   const user = await actionUser();
-  if (!user || !isApprover(user.role)) return forbidden();
+  if (!user || !mayUpload(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
 
@@ -61,13 +64,14 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult<{
     return created;
   });
   revalidatePath(`/inventory/${assetId}/documents`);
+  revalidatePath(`/finance/assets/${assetId}`);
   return ok({ id: doc.id });
 }
 
 /** Spec §2.3: one invoice, stored once, one document row per unit of the batch. */
 export async function uploadBatchDocument(formData: FormData): Promise<ActionResult<{ created: number }>> {
   const user = await actionUser();
-  if (!user || !isApprover(user.role)) return forbidden();
+  if (!user || !mayUpload(user.role)) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const assetIds = [...new Set(formData.getAll("assetIds").map(String).filter(Boolean))];
@@ -102,7 +106,11 @@ export async function uploadBatchDocument(formData: FormData): Promise<ActionRes
     // interactive-transaction default well before the loop finishes.
     timeout: 60_000, maxWait: 10_000,
   });
-  for (const a of assets) revalidatePath(`/inventory/${a.id}/documents`);
+  for (const a of assets) {
+    revalidatePath(`/inventory/${a.id}/documents`);
+    revalidatePath(`/finance/assets/${a.id}`);
+  }
+  revalidatePath("/finance/review");
   return ok({ created });
 }
 
