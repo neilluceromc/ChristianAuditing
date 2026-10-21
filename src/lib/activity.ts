@@ -31,6 +31,10 @@ export const ACTION_LABELS: Record<string, string> = {
   // Finance follow-up (spec §3): undo within 15 minutes, and an admin's reopen
   "finance.confirm.undone": "Approval undone", "asset.return.undone": "Send-back undone",
   "depreciation.override.undone": "Custom depreciation undone", "finance.confirm.reopened": "Review reopened",
+  // Purchase orders (spec §3–§6)
+  "po.save": "Saved the purchase order", "po.resubmit": "Corrected and sent back on", "po.send-back": "Sent back to Purchasing",
+  "po.fix": "Fixed the money details", "po.cancel": "Cancelled the purchase order", "po.line-closed": "Closed a line short",
+  "asset.money.fixed": "Fixed the money details",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",

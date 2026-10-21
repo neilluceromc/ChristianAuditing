@@ -12,26 +12,24 @@ import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { ReasonField } from "@/components/patterns/reason-field";
 import { REASON_CHIPS } from "@/lib/reason-chips";
 import { PO_WRITE_ROLES } from "@/lib/po-flow";
-import { cancelRequest } from "@/server/modules/purchases/actions";
-
-/** States the edit page (saveDraft) still accepts — see draft-actions.ts. */
-const EDITABLE: readonly PurchaseOrderState[] = ["SENT_BACK", "WITH_IT"];
+import { cancelPurchaseOrder } from "@/server/modules/purchases/po-actions";
 
 /**
  * Migration 38: the old transition buttons (submit, IT review / reject, request-info, complete) are gone with
- * their actions. What is left is Edit and Cancel, for the order's requester or an admin; Task 4 replaces this
- * bar. The server re-checks everything.
+ * their actions. What is left is Edit and Cancel, for Purchasing (any of the team) or an admin; Task 4 replaces
+ * this bar. Edit while the PO is sent back, or with IT / ready with nothing registered (savePurchaseOrder's
+ * rule); Cancel while nothing is registered. The server re-checks everything.
  */
 export function RequestActions({
   id,
   state,
   role,
-  isDraftOwner,
+  assetCount,
 }: {
   id: string;
   state: PurchaseOrderState;
   role: Role;
-  isDraftOwner: boolean;
+  assetCount: number;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -42,15 +40,15 @@ export function RequestActions({
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
-  const canWrite = PO_WRITE_ROLES.includes(role) && isDraftOwner;
-  const canEdit = canWrite && EDITABLE.includes(state);
-  const canCancel = canWrite && state !== "CANCELLED";
+  const canWrite = PO_WRITE_ROLES.includes(role);
+  const canEdit = canWrite && (state === "SENT_BACK" || ((state === "WITH_IT" || state === "READY") && assetCount === 0));
+  const canCancel = canWrite && state !== "CANCELLED" && assetCount === 0;
 
   function cancel() {
     setError(null);
     setFieldError(undefined);
     startTransition(async () => {
-      const res = await cancelRequest({ id, reason });
+      const res = await cancelPurchaseOrder({ id, reason });
       if (res.ok) {
         setAsking(false);
         setReason("");

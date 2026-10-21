@@ -9,7 +9,7 @@ import { Pill } from "@/components/ui/pill";
 import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { THREAD_PREVIEW, type ThreadNote } from "@/lib/purchase-thread";
-import { addComment } from "@/server/modules/purchases/actions";
+import { addComment } from "@/server/modules/purchases/po-actions";
 import { ThreadMessage } from "./thread-message";
 import { ThreadPanel } from "./thread-panel";
 

@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { uploadRequestDocument } from "@/server/modules/purchases/document-actions";
+import { uploadPoDocument } from "@/server/modules/purchases/document-actions";
 import { REQUEST_DOCUMENT_KINDS, REQUEST_DOCUMENT_LABEL } from "@/lib/documents";
 
 export interface RequestDocumentRow {
@@ -52,7 +52,7 @@ export function RequestDocumentsCard({
     fd.set("kind", kind);
     fd.set("file", file);
     startTransition(async () => {
-      const res = await uploadRequestDocument(fd);
+      const res = await uploadPoDocument(fd);
       setFileName(null);
       if (res.ok) {
         toast("Document uploaded", "settled");

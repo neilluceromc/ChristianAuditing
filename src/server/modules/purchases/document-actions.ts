@@ -10,8 +10,11 @@ import { canAttachToRequest } from "@/lib/supplier-access";
 import { REQUEST_DOCUMENT_KINDS } from "@/lib/documents";
 import { storeUpload, validateUpload } from "@/server/uploads";
 
-/** Mirrors suppliers/document-actions.ts's uploadSupplierDocument, with requestId in place of vendorId. */
-export async function uploadRequestDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
+/**
+ * Mirrors suppliers/document-actions.ts's uploadSupplierDocument, with the PO's id (form field `requestId`, kept for
+ * the existing form) in place of vendorId. Task 4 widens who may upload.
+ */
+export async function uploadPoDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
   const user = await actionUser();
   if (!user || !canAttachToRequest(user.role)) return forbidden();
   const rate = await checkRate(user.id);

@@ -198,6 +198,8 @@ export const HISTORY_VERBS: Record<string, { kind: HistoryKind; verb: string | V
   update: { kind: "cost", verb: (d) => `changed the ${changedList(d, "purchase details")}` },
   "import-update": { kind: "cost", verb: (d) => `changed the ${changedList(d, "purchase details")} by import` },
   "purchase.recorded": { kind: "cost", verb: "recorded the purchase" },
+  // Purchase orders (spec §6): a PO-level money fix reaching this asset; the row's reason follows it in quotes
+  "asset.money.fixed": { kind: "cost", verb: "fixed the money details" },
   // depreciation settings
   "depreciation.override": { kind: "settings", verb: "set a custom depreciation" },
   "depreciation.override.cleared": { kind: "settings", verb: "removed the custom depreciation" },

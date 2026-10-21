@@ -15,26 +15,34 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireRole(...PO_WRITE_ROLES);
+  await requireRole(...PO_WRITE_ROLES);
   const { id } = await params;
-  const [request, loadouts, departments] = await Promise.all([
+  const [request, loadouts, departments, vendors, categories] = await Promise.all([
     getPurchase(id),
     policyLoadouts(),
     prisma.department.findMany({ select: { id: true, name: true, kind: true, archivedAt: true }, orderBy: { name: "asc" } }),
+    prisma.vendor.findMany({ where: { archivedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } }),
   ]);
   if (!request) notFound();
-  // only an order with Purchasing or IT is editable here, and only by its requester (or an admin) —
-  // the server action enforces both; this keeps the dead end off the screen
-  if (request.state !== "SENT_BACK" && request.state !== "WITH_IT") redirect(`/purchases/${id}`);
-  if (request.requestedById !== user.id && user.role !== "admin") redirect(`/purchases/${id}`);
+  // Editable while sent back, or with IT / ready with nothing registered (savePurchaseOrder enforces it, team-wide);
+  // this keeps the dead end off the screen.
+  const editable = request.state === "SENT_BACK"
+    || ((request.state === "WITH_IT" || request.state === "READY") && request.assetCount === 0);
+  if (!editable) redirect(`/purchases/${id}`);
 
   const units: UnitDraft[] = request.units.map((u) => ({
     id: u.id,
     description: u.description,
     specs: u.specs ?? "",
+    categoryId: u.categoryId ?? "",
     qty: String(u.qty),
     unitPrice: u.unitPrice === null ? "" : String(u.unitPrice),
   }));
+  // an edit keeps the current supplier even when it has since been archived
+  const supplierOptions = request.supplier?.archived
+    ? [...vendors, { id: request.supplier.id, name: request.supplier.name }]
+    : vendors;
 
   return (
     <>
@@ -49,7 +57,14 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
       <DraftForm
         loadouts={loadouts}
         departments={departments}
-        initial={{ id: request.id, refNo: request.refNo, units, departmentId: request.department?.id ?? null }}
+        vendors={supplierOptions}
+        categories={categories}
+        initial={{
+          id: request.id, refNo: request.refNo, state: request.state, units,
+          departmentId: request.department?.id ?? null, vendorId: request.supplier?.id ?? null,
+          invoiceRef: request.invoiceRef, receiptRef: request.receiptRef, purchasedAt: request.purchasedAt, fees: request.fees,
+          sentBack: request.sentBack,
+        }}
       />
     </>
   );

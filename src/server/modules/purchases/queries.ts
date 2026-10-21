@@ -1,4 +1,4 @@
-import type { PurchaseOrderState, PurchaseUnitState } from "@prisma/client";
+import type { PurchaseOrderState, PurchaseUnitState, Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
@@ -28,6 +28,8 @@ export interface PurchaseUnitView {
   index: number;
   description: string;
   specs: string | null;
+  /** Migration 38: the line's category (its class); null on legacy lines. */
+  categoryId: string | null;
   qty: number;
   /** number, never a Prisma.Decimal: this crosses into client components */
   unitPrice: number | null;
@@ -58,6 +60,15 @@ export interface PurchaseDetail {
   department: { id: string; name: string } | null;
   supplier: { id: string; name: string; archived: boolean } | null;
   documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
+  /** Migration 38: the PO's money (purchasedAt as YYYY-MM-DD for the date input; fees as a number). */
+  invoiceRef: string | null;
+  receiptRef: string | null;
+  purchasedAt: string | null;
+  fees: number | null;
+  /** The open send-back, if any. */
+  sentBack: { by: Team | null; note: string | null; fields: string[] } | null;
+  /** Assets registered from it: outside a send-back, editing and cancelling stop once there are any. */
+  assetCount: number;
 }
 
 const money = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
@@ -160,6 +171,9 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
     select: {
       id: true, refNo: true, state: true, createdAt: true, submittedAt: true, reviewedAt: true,
       completedAt: true, cancelledAt: true, cancelReason: true, requestedById: true,
+      invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
+      sentBackBy: true, sentBackNote: true, sentBackFields: true,
+      _count: { select: { assets: true } },
       requestedBy: { select: { name: true } },
       reviewedBy: { select: { name: true } },
       department: { select: { id: true, name: true } },
@@ -187,6 +201,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       index: i + 1,
       description: u.description,
       specs: u.specs,
+      categoryId: u.categoryId,
       qty: u.qty,
       unitPrice: u.unitPrice === null ? null : price,
       price: u.unitPrice === null ? "—" : fmtMoney(price),
@@ -223,6 +238,12 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
       at: fmtDate(d.createdAt), downloadHref: `/purchases/${r.id}/documents/${d.id}/download`,
     })),
+    invoiceRef: r.invoiceRef,
+    receiptRef: r.receiptRef,
+    purchasedAt: r.purchasedAt ? r.purchasedAt.toISOString().slice(0, 10) : null,
+    fees: r.fees === null ? null : Number(r.fees),
+    sentBack: r.state === "SENT_BACK" ? { by: r.sentBackBy, note: r.sentBackNote, fields: r.sentBackFields } : null,
+    assetCount: r._count.assets,
   };
 }
 

@@ -1,0 +1,461 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { reasonError } from "@/lib/intake-rules";
+
+/*
+ * Purchase orders, Task 3 (spec §2–§7; Review Focus 2 and 3): save, send back, fix, close short and cancel on a PO,
+ * against an in-memory Prisma. The fake has no rollback, so every refusal is also checked against "nothing was
+ * written" — the actions must decide before they write.
+ */
+
+type Row = Record<string, unknown>;
+
+const h = vi.hoisted(() => ({
+  user: null as { id: string; name: string; role: string } | null,
+  tables: {} as Record<string, Array<Record<string, unknown>>>,
+  seq: 214,
+  /** Row locks and reads, in order. */
+  ops: [] as string[],
+  revalidated: [] as string[],
+}));
+
+vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
+vi.mock("@/server/auth/guards", () => ({
+  actionUser: async () => h.user,
+  actionRole: async (...roles: string[]) => (h.user && roles.includes(h.user.role) ? h.user : null),
+}));
+vi.mock("@/server/rate-limit", () => ({ checkRate: async () => ({ allowed: true, retryAfterSec: 0 }) }));
+vi.mock("@/server/db/client", () => {
+  type R = Record<string, unknown>;
+  const same = (a: unknown, b: unknown) =>
+    a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b || (a == null && b == null);
+  const matches = (rec: R, where: R | undefined): boolean =>
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (k === "OR") return (v as R[]).some((w) => matches(rec, w));
+      if (v !== null && typeof v === "object" && !(v instanceof Date) && !Array.isArray(v)) {
+        const op = v as { not?: unknown; in?: unknown[] };
+        if ("not" in op) return !same(rec[k], op.not);
+        if (op.in) return op.in.includes(rec[k]);
+      }
+      return same(rec[k], v);
+    });
+  let n = 0;
+  const rows = (name: string) => (h.tables[name] ??= []);
+  const table = (name: string) => ({
+    findUnique: async ({ where }: { where: R }) => {
+      h.ops.push(`read:${name}`);
+      const r = rows(name).find((x) => matches(x, where));
+      return r ? structuredClone(r) : null;
+    },
+    findFirst: async ({ where }: { where?: R } = {}) => {
+      const r = rows(name).find((x) => matches(x, where));
+      return r ? structuredClone(r) : null;
+    },
+    findMany: async ({ where }: { where?: R } = {}) => {
+      h.ops.push(`read:${name}`);
+      return structuredClone(rows(name).filter((x) => matches(x, where)));
+    },
+    count: async ({ where }: { where?: R } = {}) => {
+      h.ops.push(`read:${name}`);
+      return rows(name).filter((x) => matches(x, where)).length;
+    },
+    create: async ({ data }: { data: R }) => {
+      const { lines, ...rest } = data as R & { lines?: { create: R[] } };
+      const row: R = { id: `${name}-${++n}`, createdAt: new Date(), ...rest };
+      rows(name).push(row);
+      for (const l of lines?.create ?? []) rows("purchaseOrderLine").push({ id: `line-${++n}`, orderId: row.id, closedShort: 0, ...l });
+      return structuredClone(row);
+    },
+    createMany: async ({ data }: { data: R[] }) => {
+      for (const d of data) rows(name).push({ id: `${name}-${++n}`, closedShort: 0, ...d });
+      return { count: data.length };
+    },
+    update: async ({ where, data }: { where: R; data: R }) => {
+      const r = rows(name).find((x) => matches(x, where));
+      if (!r) throw new Error(`no ${name} row`);
+      Object.assign(r, data);
+      return structuredClone(r);
+    },
+    updateMany: async ({ where, data }: { where: R; data: R }) => {
+      const hit = rows(name).filter((x) => matches(x, where));
+      for (const r of hit) Object.assign(r, data);
+      return { count: hit.length };
+    },
+    deleteMany: async ({ where }: { where: R }) => {
+      const before = rows(name).length;
+      h.tables[name] = rows(name).filter((x) => !matches(x, where));
+      return { count: before - h.tables[name].length };
+    },
+  });
+  const $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const sql = strings.join("$");
+    if (sql.includes("nextval")) return [{ nextval: BigInt(h.seq++) }];
+    h.ops.push(`lock:${values.join(",")}`);
+    return [];
+  };
+  const client = Object.fromEntries(
+    ["purchaseOrder", "purchaseOrderLine", "asset", "purchaseRecord", "noteEntry", "auditEntry", "notification",
+      "user", "vendor", "department", "assetCategory"].map((t) => [t, table(t)]),
+  ) as Record<string, ReturnType<typeof table>>;
+  const full = { ...client, $queryRaw };
+  return { prisma: { ...full, $transaction: async (fn: (tx: typeof full) => Promise<unknown>) => fn(full) } };
+});
+
+import {
+  cancelPurchaseOrder, closeLineShort, fixPurchaseOrder, savePurchaseOrder, sendBackPurchaseOrder,
+} from "./po-actions";
+
+const PAT = { id: "u-pat", name: "Pat Lim", role: "purchasing_staff" };
+const IVAN = { id: "u-ivan", name: "Ivan Tan", role: "it_staff" };
+const ANA = { id: "u-ana", name: "Ana Cruz", role: "finance_staff" };
+const ADA = { id: "u-ada", name: "Ada Admin", role: "admin" };
+
+const BOUGHT = new Date("2026-10-15T00:00:00Z");
+
+const t = (name: string) => h.tables[name];
+const po = () => t("purchaseOrder").find((p) => p.id === "po1")!;
+const asset = (id: string) => t("asset").find((a) => a.id === id)!;
+const audits = (action: string) => t("auditEntry").filter((a) => a.action === action);
+
+function seedPo(extra: Row = {}) {
+  t("purchaseOrder").push({
+    id: "po1", refNo: "PO-0214", state: "WITH_IT", requestedById: PAT.id, departmentId: null,
+    vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: BOUGHT, fees: null,
+    sentBackAt: null, sentBackById: null, sentBackBy: null, sentBackFields: [], sentBackNote: null,
+    cancelledAt: null, cancelReason: null,
+    ...extra,
+  });
+}
+function seedLine(id: string, extra: Row = {}) {
+  t("purchaseOrderLine").push({
+    id, orderId: "po1", description: "laptops", specs: null, categoryId: "cat-lt", qty: 5, unitPrice: 50000,
+    closedShort: 0, closedShortReason: null, ...extra,
+  });
+}
+function seedAsset(id: string, extra: Row = {}) {
+  t("asset").push({
+    id, tag: `BR-LT-${id}`, purchaseOrderId: "po1", purchaseOrderLineId: "ln1", cost: 50000,
+    vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: BOUGHT,
+    financeConfirmedAt: null, financeConfirmedById: null,
+    financeReturnedAt: null, financeReturnedById: null, financeReturnedTo: null, financeReturnFields: [],
+    financeReturnReason: null, financeResubmitNote: null,
+    ...extra,
+  });
+}
+
+/** A refusal writes nothing at all. */
+async function expectNothingWritten<T extends { ok: boolean }>(run: () => Promise<T>): Promise<T> {
+  const before = structuredClone(h.tables);
+  const r = await run();
+  expect(r.ok).toBe(false);
+  expect(h.tables).toEqual(before);
+  return r;
+}
+
+const line = (extra: Row = {}) => ({ description: "laptops", categoryId: "cat-lt", qty: 5, unitPrice: 50000, ...extra });
+const order = (extra: Row = {}) => ({
+  vendorId: "v1", invoiceRef: "SI-0012", purchasedAt: "2026-10-15", lines: [line()], ...extra,
+});
+
+beforeEach(() => {
+  h.user = PAT;
+  h.seq = 214;
+  h.ops = [];
+  h.revalidated = [];
+  h.tables = {
+    user: [PAT, IVAN, ANA, ADA].map((u) => ({ ...u })),
+    vendor: [{ id: "v1", name: "Octagon", archivedAt: null }, { id: "v2", name: "PC Express", archivedAt: null }],
+    department: [{ id: "d1", name: "Operations", archivedAt: null }],
+    assetCategory: [{ id: "cat-lt", name: "Laptops", cls: "IT" }, { id: "cat-ch", name: "Chairs", cls: "PURCHASING" }],
+    purchaseOrder: [], purchaseOrderLine: [], asset: [], purchaseRecord: [], noteEntry: [], auditEntry: [], notification: [],
+  };
+});
+
+describe("savePurchaseOrder", () => {
+  it("save routes by class: non-IT is READY with no bell, mixed is WITH_IT with one IT TO_CHECK", async () => {
+    const chairs = await savePurchaseOrder(order({ lines: [line({ description: "office chairs", categoryId: "cat-ch", qty: 4 })] }));
+    expect(chairs).toMatchObject({ ok: true, data: { refNo: "PO-0214", state: "READY" } });
+    expect(t("notification")).toHaveLength(0);
+
+    const mixed = await savePurchaseOrder(order({
+      lines: [line(), line({ description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500 })],
+    }));
+    expect(mixed).toMatchObject({ ok: true, data: { refNo: "PO-0215", state: "WITH_IT" } });
+    expect(t("notification")).toHaveLength(1);
+    expect(t("notification")[0]).toMatchObject({
+      team: "IT", kind: "TO_CHECK", title: "PO-0215 · 5 laptops from Purchasing to check", actorId: PAT.id,
+      entityType: "purchase-order",
+    });
+    const id = mixed.ok ? mixed.data.id : "";
+    expect(t("notification")[0].href).toBe(`/purchases/${id}`);
+    expect(t("noteEntry").filter((n) => n.orderId === id).map((n) => n.kind)).toEqual(["PO_SAVED"]);
+    expect(audits("po.save").map((a) => a.entityId)).toContain(id);
+    expect(audits("po.save").every((a) => a.source === "web")).toBe(true);
+  });
+
+  it("save on SENT_BACK needs a reply; Finance's send-back resubmits to READY and un-returns the assets", async () => {
+    const returned = new Date("2026-10-20T00:00:00Z");
+    seedPo({ state: "SENT_BACK", sentBackBy: "FINANCE", sentBackById: ANA.id, sentBackAt: returned, sentBackFields: ["cost"] });
+    seedLine("ln1", { qty: 2, unitPrice: 500000 });
+    for (const id of ["a1", "a2"]) {
+      seedAsset(id, {
+        cost: 500000, financeReturnedAt: returned, financeReturnedById: ANA.id, financeReturnedTo: "PURCHASING",
+        financeReturnFields: ["cost"], financeReturnReason: "that's per box",
+      });
+    }
+    const fixed = order({ id: "po1", lines: [line({ id: "ln1", qty: 2, unitPrice: 50000 })] });
+
+    const refused = await expectNothingWritten(() => savePurchaseOrder(fixed));
+    expect(refused).toMatchObject({ kind: "validation", fieldErrors: { reply: reasonError(undefined) } });
+
+    const r = await savePurchaseOrder({ ...fixed, reply: "price per unit now" });
+    expect(r).toMatchObject({ ok: true, data: { refNo: "PO-0214", state: "READY" } });
+    expect(po()).toMatchObject({ state: "READY", sentBackBy: null, sentBackAt: null, sentBackFields: [], sentBackNote: null });
+    for (const id of ["a1", "a2"]) {
+      expect(asset(id)).toMatchObject({
+        financeReturnedAt: null, financeReturnedTo: null, financeReturnFields: [], cost: 50000,
+        financeResubmitNote: "price per unit now",
+      });
+    }
+    expect(t("notification")).toEqual([expect.objectContaining({ team: "FINANCE", kind: "TO_CHECK", body: "price per unit now" })]);
+    expect(audits("po.resubmit")).toHaveLength(1);
+    expect(audits("po.resubmit")[0].reason).toBe("price per unit now");
+    expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_RESUBMITTED"]);
+  });
+
+  it("an IT send-back resubmits to WITH_IT and rings IT", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "IT", sentBackById: IVAN.id, sentBackFields: ["invoiceRef"] });
+    seedLine("ln1");
+    const r = await savePurchaseOrder(order({ id: "po1", invoiceRef: "SI-0021", lines: [line({ id: "ln1" })], reply: "SI number corrected" }));
+    expect(r).toMatchObject({ ok: true, data: { state: "WITH_IT" } });
+    expect(po().invoiceRef).toBe("SI-0021");
+    expect(t("notification")).toEqual([expect.objectContaining({ team: "IT", kind: "TO_CHECK" })]);
+  });
+
+  it("refuses to edit once the PO is with Finance", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1");
+    seedAsset("a1");
+    const r = await expectNothingWritten(() => savePurchaseOrder(order({ id: "po1", lines: [line({ id: "ln1" })] })));
+    expect(r).toMatchObject({ kind: "conflict", message: "It's with Finance; ask Finance to fix or send it back" });
+  });
+
+  it("a line with registered assets can't be removed", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "FINANCE" });
+    seedLine("ln1");
+    seedLine("ln2", { description: "chairs", categoryId: "cat-ch" });
+    seedAsset("a1");
+    const r = await expectNothingWritten(() =>
+      savePurchaseOrder(order({ id: "po1", lines: [line({ id: "ln2", description: "chairs", categoryId: "cat-ch" })], reply: "dropped the laptops" })));
+    expect(r).toMatchObject({ kind: "conflict" });
+  });
+
+  it("IT and Finance can't save a PO", async () => {
+    h.user = IVAN;
+    expect(await savePurchaseOrder(order())).toMatchObject({ ok: false, kind: "forbidden" });
+  });
+});
+
+describe("sendBackPurchaseOrder", () => {
+  it("IT send-back: WITH_IT becomes SENT_BACK by IT, and Purchasing's bell rings once", async () => {
+    seedPo();
+    seedLine("ln1");
+    h.user = IVAN;
+    const r = await sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "SI number doesn't match the invoice" });
+    expect(r).toEqual({ ok: true, data: { refNo: "PO-0214" } });
+    expect(po()).toMatchObject({
+      state: "SENT_BACK", sentBackBy: "IT", sentBackById: IVAN.id, sentBackFields: ["invoiceRef"],
+      sentBackNote: "SI number doesn't match the invoice",
+    });
+    expect(t("notification")).toHaveLength(1);
+    expect(t("notification")[0]).toMatchObject({ team: "PURCHASING", kind: "SENT_BACK", href: "/purchases/po1" });
+    expect(audits("po.send-back")).toHaveLength(1);
+    expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_SENT_BACK"]);
+    expect(h.ops[0]).toBe("lock:po1");
+  });
+
+  it("IT can't send back once the PO has left IT", async () => {
+    seedPo({ state: "READY" });
+    h.user = IVAN;
+    await expectNothingWritten(() => sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"] }));
+  });
+
+  it("Finance send-back refused once anything is approved (Review Focus 3)", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 3 });
+    seedAsset("a1", { financeConfirmedAt: new Date("2026-10-20T00:00:00Z"), financeConfirmedById: ANA.id });
+    seedAsset("a2");
+    seedAsset("a3");
+    h.user = ANA;
+    const r = await expectNothingWritten(() => sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "wrong SI number" }));
+    expect(r).toMatchObject({ kind: "conflict", message: "Some assets from PO-0214 are approved. Fix it yourself with a reason." });
+  });
+
+  it("Finance send-back returns every asset to Purchasing", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 2 });
+    seedAsset("a1");
+    seedAsset("a2");
+    h.user = ANA;
+    const r = await sendBackPurchaseOrder({ id: "po1", fields: ["cost", "doc:invoice"], note: "price is per box" });
+    expect(r.ok).toBe(true);
+    expect(po()).toMatchObject({ state: "SENT_BACK", sentBackBy: "FINANCE" });
+    for (const id of ["a1", "a2"]) {
+      expect(asset(id)).toMatchObject({
+        financeReturnedTo: "PURCHASING", financeReturnedById: ANA.id, financeReturnFields: ["cost", "doc:invoice"],
+        financeReturnReason: "price is per box",
+      });
+      expect(asset(id).financeReturnedAt).toBeInstanceOf(Date);
+    }
+    expect(t("notification")).toEqual([expect.objectContaining({ team: "PURCHASING", kind: "SENT_BACK" })]);
+  });
+
+  it("Finance can't send back a PO with nothing registered", async () => {
+    seedPo({ state: "READY" });
+    h.user = ANA;
+    await expectNothingWritten(() => sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"] }));
+  });
+
+  it("an admin sends back as the stage's owner", async () => {
+    seedPo({ state: "WITH_IT" });
+    h.user = ADA;
+    expect((await sendBackPurchaseOrder({ id: "po1", fields: ["fees"] })).ok).toBe(true);
+    expect(po().sentBackBy).toBe("IT");
+  });
+
+  it("'other' needs a note, and a note needs 5 characters", async () => {
+    seedPo();
+    h.user = IVAN;
+    const noNote = await expectNothingWritten(() => sendBackPurchaseOrder({ id: "po1", fields: ["other"] }));
+    expect(noNote).toMatchObject({ kind: "validation" });
+    const short = await expectNothingWritten(() => sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "bad" }));
+    expect(short).toMatchObject({ kind: "validation", fieldErrors: { note: reasonError("bad") } });
+  });
+});
+
+describe("fixPurchaseOrder", () => {
+  function partlyApproved() {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 3 });
+    seedAsset("a1", { financeConfirmedAt: new Date("2026-10-20T00:00:00Z"), financeConfirmedById: ANA.id });
+    seedAsset("a2");
+    seedAsset("a3");
+  }
+
+  it("fix after partial approval (Review Focus 2): every asset gets the new SI number, none is un-approved", async () => {
+    partlyApproved();
+    const approvedAt = asset("a1").financeConfirmedAt;
+    h.user = ANA;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { invoiceRef: "SI-0021" }, reason: "typo on receipt" });
+    expect(r).toEqual({ ok: true, data: { refNo: "PO-0214", changed: ["invoiceRef"] } });
+    expect(po().invoiceRef).toBe("SI-0021");
+    for (const id of ["a1", "a2", "a3"]) expect(asset(id).invoiceRef).toBe("SI-0021");
+    expect(asset("a1").financeConfirmedAt).toEqual(approvedAt);
+    expect(asset("a1").financeConfirmedById).toBe(ANA.id);
+
+    const fixed = audits("asset.money.fixed");
+    expect(fixed).toHaveLength(3);
+    expect(fixed.map((a) => a.entityId).sort()).toEqual(["a1", "a2", "a3"]);
+    for (const a of fixed) {
+      expect(a).toMatchObject({ entityType: "asset", reason: "typo on receipt", source: "web", diff: { invoiceRef: { from: "SI-0012", to: "SI-0021" } } });
+    }
+    expect(audits("po.fix")).toHaveLength(1);
+    expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_FIXED"]);
+    expect(t("notification")).toHaveLength(1);
+    expect(t("notification")[0]).toMatchObject({
+      team: "PURCHASING", kind: "CHANGED", title: "Finance changed the SI number on PO-0214", body: "typo on receipt",
+    });
+    // the PO row is locked before anything about it is read
+    expect(h.ops.indexOf("lock:po1")).toBeGreaterThanOrEqual(0);
+    expect(h.ops.indexOf("lock:po1")).toBeLessThan(h.ops.indexOf("read:purchaseOrder"));
+    expect(h.ops.indexOf("lock:po1")).toBeLessThan(h.ops.indexOf("read:asset"));
+  });
+
+  it("a line price fix flows to that line's assets as their cost", async () => {
+    partlyApproved();
+    h.user = ANA;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { lines: [{ id: "ln1", unitPrice: 48000 }] }, reason: "discount on the invoice" });
+    expect(r).toMatchObject({ ok: true, data: { changed: ["cost"] } });
+    expect(t("purchaseOrderLine")[0].unitPrice).toBe(48000);
+    for (const id of ["a1", "a2", "a3"]) expect(asset(id).cost).toBe(48000);
+  });
+
+  it("fix without reason refused", async () => {
+    partlyApproved();
+    h.user = ANA;
+    const r = await expectNothingWritten(() => fixPurchaseOrder({ id: "po1", patch: { invoiceRef: "SI-0021" } }));
+    expect(r).toMatchObject({ kind: "validation", fieldErrors: { reason: reasonError(undefined) } });
+  });
+
+  it("Purchasing fix while with Finance refused", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 3 });
+    seedAsset("a1");
+    const r = await expectNothingWritten(() => fixPurchaseOrder({ id: "po1", patch: { invoiceRef: "SI-0021" }, reason: "typo on receipt" }));
+    expect(r).toMatchObject({ kind: "conflict", message: "It's with Finance; ask Finance to fix or send it back" });
+  });
+
+  it("IT cannot fix device fields via fixPurchaseOrder: the patch takes money fields only", async () => {
+    seedPo();
+    h.user = IVAN;
+    const r = await expectNothingWritten(() => fixPurchaseOrder({ id: "po1", patch: { serial: "PF3X9K2" }, reason: "serial on the box" }));
+    expect(r).toMatchObject({ kind: "validation" });
+    expect(Object.keys(r.ok ? {} : r.fieldErrors ?? {})).toContain("patch");
+  });
+
+  it("IT fixes Purchasing's money with a reason while the PO is with IT", async () => {
+    seedPo();
+    h.user = IVAN;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { receiptRef: "OR-77" }, reason: "OR was on the box" });
+    expect(r.ok).toBe(true);
+    expect(t("notification")[0]).toMatchObject({ team: "PURCHASING", kind: "CHANGED", title: "IT changed the OR number on PO-0214" });
+  });
+
+  it("Purchasing's own fix needs no reason and rings no bell", async () => {
+    seedPo({ state: "READY" });
+    const r = await fixPurchaseOrder({ id: "po1", patch: { invoiceRef: "SI-0099" } });
+    expect(r.ok).toBe(true);
+    expect(t("notification")).toHaveLength(0);
+  });
+
+  it("an admin's fix rings Purchasing", async () => {
+    partlyApproved();
+    h.user = ADA;
+    expect((await fixPurchaseOrder({ id: "po1", patch: { invoiceRef: "SI-0021" }, reason: "typo on receipt" })).ok).toBe(true);
+    expect(t("notification")).toEqual([expect.objectContaining({ team: "PURCHASING", kind: "CHANGED" })]);
+  });
+});
+
+describe("closeLineShort", () => {
+  it("closeLineShort over remaining refused", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 5 });
+    for (const id of ["a1", "a2", "a3"]) seedAsset(id);
+    const r = await expectNothingWritten(() => closeLineShort({ lineId: "ln1", qty: 3, reason: "supplier cancelled 3 units" }));
+    expect(r).toMatchObject({ kind: "conflict" });
+
+    const done = await closeLineShort({ lineId: "ln1", qty: 2, reason: "supplier cancelled 2 units" });
+    expect(done.ok).toBe(true);
+    expect(t("purchaseOrderLine")[0]).toMatchObject({ closedShort: 2, closedShortReason: "supplier cancelled 2 units" });
+    expect(audits("po.line-closed")).toHaveLength(1);
+    expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_LINE_CLOSED"]);
+  });
+});
+
+describe("cancelPurchaseOrder", () => {
+  it("cancels when nothing is registered, under the PO's row lock", async () => {
+    seedPo();
+    const r = await cancelPurchaseOrder({ id: "po1", reason: "supplier out of stock" });
+    expect(r).toMatchObject({ ok: true, data: { refNo: "PO-0214" } });
+    expect(po()).toMatchObject({ state: "CANCELLED", cancelReason: "supplier out of stock" });
+    expect(audits("po.cancel")).toHaveLength(1);
+    expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_CANCELLED"]);
+    expect(h.ops[0]).toBe("lock:po1");
+  });
+
+  it("refuses once something is registered", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1");
+    seedAsset("a1");
+    await expectNothingWritten(() => cancelPurchaseOrder({ id: "po1", reason: "supplier out of stock" }));
+  });
+});

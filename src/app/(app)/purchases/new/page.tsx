@@ -11,9 +11,11 @@ export const metadata: Metadata = { title: pageTitle("Register purchase") };
 
 export default async function NewPurchasePage() {
   await requireRole(...PO_WRITE_ROLES);
-  const [loadouts, departments] = await Promise.all([
+  const [loadouts, departments, vendors, categories] = await Promise.all([
     policyLoadouts(),
     prisma.department.findMany({ select: { id: true, name: true, kind: true, archivedAt: true }, orderBy: { name: "asc" } }),
+    prisma.vendor.findMany({ where: { archivedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (
@@ -22,7 +24,7 @@ export default async function NewPurchasePage() {
         title="Register purchase"
         breadcrumb={[{ label: "Purchase requests", href: "/purchases" }, { label: "New" }]}
       />
-      <DraftForm loadouts={loadouts} departments={departments} />
+      <DraftForm loadouts={loadouts} departments={departments} vendors={vendors} categories={categories} />
     </>
   );
 }

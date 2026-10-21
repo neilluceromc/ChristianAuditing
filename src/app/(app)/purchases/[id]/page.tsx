@@ -52,7 +52,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
               id={request.id}
               state={request.state}
               role={user.role}
-              isDraftOwner={request.requestedById === user.id || user.role === "admin"}
+              assetCount={request.assetCount}
             />
           )
         }
