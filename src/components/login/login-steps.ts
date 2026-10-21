@@ -36,6 +36,14 @@ export function firstFromEmail(email: string): string {
   return first ? first[0]!.toUpperCase() + first.slice(1).toLowerCase() : "";
 }
 
+/**
+ * The email the signed-in sequence may show and greet by: a password sign-in's, as typed. A Microsoft sign-in's
+ * account is picked at Microsoft, so whatever sits in the email field is not who is signing in — it shows none.
+ */
+export function sequenceEmail(passwordSignIn: boolean, typed: string): string {
+  return passwordSignIn ? typed.trim() : "";
+}
+
 /** The first word of a name, trimmed. */
 export function firstWord(name: string): string {
   return name.trim().split(/\s+/)[0] ?? "";
@@ -94,12 +102,11 @@ export function enterLines(name: string): { text: string; mood: CrisMood; bar: n
 export type Fact = { q: string; a?: string; mood?: CrisMood };
 
 /**
- * The owner's facts, minus every line that names a real person (owner's decision, 2026-10-21): only these name
- * no one.
+ * The owner's facts, minus every line that names or points at a real person (owner's decisions, 2026-10-21 and the
+ * final review, which dropped a line about the creator): only this one is left.
  */
 export const FACTS: readonly Fact[] = [
   { q: "My original design came from Raphael in Tensura." },
-  { q: "My creator is always late too, honestly.", mood: "shy" },
 ];
 
 /**

@@ -10,6 +10,7 @@ import {
   initialStep,
   nextFact,
   segments,
+  sequenceEmail,
   stepForField,
 } from "./login-steps";
 
@@ -101,10 +102,21 @@ describe("enterLines", () => {
   it("welcomes without a name when there is none (Microsoft)", () => expect(enterLines("")[3]!.text).toBe("Welcome back!"));
 });
 
+describe("sequenceEmail", () => {
+  it("a password sign-in shows the typed email, trimmed", () => {
+    expect(sequenceEmail(true, "  neil.lucero@x.com ")).toBe("neil.lucero@x.com");
+  });
+  it("a Microsoft sign-in shows none, whatever was typed (final review)", () => {
+    expect(sequenceEmail(false, "someone.else@x.com")).toBe("");
+  });
+});
+
 describe("FACTS", () => {
   it("names no real people (owner's decision, 2026-10-21)", () => {
     const text = FACTS.map((f) => `${f.q} ${f.a ?? ""}`).join(" ");
     for (const name of ["Neil", "Salem", "Princess", "Christian", "Sir ", "Miss "]) expect(text).not.toContain(name);
+    // nor points at one (final review): the creator is a real person
+    expect(text.toLowerCase()).not.toContain("creator");
     expect(FACTS.length).toBeGreaterThan(0);
   });
 });

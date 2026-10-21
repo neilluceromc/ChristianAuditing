@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { signInWithCredentials, signUp, type AuthFormState } from "@/server/auth/actions";
-import { emailProblem, firstWord, segments, stepForField, type Step } from "./login-steps";
+import { emailProblem, firstWord, segments, sequenceEmail, stepForField, type Step } from "./login-steps";
 
 /** Staging quick sign-in: null when QUICK_LOGIN_EMAILS is unset (no STAGING pill). */
 export type QuickSignIn = { accounts: { email: string; label: string }[]; refused: boolean } | null;
@@ -94,9 +94,9 @@ export function SignInCard({
   const focusAfterStep = useRef<FieldKey | null>(null);
   const focusedStep = useRef(step);
   // Effects and timers below read the latest values without re-running when they change.
-  const latest = useRef({ step, onStep, onCue, email, password, pending: false });
+  const latest = useRef({ step, onStep, onCue, email, password, pending: false, passwordSignIn: false });
   useEffect(() => {
-    latest.current = { step, onStep, onCue, email, password, pending: loginPending || msPending };
+    latest.current = { step, onStep, onCue, email, password, pending: loginPending || msPending, passwordSignIn: loginPending };
   });
 
   useEffect(() => {
@@ -120,9 +120,10 @@ export function SignInCard({
 
   // The signed-in sequence follows the request exactly: on while it is in flight, off when it ends (an error). Declared
   // before the error effect below, so the sequence has ended by the time the error reaches Cris.
+  // Only a password sign-in shows its typed email: Microsoft's account is picked at Microsoft (sequenceEmail).
   const signingIn = loginPending || msPending;
   useEffect(() => {
-    onSignIn?.({ pending: signingIn, email: latest.current.email.trim() });
+    onSignIn?.({ pending: signingIn, email: sequenceEmail(latest.current.passwordSignIn, latest.current.email) });
   }, [signingIn, onSignIn]);
 
   // A failed sign-in stays on the form with the message under Password.
