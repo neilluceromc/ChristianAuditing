@@ -229,15 +229,17 @@ test.describe("phase 40 — readable asset history", () => {
       // The real send-back: its audit value is an OBJECT ({ fields, note }), the thing that printed "[object Object]".
       await login(page, FINANCE);
       await page.goto(`/finance/assets/${id}`);
-      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back to IT…" });
+      const sendBack = page.getByRole("region", { name: "Review" }).getByRole("button", { name: "Send back…" });
       await waitForHydration(sendBack);
       await sendBack.click();
-      const dialog = page.getByRole("dialog", { name: `Send ${tag} back to IT` });
+      const dialog = page.getByRole("dialog", { name: `Send ${tag} back` });
       await expect(dialog).toBeVisible();
       await dialog.getByLabel("Cost", { exact: true }).check();
       await dialog.getByLabel("Sales invoice").check();
       await dialog.getByLabel("Note for IT").fill("Invoice is for another PO");
-      await dialog.getByRole("button", { name: "Send back", exact: true }).click();
+      // Task 6 (purchase-orders spec §5): Finance picks the team
+      await dialog.getByLabel("Send to").selectOption("IT");
+      await dialog.getByRole("button", { name: "Send back to IT", exact: true }).click();
       await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${tag} back to IT` })).toBeVisible();
 
       // An edit records ids (categoryId, assigneeId) — written as updateAsset does — plus one id that no longer exists.
@@ -303,7 +305,7 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
     const palette = page.getByRole("dialog", { name: "Command palette" });
     const input = palette.getByRole("combobox", { name: "Search" });
     await expect(input).toBeFocused();
-    await expect(input).toHaveAttribute("placeholder", "Search assets, people, requests…");
+    await expect(input).toHaveAttribute("placeholder", "Search assets, people, purchase orders…");
     await page.keyboard.press("Escape");
     await expect(palette).toHaveCount(0);
 
@@ -444,7 +446,7 @@ test.describe("phase 40 — phone shell, shortcuts, titles", () => {
 test.describe("phase 40 — palette search", () => {
   async function openPalette(page: Page) {
     await page.goto("/inventory");
-    const trigger = page.getByRole("button", { name: /Search assets, people, requests/ });
+    const trigger = page.getByRole("button", { name: /Search assets, people, purchase orders/ });
     await waitForHydration(trigger);
     await trigger.click();
     const palette = page.getByRole("dialog", { name: "Command palette" });

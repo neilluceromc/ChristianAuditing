@@ -296,11 +296,15 @@ test.describe.serial("suppliers", () => {
     await page.goto("/purchases/suppliers?archived=1");
     await expect(page.getByRole("link", { name: "Bayside Networks" })).toBeVisible({ timeout: 10_000 });
 
-    // PR-0198 (seeded SUBMITTED request) — its Supplier picker no longer
-    // offers the archived supplier as an option.
+    // PO-0198 (seeded, with IT) — the Supplier picker on its edit form no
+    // longer offers the archived supplier as an option (migration 38: the
+    // supplier is set on Purchasing's PO form).
     await page.goto("/purchases");
-    await page.getByRole("link", { name: "PR-0198" }).click();
-    await expect(page.getByRole("heading", { name: "PR-0198" })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("link", { name: "PO-0198" }).click();
+    await expect(page.getByRole("heading", { name: "PO-0198" })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await page.waitForURL(/\/purchases\/[^/]+\/edit$/, { timeout: 20_000 });
+    await expect(page.getByRole("main").getByLabel("Supplier")).toBeVisible();
     await expect(
       page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Bayside Networks" }),
     ).toHaveCount(0);
@@ -372,7 +376,7 @@ test.describe.serial("suppliers", () => {
   test("9. The command palette finds Bayside Networks and opens its profile", async ({ page }) => {
     await login(page, PURCHASING);
     await page.goto("/purchases/suppliers");
-    const paletteTrigger = page.getByRole("button", { name: /Search assets, people, requests/ });
+    const paletteTrigger = page.getByRole("button", { name: /Search assets, people, purchase orders/ });
     await waitForHydration(paletteTrigger);
     await paletteTrigger.click();
     // Scoped to the palette dialog: "Suppliers" is ALSO the sidebar nav's

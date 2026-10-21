@@ -54,7 +54,7 @@ async function waitForHydration(target: Locator) {
 }
 
 test.describe.serial("phase 40 — work and approvals", () => {
-  test("1. a SUBMITTED request is a Purchase review on the worklist; the group opens the list; the nav item counts them", async ({ page }) => {
+  test("1. a PO with IT is a Purchase review on the worklist; the group opens the list; the nav item counts them", async ({ page }) => {
     test.setTimeout(90_000);
     const pr = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0198" } });
     expect(pr.state).toBe("WITH_IT");
@@ -64,38 +64,37 @@ test.describe.serial("phase 40 — work and approvals", () => {
     await page.goto("/inventory/work");
     const group = page.locator("section#purchases");
     await expect(group.getByRole("heading", { name: /^Purchase reviews/ })).toBeVisible({ timeout: 20_000 });
-    const row = group.locator("ol > li").filter({ hasText: "PR-0198" });
-    await expect(row).toContainText("PR-0198 · 27-inch monitors +1 more");
+    const row = group.locator("ol > li").filter({ hasText: "PO-0198" });
+    await expect(row).toContainText("PO-0198 · 27-inch monitors +1 more");
     await expect(row).toContainText("from ");
     await expect(row.getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", `/purchases/${pr.id}`);
 
     // The group's heading is the link to the whole list.
     const open = group.getByRole("link", { name: "Purchase reviews", exact: true });
-    await expect(open).toHaveAttribute("href", "/purchases?state=SUBMITTED");
+    await expect(open).toHaveAttribute("href", "/purchases?state=WITH_IT");
     await open.click();
-    await expect(page).toHaveURL(/\/purchases\?state=SUBMITTED$/, { timeout: 20_000 });
-    await expect(page.getByRole("navigation", { name: "Request states" }).getByRole("link", { name: /Awaiting IT/ }))
+    await expect(page).toHaveURL(/\/purchases\?state=WITH_IT$/, { timeout: 20_000 });
+    await expect(page.getByRole("navigation", { name: "Purchase order states" }).getByRole("link", { name: /With IT/ }))
       .toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("link", { name: "PR-0198" }).first()).toBeVisible();
-    // Only SUBMITTED requests: the seed's draft (PR-0201) and its IT_REVIEWED one (PR-0195) are filtered out.
-    await expect(page.getByRole("link", { name: "PR-0201" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "PR-0195" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "PO-0198" }).first()).toBeVisible();
+    // Only POs with IT: the seed's sent-back PO-0202 and ready PO-0203 are filtered out.
+    await expect(page.getByRole("link", { name: "PO-0202" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "PO-0203" })).toHaveCount(0);
 
-    // The nav item's badge: every request waiting for IT, the same count the list's Awaiting IT tab shows.
-    // Phase 42 (spec §3.1, §4.2): Purchase reviews is a view under Approvals, rendered only while Approvals is the
-    // current link — so it is here (the view is the current page) and on /approvals.
-    const navItem = page.getByRole("navigation", { name: "Workspace" }).first().locator('a[href="/purchases?state=SUBMITTED"]');
+    // The nav item's badge: every PO waiting for IT, the same count the list's With IT tab shows. Migration 38 moved
+    // it off Approvals › Purchase reviews onto IT's own Purchase orders item, which is the current page here.
+    const navItem = page.getByRole("navigation", { name: "Workspace" }).first().locator('a[href="/purchases?state=WITH_IT"]');
     await expect(navItem).toHaveAttribute("aria-current", "page");
     await page.goto("/approvals");
-    const badge = navItem.locator('[aria-label$="waiting for IT"]');
+    const badge = navItem.locator('[aria-label$="with IT"]');
     await expect(badge).toHaveText(String(waiting));
-    await expect(badge).toHaveAttribute("aria-label", `${waiting} waiting for IT`);
+    await expect(badge).toHaveAttribute("aria-label", `${waiting} with IT`);
 
     // The worklist carries the same group. (Phase 46: Home's worklist sections became the Overview's Needs you; the
     // full worklist is where the group's heading link lives.)
     await page.goto("/inventory/work");
     await expect(page.locator("section#purchases").getByRole("link", { name: "Purchase reviews", exact: true }))
-      .toHaveAttribute("href", "/purchases?state=SUBMITTED");
+      .toHaveAttribute("href", "/purchases?state=WITH_IT");
   });
 
   test("2. each approval check says Passed or Failed in words, not only by its dot", async ({ page }) => {

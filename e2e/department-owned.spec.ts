@@ -387,6 +387,7 @@ test.describe.serial("new employee", () => {
   });
 
   test("10. Purchasing cannot open the create or edit forms", async ({ page }) => {
+    test.setTimeout(60_000); // three cold pages after a sign-in
     const emp = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0097" } });
     await login(page, P);
     await page.goto("/employees/new");
@@ -399,7 +400,7 @@ test.describe.serial("new employee", () => {
 });
 
 test.describe("Purchasing Home", () => {
-  test("11. Purchasing's approvals waiting (its own class and the class-less) and requests awaiting IT", async ({ page }) => {
+  test("11. Purchasing's approvals waiting (its own class and the class-less) and purchase orders with IT", async ({ page }) => {
     const expectedApprovals = await db.approval.count({
       where: { state: { in: ["PENDING", "CLAIMED"] }, OR: [{ assetId: null }, { asset: { cls: "PURCHASING" } }] },
     });
@@ -411,10 +412,10 @@ test.describe("Purchasing Home", () => {
     expect(expectedApprovals, "the seed has open approvals Purchasing can see").toBeGreaterThan(0);
     const approvals = page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: /^Approvals\b/ });
     await expect(approvals.getByLabel(/^\d+ open approvals\b/)).toHaveText(String(expectedApprovals));
-    // Awaiting IT: the tile is the /purchases "Awaiting IT" tab's count.
+    // With IT (migration 38; was Awaiting IT): the tile is the /purchases "With IT" tab's count.
     const awaitingIt = page.locator('a[data-kpi="pr.submitted"]');
     await expect(awaitingIt.locator("[data-kpi-value]")).toHaveText(String(expectedAwaitingIt));
-    await expect(awaitingIt).toHaveAttribute("href", "/purchases?state=SUBMITTED");
+    await expect(awaitingIt).toHaveAttribute("href", "/purchases?state=WITH_IT");
   });
 });
 
@@ -444,61 +445,39 @@ test.describe("visibility", () => {
 test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
   let tag = "";
   let id = "";
-  test("13a. Purchasing registers a laptop; it awaits IT; Purchasing can still edit", async ({ page }) => {
+  // Purchase orders (spec §4): Purchasing no longer registers IT gear (an IT line is IT's to register, way 1; the
+  // direct Register is IT's, way 3). A laptop Purchasing registered before that still waits for IT's check — the
+  // fixture below is that legacy row, registered by Purchasing — and runs the same IT → Finance path.
+  test("13a. a laptop Purchasing registered before purchase orders awaits IT; Purchasing can still fix its money", async ({ page }) => {
     tag = tagOf("LT", (await highestNumber("LT")) + 1);
-    await login(page, P);
-    await page.goto("/inventory/register");
-    // Phase 34: a category card; a new model picks its type; every IT unit needs a serial.
-    const card = page.getByRole("button", { name: /^Laptop (\d+ in stock|None yet)$/ });
-    await card.waitFor();
-    await expect(async () => {
-      expect(await card.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
-    }).toPass({ timeout: 20_000 });
-    await card.click();
-    await page.getByRole("combobox", { name: "Model", exact: true }).fill("ThinkPad T14 Gen 5 (e2e)");
-    await page.getByRole("option", { name: /^\+ Add .ThinkPad T14 Gen 5 \(e2e\). as a new model$/ }).click();
-    await page.getByRole("combobox", { name: "Type", exact: true }).selectOption({ label: "High-performance" });
-    await page.getByRole("textbox", { name: "Tag", exact: true }).fill(tag);
-    await page.getByRole("textbox", { name: "Serial number", exact: true }).fill(`E2E-DEPT-13A-${Date.now()}`);
-    // D-: finance/queries.ts's financeAssets only lists assets with
-    // `cost: { not: null }` ("Capitalized assets: anything with an
-    // acquisition cost") — 13d expects Finance to list this asset once
-    // confirmed, so it needs a cost from the start, or it would never appear
-    // there regardless of itVerifiedAt/financeConfirmedAt.
-    // Phase 34: Cost sits in the Purchase and warranty section.
-    await page.getByRole("button", { name: /^Purchase and warranty/ }).click();
-    await page.getByRole("textbox", { name: "Cost (₱)", exact: true }).fill("45000");
-    await expect(page.getByRole("textbox", { name: "How many", exact: true })).toHaveValue("1");
-    // Purchasing does not manage IT, so Lend is not offered (ruling R4) — the
-    // approval path would create a loan with no due date.
-    const initialState = page.getByRole("radiogroup", { name: "Where does it go" });
-    await expect(initialState.getByRole("radio", { name: "Spare stock" })).toBeChecked();
-    await expect(initialState.getByRole("radio", { name: "Lend" })).toHaveCount(0);
-    // Plan P-5: quantity 1 is one asset — it lands on Labels with its record ticked.
-    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
-    await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
-    // Ruling R20: the Labels tab is the classes this role manages PLUS what this
-    // user registered, so the IT laptop Purchasing just registered is ticked
-    // here and printable by Purchasing — not left waiting for IT (8b: IT's own
-    // IT batches never reach Purchasing's queue).
-    await expect(page.getByRole("checkbox", { name: new RegExp(tag) })).toBeChecked({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "Print 1 label", exact: true })).toBeEnabled();
-    await expect(page.getByRole("img", { name: `Barcode ${tag}` })).toHaveCount(1);
-    const a = await db.asset.findUniqueOrThrow({ where: { tag } });
-    expect(new URL(page.url()).searchParams.get("just")).toBe(a.purchaseRecordId);
-    expect(Number(a.cost)).toBe(45000);
+    const purchasing = await db.user.findUniqueOrThrow({ where: { email: P } });
+    const laptop = await db.assetCategory.findFirstOrThrow({ where: { name: "Laptop", cls: "IT" } });
+    const record = await db.purchaseRecord.create({ data: { cls: "IT", quantity: 1, createdById: purchasing.id, unitCost: 45_000 } });
+    const a = await db.asset.create({
+      data: {
+        tag, model: "ThinkPad T14 Gen 5 (e2e)", categoryId: laptop.id, cls: "IT", status: "SPARE",
+        serial: `E2E-DEPT-13A-${Date.now()}`, cost: 45_000, purchaseRecordId: record.id,
+      },
+    });
     id = a.id;
-    expect(a.cls).toBe("IT");
     expect(a.itVerifiedAt).toBeNull();
+
+    await login(page, P);
     await page.goto(`/inventory/${id}`);
     // Phase 30 (spec §4.1): the header's one pill asks something of THIS
     // viewer — AWAITING IT CHECK is IT's (13c); Purchasing's move is Edit.
     await expect(page.getByRole("link", { name: "Edit" })).toBeVisible();
     await expect(page.getByText("AWAITING IT CHECK", { exact: true })).toHaveCount(0);
     await page.getByRole("link", { name: "Edit" }).click();
-    await page.getByLabel("Model").fill("ThinkPad T14 Gen 5 (e2e, corrected)");
+    // Spec §2: the money is still Purchasing's while the asset waits for IT (no reason needed); the device is IT's.
+    const cost = page.getByRole("textbox", { name: "Cost (₱)", exact: true });
+    await expect(async () => {
+      expect(await cost.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+    }).toPass({ timeout: 20_000 });
+    await cost.fill("46000");
     await page.getByRole("button", { name: /Save/ }).click();
     await expect(page.getByText(/Saved|saved/)).toBeVisible();
+    await expect.poll(async () => Number((await db.asset.findUniqueOrThrow({ where: { id } })).cost)).toBe(46_000);
   });
   test("13b. Finance lists it as Waiting for IT, and cannot approve it yet", async ({ page }) => {
     // Phase 35 (spec §4.1): Finance's register lists every asset; an unchecked one reads "Waiting for IT"

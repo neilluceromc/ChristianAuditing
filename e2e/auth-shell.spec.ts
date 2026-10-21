@@ -26,17 +26,6 @@ async function login(page: Page, email: string) {
     .toBe(id);
 }
 
-/**
- * Phase 42 spec §4.3 (builder-check ruling): IT's Approvals badge label. With no purchase reviews waiting it is
- * exactly the old "{n} open approvals[, some past SLA]"; otherwise "{sum} waiting: {a} open approval(s), {b}
- * purchase review(s)[, some approvals past SLA]". Copied, not imported — house rule.
- */
-function itApprovalsLabel(open: number, reviews: number, overdue: boolean): string {
-  if (reviews === 0) return `${open} open approvals${overdue ? ", some past SLA" : ""}`;
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  return `${open + reviews} waiting: ${plural(open, "open approval")}, ${plural(reviews, "purchase review")}`
-    + (overdue ? ", some approvals past SLA" : "");
-}
 
 // Spec files share one database and run in alphabetical order — each file
 // reseeds so no file inherits another's mutations (approvals-audit deploys
@@ -131,12 +120,13 @@ test.describe("workspace gating", () => {
     await page.getByRole("button", { name: /4 workspaces/ }).click();
     await page.getByRole("menuitem", { name: "Purchasing" }).click();
     await expect(page).toHaveURL(/\/purchases$/);
-    // Phase 42 (spec §3.2): no headings any more — Purchasing's nav is known by its Requests link.
+    // Phase 42 (spec §3.2): no headings any more — Purchasing's nav is known by its Purchase orders link (migration
+    // 38; its name carries its count, hence the anchor).
     const nav = page.getByRole("navigation", { name: "Workspace" });
-    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(nav.getByRole("link", { name: /^Purchase orders\b/ })).toHaveAttribute("href", "/purchases");
     await expect(page.getByRole("button", { name: /^Switch workspace — Purchasing, 4 workspaces$/ })).toBeVisible();
     await page.reload();
-    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(nav.getByRole("link", { name: /^Purchase orders\b/ })).toHaveAttribute("href", "/purchases");
     await expect(page.getByRole("button", { name: /^Switch workspace — Purchasing, 4 workspaces$/ })).toBeVisible();
   });
 
@@ -155,14 +145,17 @@ test.describe("workspace gating", () => {
 
 test.describe("shell", () => {
   test("approvals badge shows the seeded urgent count", async ({ page }) => {
-    // Phase 42 (spec §4.3): IT's Approvals badge is the 3 seeded open approvals (one past SLA) plus the purchase
-    // reviews waiting for IT (the seed's PR-0198), so waiting reviews stay visible while Approvals is closed.
-    const reviews = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
+    // Phase 42 (spec §4.3): IT's Approvals badge is the 3 seeded open approvals (one past SLA). Migration 38 moved
+    // the purchase orders waiting for IT off it onto IT's own Purchase orders link ("N with IT").
+    const withIt = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
     await login(page, "it@thebackroomop.com");
     const badge = page.getByLabel(/open approval/);
-    await expect(badge).toHaveText(String(3 + reviews));
-    await expect(badge).toHaveAttribute("aria-label", itApprovalsLabel(3, reviews, true));
+    await expect(badge).toHaveText("3");
+    await expect(badge).toHaveAttribute("aria-label", "3 open approvals, some past SLA");
     await expect(badge).toHaveClass(/fault/);
+    const orders = page.getByLabel(/^\d+ with IT$/);
+    await expect(orders).toHaveText(String(withIt));
+    await expect(orders).toHaveAttribute("aria-label", `${withIt} with IT`);
   });
 
   test("theme survives a reload via the cookie contract", async ({ page }) => {

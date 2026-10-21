@@ -7,31 +7,25 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 import { PROVENANCE_LABEL } from "@/lib/provenance";
 
 /**
- * Phase 18, Task 9 — purchasing extensions (spec §8.2, 8 cases). Covers the
- * surface Task 6 added to a purchase request (a required requesting
- * department with its own list filter, a settable supplier, attachments) and
- * Task 7's asset provenance (the derived badge/facet/export column, and the
- * register page's vendor-from-request prefill) — everything Tasks 1-8 shipped
- * that Task 8's own suppliers.spec.ts does not already cover.
+ * Phase 18, Task 9 — purchasing extensions (spec §8.2, 8 cases), carried over to purchase orders (migration 38,
+ * docs/superpowers/specs/2026-10-21-purchase-orders-intake-design.md). Covers a PO's optional department with its own
+ * list filter, its supplier (set on Purchasing's edit form, archived suppliers kept but never offered), documents, and
+ * asset provenance (the derived badge/facet/export column, and the money a PO registration copies from the PO).
  *
- * Cases run serial and share state the same way suppliers.spec.ts and
- * registration.spec.ts do: case 1 creates one new draft (its id/refNo are
- * read once and reused by case 2), and cases 3-4 both act on the seed's
- * PR-0198, each leaving it in the state the next one expects. Every id is
- * looked up fresh via Prisma, never hardcoded, since the seed produces new
- * cuids on every reseed.
+ * Cases run serial and share state: case 1 saves one new PO (its id/refNo are read once and reused by case 2), and
+ * cases 3-5 act on the seed's PO-0198. Every id is looked up fresh via Prisma, never hardcoded, since the seed produces
+ * new cuids on every reseed.
  *
- * Seeded fixtures this file depends on (prisma/seed.ts), all
- * @thebackroomop.com / SEED_PASSWORD:
+ * Seeded fixtures this file depends on (prisma/seed.ts), all @thebackroomop.com / SEED_PASSWORD:
  *   admin, it, purchasing (A. Reyes), finance (L. Domingo), viewer.
  *   Departments: IT, Finance, Sales, HR, Operations.
- *   PR-0201 DRAFT/IT, PR-0198 SUBMITTED/HR, PR-0195 IT_REVIEWED/Sales,
- *   PR-0188 COMPLETED/IT with supplier TechServe PH, PR-0183 CANCELLED with
- *   NO department.
- *   Suppliers: TechServe PH, Octagon Repairs, Metro Office Supply, Quezon
- *   Furniture Works (all active), Old Line Trading (already archived).
- *   e2e/fixtures/assets-clean.xlsx (shared with import-export.spec.ts) yields
- *   3 new IT-class assets: BR-LT-9001, BR-MN-9002, BR-HS-9003.
+ *   PO-0201 SENT_BACK/IT, PO-0198 WITH_IT/HR (no supplier), PO-0195 WITH_IT/Sales,
+ *   PO-0188 READY (legacy, completed)/IT with supplier TechServe PH, SI-30188, OR-30188, one Dell Latitude 5420 of two
+ *   linked; PO-0183 CANCELLED with NO department.
+ *   Suppliers: TechServe PH, Octagon Repairs, Metro Office Supply, Quezon Furniture Works (all active), Old Line
+ *   Trading (already archived).
+ *   e2e/fixtures/assets-clean.xlsx (shared with import-export.spec.ts) yields 3 new IT-class assets: BR-LT-9001,
+ *   BR-MN-9002, BR-HS-9003.
  */
 
 const db = new PrismaClient();
@@ -113,60 +107,46 @@ async function newLaptop(page: Page, model: string, serial: string): Promise<str
   return tag;
 }
 
-/** "Purchase request" and "Vendor" sit inside the Purchase and warranty section, closed until opened. */
-async function openPurchase(page: Page) {
-  const header = page.getByRole("button", { name: /^Purchase and warranty/ });
-  await waitForHydration(header);
-  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click();
-  await expect(header).toHaveAttribute("aria-expanded", "true");
-}
-
 const reqByRef = (refNo: string) => db.purchaseOrder.findUniqueOrThrow({ where: { refNo } });
 const vendorByName = (name: string) => db.vendor.findUniqueOrThrow({ where: { name } });
 const deptByName = (name: string) => db.department.findUniqueOrThrow({ where: { name } });
 
+/** Saves the open PO form (new or edit) and waits for its page; returns the PO's id. */
+async function savePo(page: Page): Promise<string> {
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.waitForURL(/\/purchases\/(?!new)[^/]+$/, { timeout: 30_000 });
+  return new URL(page.url()).pathname.split("/").pop()!;
+}
+
 // Set by case 1, read by case 2 — module scope because each is its own test.
-let newReqId: string;
 let newReqRef: string;
 
 test.describe.serial("purchasing extensions", () => {
-  test("1. a draft cannot autosave without a department; choosing one saves it, and the badge/list reflect it", async ({ page }) => {
+  test("1. a PO's department is optional; one saved for HR shows FOR HR and its list row says HR", async ({ page }) => {
     test.setTimeout(90_000); // first hit of /purchases/new and /purchases/[id] in this file
-    const before = await db.purchaseOrder.count();
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
+    const main = page.getByRole("main");
+    const save = main.getByRole("button", { name: "Save", exact: true });
+    await waitForHydration(save);
 
-    const line1 = page.getByLabel("Line 1 description");
-    await waitForHydration(line1);
-    await expect(
-      page.getByText("Pick the department first — the draft saves once it is chosen."),
-    ).toBeVisible();
+    // Purchase orders (migration 38): the department is optional ("No department"); a non-IT line skips IT.
+    await expect(main.getByLabel("Department")).toHaveValue("");
+    await main.getByLabel("Supplier").selectOption({ label: "Metro Office Supply" });
+    await main.getByLabel("SI number").fill("SI-18001");
+    await main.getByLabel("Purchase date").fill("2026-10-18");
+    await main.getByLabel("Department").selectOption({ label: "HR" });
+    await main.getByLabel("Line 1 description").fill("Ergonomic task chairs");
+    await main.getByLabel("Line 1 category").selectOption({ label: "Furniture" });
+    await main.getByLabel("Line 1 quantity").fill("2");
+    await main.getByLabel("Line 1 unit price").fill("9500");
+    await savePo(page);
+    newReqRef = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
+    expect(newReqRef).toMatch(/^PO-\d{4}$/);
 
-    await line1.fill("Ergonomic task chairs");
-    // Sanctioned exception: a negative assertion has no state to wait on.
-    // Outwaits draft-form's AUTOSAVE_MS (2500ms) + margin, then proves the DB
-    // count is unchanged (draft-form.tsx:30,136-150 debounce; the guard at
-    // :132 refuses to call createDraft at all while departmentId === "").
-    await page.waitForTimeout(3_000);
-    expect(await db.purchaseOrder.count()).toBe(before);
-
-    await page.getByLabel("Requesting department").selectOption({ label: "HR" });
-    await expect(page.getByText(/DRAFT · SAVED \d{2}:\d{2}/)).toBeVisible({ timeout: 10_000 });
-
-    // Scoped by visible text (PR-####), same reasoning as
-    // e2e/purchases.spec.ts:156 — the sidebar's "Register purchase" link also
-    // targets /purchases/new but its name never matches this pattern.
-    const refLink = page.getByRole("link", { name: /^PR-\d{4}$/ });
-    newReqRef = (await refLink.textContent())!.trim();
-    const href = await refLink.getAttribute("href");
-    newReqId = href!.replace("/purchases/", "");
-    expect(newReqId).toBeTruthy();
-
-    await page.goto(`/purchases/${newReqId}`);
-    await expect(page.getByRole("heading", { name: newReqRef })).toBeVisible({ timeout: 10_000 });
-    // exact: the meta line below the badge also reads "· for HR" (lowercase
-    // "for") and a case-insensitive substring match would resolve both.
+    // exact: the meta line below the badge also reads "· for HR" (lowercase "for").
     await expect(page.getByText("FOR HR", { exact: true })).toBeVisible();
+    await expect(page.locator("main header").first()).toContainText("Ready to register");
 
     await page.goto("/purchases");
     await expect(page.getByRole("row", { name: new RegExp(newReqRef) })).toContainText("HR");
@@ -178,71 +158,67 @@ test.describe.serial("purchasing extensions", () => {
 
     await page.goto(`/purchases?department=${hr.id}`);
     await expect(page.getByRole("row", { name: new RegExp(newReqRef) })).toBeVisible();
-    await expect(page.getByRole("row", { name: /PR-0195/ })).toHaveCount(0);
+    await expect(page.getByRole("row", { name: /PO-0195/ })).toHaveCount(0);
 
     await page.goto("/purchases?department=none");
-    await expect(page.getByRole("row", { name: /PR-0183/ })).toBeVisible();
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toHaveCount(0);
+    await expect(page.getByRole("row", { name: /PO-0183/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /PO-0198/ })).toHaveCount(0);
   });
 
-  test("3. Purchasing sets PR-0198's supplier; the request, the list row, the audit log and the supplier profile all agree", async ({ page }) => {
+  test("3. Purchasing sets PO-0198's supplier on its edit form; the PO, the list row, the audit log and the supplier profile agree", async ({ page }) => {
     test.setTimeout(60_000); // first hit of /purchases/suppliers/[id] in this file
     await login(page, PURCHASING);
-    const pr0198 = await reqByRef("PR-0198");
+    const po0198 = await reqByRef("PO-0198");
 
-    await page.goto(`/purchases/${pr0198.id}`);
+    // Purchase orders: the supplier is one of the PO's money fields, edited on Purchasing's own form (no reason while
+    // the PO is with IT, spec §2).
+    await page.goto(`/purchases/${po0198.id}/edit`);
     const supplierSelect = page.getByRole("main").getByLabel("Supplier");
     await waitForHydration(supplierSelect);
     await supplierSelect.selectOption({ label: "Quezon Furniture Works" });
-    await page.getByRole("button", { name: "Save supplier" }).click();
-    await expect(page.getByRole("link", { name: "Quezon Furniture Works" })).toBeVisible({ timeout: 10_000 });
+    await savePo(page);
+    await expect(page.getByRole("main")).toContainText("Quezon Furniture Works");
 
     await page.goto("/purchases");
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toContainText("Quezon Furniture Works");
+    await expect(page.getByRole("row", { name: /PO-0198/ })).toContainText("Quezon Furniture Works");
 
-    expect(await db.auditEntry.findFirst({ where: { action: "supplier-set" } })).not.toBeNull();
+    expect(await db.auditEntry.findFirst({ where: { entityType: "purchase-order", entityId: po0198.id, action: "po.save" } })).not.toBeNull();
 
     const quezon = await vendorByName("Quezon Furniture Works");
     await page.goto(`/purchases/suppliers/${quezon.id}`);
-    await expect(page.getByRole("row", { name: /PR-0198/ })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("row", { name: /PO-0198/ })).toBeVisible({ timeout: 10_000 });
   });
 
-  test("4. an archived supplier is never offered, but a request that already names one keeps showing it", async ({ page }) => {
+  test("4. an archived supplier is never offered, but a PO that already names one keeps showing it", async ({ page }) => {
     await login(page, PURCHASING);
-    const pr0198 = await reqByRef("PR-0198");
+    const po0198 = await reqByRef("PO-0198");
+    const quezon = await vendorByName("Quezon Furniture Works");
+    // Re-affirm Quezon (case 3 already set it) so this case does not depend on case 3 having run first.
+    await db.purchaseOrder.update({ where: { id: po0198.id }, data: { vendorId: quezon.id } });
 
-    await page.goto(`/purchases/${pr0198.id}`);
-    // Old Line Trading is archived in the seed itself and is not the
-    // currently-set supplier here — it must not appear at all.
+    // Old Line Trading is archived in the seed itself and is not this PO's supplier — it must not appear at all.
+    await page.goto(`/purchases/${po0198.id}/edit`);
     await expect(
       page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Old Line Trading" }),
     ).toHaveCount(0);
 
-    // Re-affirm Quezon (case 3 already set it) so this case does not depend
-    // on case 3 having run first.
-    const supplierSelect = page.getByRole("main").getByLabel("Supplier");
-    await waitForHydration(supplierSelect);
-    await supplierSelect.selectOption({ label: "Quezon Furniture Works" });
-    await page.getByRole("button", { name: "Save supplier" }).click();
-    await expect(page.getByRole("link", { name: "Quezon Furniture Works" })).toBeVisible({ timeout: 10_000 });
-
-    const quezon = await vendorByName("Quezon Furniture Works");
     await page.goto(`/purchases/suppliers/${quezon.id}`);
     const archiveBtn = page.getByRole("button", { name: "Archive supplier" });
     await waitForHydration(archiveBtn);
     await archiveBtn.click();
     await page.getByRole("dialog").getByRole("button", { name: "Archive" }).click();
-    // exact: the "Success: Supplier archived" toast also contains "archived"
-    // and getByText's default match is case-insensitive-substring.
+    // exact: the "Success: Supplier archived" toast also contains "archived".
     await expect(page.getByText("ARCHIVED", { exact: true })).toBeVisible({ timeout: 10_000 });
 
-    await page.goto(`/purchases/${pr0198.id}`);
+    // The PO page names it, marked archived; its edit form keeps it selected.
+    await page.goto(`/purchases/${po0198.id}`);
+    await expect(page.getByRole("main")).toContainText("Quezon Furniture Works");
+    await expect(page.getByRole("main").getByText("ARCHIVED", { exact: true })).toBeVisible();
+    await page.goto(`/purchases/${po0198.id}/edit`);
     const reopenedSelect = page.getByRole("main").getByLabel("Supplier");
     await expect(reopenedSelect).toBeVisible({ timeout: 10_000 });
-    const selectedText = await reopenedSelect.evaluate(
-      (el: HTMLSelectElement) => el.options[el.selectedIndex]?.text,
-    );
-    expect(selectedText).toBe("Quezon Furniture Works (archived)");
+    const selectedText = await reopenedSelect.evaluate((el: HTMLSelectElement) => el.options[el.selectedIndex]?.text);
+    expect(selectedText).toBe("Quezon Furniture Works");
 
     await page.goto(`/purchases/suppliers/${quezon.id}`);
     const restoreBtn = page.getByRole("button", { name: "Restore supplier" });
@@ -251,10 +227,10 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByText("ARCHIVED", { exact: true })).toHaveCount(0, { timeout: 10_000 });
   });
 
-  test("5. attachments show by role, survive on a cancelled request, and download with real headers", async ({ page }) => {
+  test("5. documents show by role, survive on a cancelled PO, and download with real headers", async ({ page }) => {
     await login(page, PURCHASING);
-    const pr0198 = await reqByRef("PR-0198");
-    await page.goto(`/purchases/${pr0198.id}`);
+    const po0198 = await reqByRef("PO-0198");
+    await page.goto(`/purchases/${po0198.id}`);
 
     const kindSelect = page.getByLabel("Document kind");
     await waitForHydration(kindSelect);
@@ -264,20 +240,21 @@ test.describe.serial("purchasing extensions", () => {
     });
     await expect(page.getByRole("row", { name: /Quotation/ })).toBeVisible({ timeout: 10_000 });
 
+    // Spec §2: Purchasing, IT and Finance can all upload.
     await login(page, FINANCE);
-    await page.goto(`/purchases/${pr0198.id}`);
+    await page.goto(`/purchases/${po0198.id}`);
     const kindSelectFinance = page.getByLabel("Document kind");
     await waitForHydration(kindSelectFinance);
     await kindSelectFinance.selectOption("invoice");
     await page.getByLabel("Document file").setInputFiles({
       name: "invoice.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%invoice"),
     });
-    await expect(page.getByRole("row", { name: /Invoice/ })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("row", { name: /Sales invoice/ })).toBeVisible({ timeout: 10_000 });
 
     await login(page, VIEWER);
-    await page.goto(`/purchases/${pr0198.id}`);
+    await page.goto(`/purchases/${po0198.id}`);
     await expect(page.getByRole("row", { name: /Quotation/ })).toBeVisible();
-    await expect(page.getByRole("row", { name: /Invoice/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /Sales invoice/ })).toBeVisible();
     await expect(page.getByLabel("Document file")).toHaveCount(0);
     const downloadLinks = page.getByRole("link", { name: "Download" });
     await expect(downloadLinks.first()).toBeVisible();
@@ -287,25 +264,26 @@ test.describe.serial("purchasing extensions", () => {
     expect(res.headers()["content-type"]).toBe("application/pdf");
     expect(res.headers()["content-disposition"]).toMatch(/\.pdf/);
 
-    // Spec §5.3: a cancelled request keeps its files — attaching still works.
+    // A cancelled PO keeps its files — and shows them; it takes no new ones (nothing more happens to it).
     await login(page, PURCHASING);
-    const pr0183 = await reqByRef("PR-0183");
-    await page.goto(`/purchases/${pr0183.id}`);
-    const kindSelectPr0183 = page.getByLabel("Document kind");
-    await waitForHydration(kindSelectPr0183);
-    await kindSelectPr0183.selectOption("other");
-    await page.getByLabel("Document file").setInputFiles({
-      name: "other.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%other"),
+    const po0183 = await reqByRef("PO-0183");
+    await db.requestDocument.create({
+      data: {
+        orderId: po0183.id, kind: "other", fileName: "kept.pdf", path: "e2e/kept.pdf", checksum: "e2e",
+        uploadedById: (await db.user.findUniqueOrThrow({ where: { email: PURCHASING } })).id,
+      },
     });
-    await expect(page.getByRole("row", { name: /Other/ })).toBeVisible({ timeout: 10_000 });
+    await page.goto(`/purchases/${po0183.id}`);
+    await expect(page.getByRole("row", { name: /kept\.pdf/ })).toBeVisible();
+    await expect(page.getByLabel("Document file")).toHaveCount(0);
   });
 
-  test("6. import gives an asset Historical provenance; register gives Direct or From-a-request; the export names the column", async ({ page }) => {
+  test("6. import gives an asset Historical provenance; register gives Direct or From a PO; the export names the column", async ({ page }) => {
     test.setTimeout(180_000); // cold JIT on /inventory/import and /inventory/register, plus the wizard's own Apply budget
     await login(page, ADMIN);
 
-    // Wizard steps copied from e2e/import-export.spec.ts's "a clean file
-    // reports 3 creates" / "applying it creates 3 assets" cases.
+    // Wizard steps copied from e2e/import-export.spec.ts's "a clean file reports 3 creates" / "applying it creates 3
+    // assets" cases.
     await page.goto("/inventory/import");
     const spreadsheet = page.getByLabel(/Spreadsheet/);
     await waitForHydration(spreadsheet);
@@ -325,7 +303,7 @@ test.describe.serial("purchasing extensions", () => {
     await page.goto("/inventory?provenance=HISTORICAL");
     await expect(page.getByText("BR-LT-9001")).toBeVisible({ timeout: 10_000 });
 
-    // Register one laptop with no request — Direct provenance.
+    // Register one laptop with no PO — Direct provenance.
     await page.goto("/inventory/register");
     await pickLaptop(page);
     const directTag = await newLaptop(page, "e2e provenance -- direct", `E2E-PEXT-6A-${Date.now()}`);
@@ -338,26 +316,29 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     await expect(page.getByText("Registered directly")).toBeVisible();
 
-    // Register one laptop against PR-0188 (COMPLETED) — From-a-request provenance.
-    await page.goto("/inventory/register");
-    await pickLaptop(page);
-    const fromPrTag = await newLaptop(page, "e2e provenance -- from PR-0188", `E2E-PEXT-6B-${Date.now()}`);
-    // Phase 30 (spec §5.2): a request option reads `{refNo} · {vendor} · {date}`, so pick it by id.
-    await openPurchase(page);
-    await page.getByLabel("Purchase request").selectOption((await reqByRef("PR-0188")).id);
-    await page.getByRole("button", { name: "Register 1 laptop", exact: true }).click();
+    // Register one laptop from PO-0188 (a legacy completed order: Register stays open on it, spec §3) — From a PO.
+    const po0188 = await reqByRef("PO-0188");
+    await page.goto(`/purchases/${po0188.id}/register`);
+    const card = page.getByRole("region", { name: /^Line 01 · Dell Latitude 5420/ });
+    const count = card.getByLabel("How many arrived now");
+    await waitForHydration(count);
+    await count.fill("1");
+    const type = card.getByRole("combobox", { name: "Type", exact: true });
+    if (await type.count()) await type.selectOption({ label: "Standard" });
+    await card.getByRole("combobox", { name: "Model", exact: true }).fill("Latitude 5420 (e2e from PO-0188)");
+    const fromPoTag = `PX${Date.now().toString(36).slice(-6).toUpperCase()}-PO`;
+    await card.getByLabel("Tag 1", { exact: true }).fill(fromPoTag);
+    await card.getByLabel("Serial 1", { exact: true }).fill(`E2E-PEXT-6B-${Date.now()}`);
+    await page.getByRole("button", { name: "Register 1 asset" }).click();
     await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
-    expect(await db.asset.count({ where: { tag: fromPrTag } })).toBe(1);
+    expect(await db.asset.count({ where: { tag: fromPoTag } })).toBe(1);
 
-    await page.goto(`/inventory?q=${fromPrTag}&go=1`);
+    await page.goto(`/inventory?q=${fromPoTag}&go=1`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
-    await expect(page.getByRole("link", { name: "From PR-0188" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "From PO-0188" })).toBeVisible();
 
-    // The export sheet's header carries the derived column, and by this point
-    // the run has produced all three provenances (BR-LT-9001 historical,
-    // directTag direct, fromPrTag from-a-request, plus the seeded PR-0188
-    // asset) — spec §8.2 case 6: "the export CSV has the provenance column
-    // with the three labels".
+    // The export sheet's header carries the derived column, and by now the run has every provenance (BR-LT-9001
+    // historical, directTag direct, fromPoTag and the seeded BR-LT-0148 from a PO).
     const res = await page.request.get("/inventory/export");
     expect(res.status()).toBe(200);
     const grid = (await readSheet(Buffer.from(await res.body()))) as unknown[][];
@@ -367,44 +348,28 @@ test.describe.serial("purchasing extensions", () => {
     for (const label of Object.values(PROVENANCE_LABEL)) expect(seen).toContain(label);
   });
 
-  test("7. the register page prefills the vendor from a chosen request, but never overwrites one already picked", async ({ page }) => {
-    test.setTimeout(60_000);
-    await login(page, PURCHASING);
+  test("7. a PO registration takes its money from the PO: supplier, SI and OR numbers, date and the line's price", async () => {
+    // Spec §4/§5: money lives on the PO and is copied onto each asset at Register (case 6 registered one from PO-0188).
+    const po0188 = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0188" }, include: { lines: true } });
+    const asset = await db.asset.findFirstOrThrow({
+      where: { purchaseOrderId: po0188.id, model: "Latitude 5420 (e2e from PO-0188)" },
+    });
     const techServe = await vendorByName("TechServe PH");
-    const octagon = await vendorByName("Octagon Repairs");
-
-    const pr0188 = await reqByRef("PR-0188");
-    await page.goto("/inventory/register");
-    await openPurchase(page);
-    const requestSelect = page.getByLabel("Purchase request");
-    await waitForHydration(requestSelect);
-    // Phase 30 (spec §5.2): the option names the request's supplier and date,
-    // and Vendor is the searchable picker (it shows the supplier's name).
-    await expect(requestSelect.locator(`option[value="${pr0188.id}"]`)).toHaveText(/^PR-0188 · TechServe PH · \d{2} \w{3,4} \d{4}$/); // en-GB writes September as "Sept"
-    await requestSelect.selectOption(pr0188.id);
-    await expect(page.getByLabel("Vendor")).toHaveValue(techServe.name);
-
-    await page.goto("/inventory/register");
-    await openPurchase(page);
-    const vendorPicker = page.getByLabel("Vendor");
-    await waitForHydration(vendorPicker);
-    await vendorPicker.fill("Octagon");
-    await vendorPicker.locator("xpath=following-sibling::ul").getByRole("option", { name: /Octagon Repairs/ }).first().click();
-    await expect(vendorPicker).toHaveValue(octagon.name);
-    await page.getByLabel("Purchase request").selectOption(pr0188.id);
-    await expect(page.getByLabel("Vendor")).toHaveValue(octagon.name);
+    expect(asset.vendorId).toBe(techServe.id);
+    expect(asset.invoiceRef).toBe("SI-30188");
+    expect(asset.receiptRef).toBe("OR-30188");
+    expect(asset.purchasedAt?.toISOString().slice(0, 10)).toBe(po0188.purchasedAt?.toISOString().slice(0, 10));
+    expect(Number(asset.cost)).toBe(Number(po0188.lines[0].unitPrice));
+    expect(asset.purchaseOrderLineId).toBe(po0188.lines[0].id);
   });
 
-  test("8. no serious or critical axe violations on PR-0198's detail (Supplier + Attachments) or the historical-provenance inventory view", async ({ page }) => {
+  test("8. no serious or critical axe violations on PO-0198's page (Purchase + Documents) or the historical-provenance inventory view", async ({ page }) => {
     test.setTimeout(60_000); // two full-page axe scans, each with its own settle wait
     await login(page, PURCHASING);
-    const pr0198 = await reqByRef("PR-0198");
-    await page.goto(`/purchases/${pr0198.id}`);
-    // exact: a substring match would also take any heading that merely
-    // contains "Supplier" (the sidebar's "Suppliers" section heading did,
-    // until Phase 42 dropped the nav's headings).
-    await expect(page.getByRole("heading", { name: "Supplier", exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("heading", { name: "Attachments" })).toBeVisible();
+    const po0198 = await reqByRef("PO-0198");
+    await page.goto(`/purchases/${po0198.id}`);
+    await expect(page.getByRole("heading", { name: "Purchase", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
     await expectNoSeriousAxe(page);
 
     await page.goto("/inventory?provenance=HISTORICAL");

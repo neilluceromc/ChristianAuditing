@@ -12,7 +12,7 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
  *   3. on /employees, Inventory's views are gone and Employees' show;
  *   4. /admin/asset-types opens Setup with Asset types current;
  *   5. a viewer's Setup points straight at Equipment policies and opens no list;
- *   6. Purchasing (admin, switched): Requests' views with Awaiting finance current after a click; Assets → IT inventory;
+ *   6. Purchasing (admin, switched): Purchase orders' views with With IT current after a click; Assets → IT inventory;
  *   7. at 1280×600 the nav scrolls inside the sidebar and the account row stays visible;
  *   8. axe on /inventory and /purchases, light and dark;
  *   9. (Task 4 review) a deep-scrolled page, then a client navigation from a link low in the nav: the new page opens
@@ -213,7 +213,7 @@ test.describe("phase 42 — the sidebar stays put, with views under the current 
     }
   });
 
-  test("6. Purchasing (admin, switched): Requests' views, Awaiting finance current on click; Assets → IT inventory", async ({ page }) => {
+  test("6. Purchasing (admin, switched): Purchase orders' views, With IT current on click; Assets → IT inventory", async ({ page }) => {
     test.setTimeout(90_000);
     await login(page, ADMIN);
     const tag = page.getByRole("button", { name: /4 workspaces/ });
@@ -224,21 +224,22 @@ test.describe("phase 42 — the sidebar stays put, with views under the current 
     await expect(page.getByRole("button", { name: "Switch workspace — Purchasing, 4 workspaces" })).toBeVisible();
 
     const nav = navOf(page);
-    await expect(nav.getByRole("link", { name: "Requests", exact: true })).toHaveAttribute("href", "/purchases");
+    // Purchase orders (migration 38): the link carries its count in its name, hence the anchor.
+    await expect(nav.getByRole("link", { name: /^Purchase orders\b/ })).toHaveAttribute("href", "/purchases");
     await expectLinks(nav, [
       ["All", "/purchases"],
-      ["My drafts", "/purchases?state=DRAFT"],
-      ["Awaiting IT", "/purchases?state=SUBMITTED"],
-      ["Awaiting finance", "/purchases?state=IT_REVIEWED"],
-      ["Completed", "/purchases?state=COMPLETED"],
-      ["Register purchase", "/purchases/new"],
+      ["With IT", "/purchases?state=WITH_IT"],
+      ["Sent back", "/purchases?state=SENT_BACK"],
+      ["To register", "/purchases?register=1"],
+      ["Cancelled", "/purchases?state=CANCELLED"],
+      ["New purchase order", "/purchases/new"],
     ]);
     await expect(nav.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page");
 
-    const awaitingFinance = nav.getByRole("link", { name: /^Awaiting finance\b/ });
-    await awaitingFinance.click();
-    await expect(page).toHaveURL(/\/purchases\?state=IT_REVIEWED$/, { timeout: 30_000 });
-    await expect(awaitingFinance).toHaveAttribute("aria-current", "page");
+    const withIt = nav.getByRole("link", { name: /^With IT\b/ });
+    await withIt.click();
+    await expect(page).toHaveURL(/\/purchases\?state=WITH_IT$/, { timeout: 30_000 });
+    await expect(withIt).toHaveAttribute("aria-current", "page");
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
 
     const assets = nav.getByRole("link", { name: "Assets", exact: true });
@@ -246,8 +247,8 @@ test.describe("phase 42 — the sidebar stays put, with views under the current 
     await assets.click();
     await expect(page).toHaveURL(/\/inventory\?cls=PURCHASING$/, { timeout: 30_000 });
     await expect(nav.getByRole("link", { name: "Purchasing assets", exact: true })).toHaveAttribute("aria-current", "page");
-    // Requests closed when Assets became current.
-    await expect(nav.locator('a[href="/purchases?state=IT_REVIEWED"]')).toHaveCount(0);
+    // Purchase orders closed when Assets became current.
+    await expect(nav.locator('a[href="/purchases?state=WITH_IT"]')).toHaveCount(0);
 
     const itInventory = nav.getByRole("link", { name: "IT inventory", exact: true });
     await expect(itInventory).toHaveAttribute("href", "/inventory?cls=IT");

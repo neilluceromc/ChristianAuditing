@@ -446,7 +446,9 @@ test.describe("queues-records-ux — labels", () => {
     // the way back is the crumb above, and the New equipment tabs keep the class.
     await expect(crumb.getByText("Labels", { exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("link", { name: /^Labels\b/ })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("link", { name: "Register", exact: true })).toHaveAttribute("href", "/inventory/register?cls=PURCHASING");
+    // Purchase orders (spec §4): Purchasing registers from a PO, so its first tab opens the purchase orders.
+    await expect(page.getByRole("link", { name: "Register from a PO", exact: true })).toHaveAttribute("href", "/purchases");
+    await expect(page.getByRole("link", { name: "Register", exact: true })).toHaveCount(0);
     await expectNoSeriousAxe(page);
 
     // From a real entry point: the Purchasing list's selection bar carries the class.

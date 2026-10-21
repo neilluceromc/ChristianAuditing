@@ -49,18 +49,6 @@ async function pressInQueue(page: Page, ...keys: string[]) {
   for (const key of keys) await group.press(key);
 }
 
-/**
- * Phase 42 spec §4.3 (builder-check ruling): IT's Approvals badge label. With no purchase reviews waiting it is
- * exactly the old "{n} open approvals[, some past SLA]"; otherwise "{sum} waiting: {a} open approval(s), {b}
- * purchase review(s)[, some approvals past SLA]". Copied, not imported — house rule.
- */
-function itApprovalsLabel(open: number, reviews: number, overdue: boolean): string {
-  if (reviews === 0) return `${open} open approvals${overdue ? ", some past SLA" : ""}`;
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  return `${open + reviews} waiting: ${plural(open, "open approval")}, ${plural(reviews, "purchase review")}`
-    + (overdue ? ", some approvals past SLA" : "");
-}
-
 // Seeded refNos this file depends on (see prisma/seed.ts):
 //   APR-2041 PENDING NORMAL   — lifecycle.assign BR-LT-0181 -> Nina Robles (EMP-0097)
 //   APR-2040 PENDING URGENT   — overdue, lifecycle.return (Dennis Ong)
@@ -165,10 +153,9 @@ test.describe.serial("approvals lifecycle — it@", () => {
   });
 
   test("keyboard claim + approve: c claims (owner J. Sarmiento), a approves (row leaves, badge decrements)", async ({ page }) => {
-    // Phase 42 (spec §4.3): IT's Approvals link badge is the open approvals plus the purchase reviews waiting for
-    // IT (the seed's PR-0198). While Approvals is the current link its badge steps aside and its Open view
-    // carries the open count alone.
-    const reviews = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
+    // Phase 42 (spec §4.3): IT's Approvals link badge is the open approvals (migration 38 moved the purchase
+    // orders waiting for IT onto their own Purchase orders link). While Approvals is the current link its badge
+    // steps aside and its Open view carries the open count.
     const nav = 'nav[aria-label="Workspace"]';
     // Phase 46 (spec §4.2): the link sits in a row with its "{Link} views" toggle (li > div > a), so the top-level
     // link is "not inside a view list" rather than a direct child of its li.
@@ -176,8 +163,8 @@ test.describe.serial("approvals lifecycle — it@", () => {
     const sidebarBadge = page.locator(`${nav} li li a[href="/approvals"] span[aria-label*="open approval"]`);
     await login(page, "it@thebackroomop.com");
     await page.goto("/inventory");
-    await expect(linkBadge).toHaveText(String(3 + reviews));
-    await expect(linkBadge).toHaveAttribute("aria-label", itApprovalsLabel(3, reviews, true));
+    await expect(linkBadge).toHaveText("3");
+    await expect(linkBadge).toHaveAttribute("aria-label", "3 open approvals, some past SLA");
 
     await page.goto("/approvals");
     await expect(linkBadge).toHaveCount(0);
@@ -194,10 +181,10 @@ test.describe.serial("approvals lifecycle — it@", () => {
     await expect(page.getByRole("row", { name: /APR-2041/ })).toHaveCount(0);
     await expect(sidebarBadge).toHaveText("2");
 
-    // … and the closed link's sum drops by the same one (APR-2040 is still past SLA).
+    // … and the closed link's badge drops by the same one (APR-2040 is still past SLA).
     await page.goto("/inventory");
-    await expect(linkBadge).toHaveText(String(2 + reviews));
-    await expect(linkBadge).toHaveAttribute("aria-label", itApprovalsLabel(2, reviews, true));
+    await expect(linkBadge).toHaveText("2");
+    await expect(linkBadge).toHaveAttribute("aria-label", "2 open approvals, some past SLA");
   });
 
   test("worker executes: APR-2041 -> EXECUTED, /inventory redirect + history, APR-2035 -> EXECUTION_FAILED", async ({ page }) => {

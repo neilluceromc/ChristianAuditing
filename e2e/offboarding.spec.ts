@@ -446,7 +446,7 @@ test.describe("equipment policies", () => {
     await expect(editor.getByLabel(/^Line \d+ kind$/)).toHaveCount(7);
     await editor.getByLabel("Line 7 kind", { exact: true }).selectOption({ label: "Webcam" });
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
+    await expect(page.locator('div[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
     // the refreshed page replaces the editor (Save idle and disabled) before this test leaves it
     const save = editor.getByRole("button", { name: "Save", exact: true });
     await expect(save).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });

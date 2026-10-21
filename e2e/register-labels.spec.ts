@@ -44,7 +44,9 @@ import { SEED_PASSWORD } from "../prisma/fixtures";
 const db = new PrismaClient();
 
 const IT = "it@thebackroomop.com";
-const PURCHASING = "purchasing@thebackroomop.com";
+// Purchase orders (spec §4 way 3): the direct Register is IT's and an admin's; Purchasing registers from a PO. The
+// Purchasing-class cases below register directly as an admin, on the Purchasing class (?cls=PURCHASING).
+const ADMIN = "admin@thebackroomop.com";
 const KNOWN_LAPTOP = "ThinkPad T14 Gen 4";
 
 test.beforeAll(async () => {
@@ -345,13 +347,13 @@ test.describe("register — the Register tab", () => {
     expect(asset.assigneeId).toBe(emp.id);
   });
 
-  test("7. Purchasing In use files an assign approval, with no serial", async ({ page }) => {
+  test("7. a Purchasing-class In use files an assign approval, with no serial", async ({ page }) => {
     test.setTimeout(120_000);
     const t0 = new Date();
     const emp = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0042" } });
     const model = "Toyota Vios 1.3 E";
     try {
-      await login(page, PURCHASING);
+      await login(page, ADMIN);
       await openRegister(page, "PURCHASING");
       await pickCategory(page, "Vehicle");
       await modelBox(page).fill(model);
@@ -510,9 +512,9 @@ test.describe("register — the Register tab", () => {
     await expect(figure.getByLabel(`Barcode ${tag}`, { exact: true })).toHaveCount(1);
   });
 
-  test("14. Purchasing sees its four cards in name order, and its serial is optional", async ({ page }) => {
+  test("14. the Purchasing class shows its four cards in name order, and its serial is optional", async ({ page }) => {
     test.setTimeout(120_000);
-    await login(page, PURCHASING);
+    await login(page, ADMIN);
     await openRegister(page, "PURCHASING");
     const cards = page.locator("[data-category-card]");
     await expect(cards).toHaveCount(4);

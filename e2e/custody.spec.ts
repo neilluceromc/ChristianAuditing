@@ -123,7 +123,7 @@ test.describe.serial("custody", () => {
     await editor.getByLabel("Line 2 variant", { exact: true }).selectOption({ label: laptopType.name });
     await editor.getByLabel("Line 2 filled by a lent device").check();
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
+    await expect(page.locator('div[aria-live="polite"]')).toContainText("Saved", { timeout: 10_000 });
     // Wait for the refreshed page to replace the editor (Save idle and disabled: nothing unsaved) — leaving
     // earlier would meet the editor's beforeunload guard — and for both slots to be in the database.
     const save = editor.getByRole("button", { name: "Save", exact: true });

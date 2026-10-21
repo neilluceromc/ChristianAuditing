@@ -151,7 +151,11 @@ async function pageCount(page: Page): Promise<number> {
     case "/approvals":
       return read(main.getByText(/\d[\d,]* in this tab/), /([\d,]+) in this tab/, main.getByText("The queue is clear", { exact: true }));
     case "/purchases":
-      return read(main.getByText(/^\d[\d,]* requests?$/), /^([\d,]+) requests?$/);
+      // migration 38: the list's count line reads "N purchase orders"
+      return read(main.getByText(/^\d[\d,]* purchase orders?$/), /^([\d,]+) purchase orders?$/);
+    case "/finance/review":
+      // Task 6: "N groups · N assets waiting", or "Nothing to review"
+      return read(main.getByText(/^\d[\d,]* groups? · /), /^([\d,]+) groups? · /, main.getByText("Nothing to review", { exact: true }));
     case "/stock":
       return read(main.getByText(/^\d[\d,]* items · /), /^([\d,]+) items · /);
     case "/stock/reports/expiry":
@@ -218,7 +222,8 @@ const WORKSPACES: Workspace[] = [
     ],
   },
   {
-    name: "Finance", email: FINANCE, needsHref: "/purchases?state=IT_REVIEWED", series: "Capitalized", points: 12,
+    // Purchase orders (Task 6): Finance's queue is To review, registration groups
+    name: "Finance", email: FINANCE, needsHref: "/finance/review", series: "Capitalized", points: 12,
     tiles: [
       ["fin.waitingC", false], ["fin.waitingCount", true], ["approved.month", false],
       ["capitalized.month", false], ["fin.bookC", false], ["fin.toConfirm", true],

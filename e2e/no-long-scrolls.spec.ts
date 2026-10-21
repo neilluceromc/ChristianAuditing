@@ -334,7 +334,7 @@ test.describe("Phase 39 — the IT setup tab", () => {
 
       // Argus saves on change: the toast, the database and the select after a reload.
       await select("Argus").selectOption({ label: "Done" });
-      await expect(page.locator('[aria-live="polite"]')).toContainText("Saved", { timeout: 15_000 });
+      await expect(page.locator('div[aria-live="polite"]')).toContainText("Saved", { timeout: 15_000 });
       await expect.poll(async () => (await db.employee.findUniqueOrThrow({ where: { id: person.id } })).argusStatus, {
         timeout: 15_000,
       }).toBe("DONE");

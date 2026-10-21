@@ -58,7 +58,7 @@ const VIEWER = "viewer@thebackroomop.com";
 const baseEditor = (page: Page) => page.getByRole("region", { name: "What their staff should have" });
 const kindSelects = (editor: Locator) => editor.getByLabel(/^Line \d+ kind$/);
 const kindOf = (editor: Locator, n: number) => editor.getByLabel(`Line ${n} kind`, { exact: true }).locator("option:checked");
-const toasts = (page: Page) => page.locator('[aria-live="polite"]');
+const toasts = (page: Page) => page.locator('div[aria-live="polite"]');
 const groupLink = (page: Page, name: string) => page.getByRole("link", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) });
 
 /**

@@ -377,7 +377,7 @@ test.describe.serial("quick forms", () => {
     await page.getByLabel("Line 2 unit price").press("Enter");
     await expect(page.getByLabel("Line 3 description")).toHaveCount(0);
 
-    // No department was ever chosen, so autosave never fired: no draft row.
+    // Purchase orders have no drafts or autosave (migration 38): nothing is saved until Save, so no new row.
     expect(await db.purchaseOrder.count()).toBe(draftsBefore);
   });
 
