@@ -7,16 +7,23 @@ export function Banner({
   children,
   actions,
   className,
+  live,
 }: {
   tone?: StatusFamily;
   title?: React.ReactNode;
   children?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
+  /**
+   * The live-region role. By default a fault or attention banner is an alert (it interrupts), and anything else a
+   * status. A banner that is simply part of the page on load (say, "No SI number yet") passes "status", so a screen
+   * reader isn't interrupted every time the page opens.
+   */
+  live?: "alert" | "status";
 }) {
   return (
     <div
-      role={tone === "fault" || tone === "attention" ? "alert" : "status"}
+      role={live ?? (tone === "fault" || tone === "attention" ? "alert" : "status")}
       className={cn("rounded-(--radius-card) border px-4 py-3", className)}
       style={{
         background: `var(--st-${tone}-bg)`,

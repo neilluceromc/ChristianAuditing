@@ -104,6 +104,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         {po.sentBack && po.sentBack.by && (
           <Banner
             tone="fault"
+            live="status"
             title={`Sent back by ${TEAM_WORDS[po.sentBack.by] ?? "another team"}${po.sentBack.byName ? ` — ${po.sentBack.byName}` : ""}${po.sentBack.at ? ` · ${fmtDateTime(po.sentBack.at)}` : ""}`}
             actions={
               <>
@@ -124,13 +125,14 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
           </Banner>
         )}
         {po.sentBack && !po.sentBack.by && (
-          <Banner tone="attention" title="Not sent yet">
+          <Banner tone="attention" live="status" title="Not sent yet">
             This order was a draft before purchase orders. Edit it and save to send it on.
           </Banner>
         )}
         {bounce && <BounceBackBanner bounce={bounce} />}
         {missingSi && (
-          <Banner tone="attention" title="No SI number yet. Finance can't approve until it's added." />
+          // part of the page on every load, not news: a status, so it doesn't interrupt a screen reader each time
+          <Banner tone="attention" live="status" title="No SI number yet. Finance can't approve until it's added." />
         )}
 
         <Card>
