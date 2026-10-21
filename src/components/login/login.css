@@ -189,12 +189,12 @@
 .lw-room {
   transition: opacity 0.8s cubic-bezier(0.2, 0, 0, 1);
 }
-.lw-blobwall,
+.lw-blobfill > .lw-f-wall,
 .lw-blobshade {
   transition: opacity 0.6s ease;
 }
 .lw-focus .lw-room,
-.lw-focus .lw-blobwall,
+.lw-focus .lw-blobfill > .lw-f-wall,
 .lw-focus .lw-blobshade {
   opacity: 0;
 }
@@ -865,7 +865,6 @@
   .lw-daylog,
   .lw-room,
   .lw-blobfill,
-  .lw-blobwall,
   .lw-blobshade {
     display: none;
   }

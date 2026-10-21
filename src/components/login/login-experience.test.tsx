@@ -54,10 +54,11 @@ describe("LoginExperience (server render)", () => {
     const html = render("login");
     expect(html).toContain('<use href="#cris-gold"');
     expect(html).toContain('<symbol id="cris-gold"');
-    expect(html.match(/class="lw-f-wall lw-blobwall"/g)).toHaveLength(1);
-    // The wall is the blob's own shape, never a full-size rect a browser could paint outside the mask as a square.
-    expect(html).toContain('<use href="#lw-blob-shape" class="lw-f-wall lw-blobwall"');
-    expect(html).not.toMatch(/<rect class="lw-f-wall"/);
+    expect(html.match(/class="lw-f-wall"/g)).toHaveLength(1);
+    // The scene's back svg must not share a class with the sign-up "Back" button: that button's hover style
+    // (grey background, rounded corners) painted the whole scene grey while the pointer was over it.
+    expect(html).toContain('<svg class="lw-scene-back"');
+    expect(html).not.toMatch(/<svg class="lw-back"/);
     expect(html).toContain("PO-1042");
     expect(html).not.toContain("PR-1042");
   });
