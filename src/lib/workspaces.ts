@@ -422,7 +422,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Purchases",
           href: "/purchases",
           icon: "requests",
-          badge: ["poReady"],
+          // No badge (final review I3): Finance works from To review; Ready to register is Purchasing's and IT's work.
           views: [
             { label: "All purchases", href: "/purchases" },
             { label: "Ready to register", href: "/purchases?state=READY", count: "poReady" },

@@ -49,6 +49,9 @@ describe("purchaseWhere", () => {
   it("filters by state", () => {
     expect(purchaseWhere("SENT_BACK", "")).toEqual({ state: "SENT_BACK" });
   });
+  it("Ready to register leaves out completed POs (final review I3: 71 migrated completed requests on day one)", () => {
+    expect(purchaseWhere("READY", "")).toEqual({ state: "READY", completedAt: null });
+  });
   it("searches refNo and line descriptions (contains — the sanctioned use)", () => {
     expect(purchaseWhere(null, "monitor")).toEqual({
       OR: [

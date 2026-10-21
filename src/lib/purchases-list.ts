@@ -46,6 +46,9 @@ export function purchaseWhere(
 ): Prisma.PurchaseOrderWhereInput {
   const where: Prisma.PurchaseOrderWhereInput = {};
   if (state) where.state = state;
+  // "Ready to register" means what it says: a completed PO (every line done and every asset approved, or an old
+  // request the old flow completed — migration 38) stays READY but has nothing left to register.
+  if (state === "READY") where.completedAt = null;
   if (q) {
     // contains-search with insensitive mode is the sanctioned use; the
     // ILIKE-wildcard hazard applies to identity/equals lookups only.

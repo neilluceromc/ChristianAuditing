@@ -172,9 +172,15 @@ export async function listPurchases(
   };
 }
 
-/** Tab counts — one grouped query, plus the All total. */
+/**
+ * Tab counts — one grouped query, plus the All total. Ready to register leaves out the completed POs, as its tab
+ * does (purchaseWhere): they stay READY, so they are counted apart and taken off.
+ */
 export async function stateCounts(): Promise<Record<string, number>> {
-  const groups = await prisma.purchaseOrder.groupBy({ by: ["state"], _count: { _all: true } });
+  const [groups, completedReady] = await Promise.all([
+    prisma.purchaseOrder.groupBy({ by: ["state"], _count: { _all: true } }),
+    prisma.purchaseOrder.count({ where: { state: "READY", completedAt: { not: null } } }),
+  ]);
   const counts: Record<string, number> = {
     ALL: 0, WITH_IT: 0, SENT_BACK: 0, READY: 0, CANCELLED: 0,
   };
@@ -182,6 +188,7 @@ export async function stateCounts(): Promise<Record<string, number>> {
     counts[g.state] = g._count._all;
     counts.ALL += g._count._all;
   }
+  counts.READY = Math.max(0, counts.READY - completedReady);
   return counts;
 }
 

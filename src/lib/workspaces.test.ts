@@ -350,7 +350,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("it", "it_staff", "Purchase orders").badge).toEqual(["poWithIt"]);
     expect(item("purchasing", "purchasing_staff", "Approvals").badge).toEqual(["approvals"]);
     expect(item("finance", "finance_staff", "Approvals").badge).toEqual(["approvals"]);
-    expect(item("finance", "finance_staff", "Purchases").badge).toEqual(["poReady"]);
+    // Final review I3: Finance works from To review; its Purchases link carries no badge.
+    expect(item("finance", "finance_staff", "Purchases").badge).toEqual([]);
     // Task 6 (spec §5): Finance's group queue, one link with its badge
     expect(item("finance", "finance_staff", "To review")).toMatchObject({ href: "/finance/review", badge: ["finGroupsToReview"], views: [] });
     // Task 7 (spec §7): the Sent back counts stay on the closed links (red); a viewer, who can fix nothing, has neither.
