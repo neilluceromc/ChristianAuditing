@@ -104,7 +104,7 @@ export default async function AssetOverviewPage({
                       // Finance use it); only the record spells out the gap.
                       <span>
                         {PROVENANCE_LABEL[provenance]}
-                        {provenance === "HISTORICAL" && " · no purchase request"}
+                        {provenance === "HISTORICAL" && " · no purchase order"}
                       </span>
                     )}
                   </span>

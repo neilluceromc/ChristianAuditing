@@ -1,4 +1,5 @@
 import type { Prisma, PurchaseOrderState } from "@prisma/client";
+import { poRefSearch } from "./po-flow";
 
 /**
  * `?state=` is the tab contract (HANDOVER §6.4): the sidebar's Purchase orders
@@ -38,7 +39,8 @@ export function purchaseWhere(
     // contains-search with insensitive mode is the sanctioned use; the
     // ILIKE-wildcard hazard applies to identity/equals lookups only.
     where.OR = [
-      { refNo: { contains: q, mode: "insensitive" } },
+      // an old printed PR-0188 still finds PO-0188 (poRefSearch)
+      { refNo: { contains: poRefSearch(q), mode: "insensitive" } },
       { lines: { some: { description: { contains: q, mode: "insensitive" } } } },
     ];
   }

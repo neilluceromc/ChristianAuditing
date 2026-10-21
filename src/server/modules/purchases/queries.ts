@@ -1,8 +1,9 @@
-import type { PurchaseOrderState, PurchaseUnitState, Team } from "@prisma/client";
+import type { AssetClass, PurchaseOrderState, Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
+import { lineProgress, poProgress } from "@/lib/po-flow";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
@@ -28,14 +29,22 @@ export interface PurchaseUnitView {
   index: number;
   description: string;
   specs: string | null;
-  /** Migration 38: the line's category (its class); null on legacy lines. */
+  /** Migration 38: the line's category (and so its class); null on legacy lines. */
   categoryId: string | null;
+  categoryName: string | null;
+  cls: AssetClass | null;
   qty: number;
   /** number, never a Prisma.Decimal: this crosses into client components */
   unitPrice: number | null;
   price: string;
   lineTotal: string;
-  state: PurchaseUnitState;
+  /** Assets registered from this line (the asset's PO-line link), and units closed short with why. */
+  registered: number;
+  closedShort: number;
+  closedShortReason: string | null;
+  /** Units still to register, and the label ("3 of 5 registered · 2 closed short"). */
+  remaining: number;
+  progressLabel: string;
   itSlotNotes: string | null;
   financeNotes: string | null;
 }
@@ -66,9 +75,17 @@ export interface PurchaseDetail {
   purchasedAt: string | null;
   fees: number | null;
   /** The open send-back, if any. */
-  sentBack: { by: Team | null; note: string | null; fields: string[] } | null;
-  /** Assets registered from it: outside a send-back, editing and cancelling stop once there are any. */
+  sentBack: { by: Team | null; byName: string | null; at: Date | null; note: string | null; fields: string[] } | null;
+  /** Assets registered from it (all of them, through a line or not): editing and cancelling stop once there are any. */
   assetCount: number;
+  /** …and how many of those Finance has approved. */
+  approvedCount: number;
+  /** poProgress over the lines: null until something is registered from a line. */
+  progress: ReturnType<typeof poProgress>;
+  /** Some line is IT gear, or has no class yet (a legacy line): the IT check applies. */
+  hasItLines: boolean;
+  /** An old request (its lines have no category): the unit link was never set, so the page counts "N assets linked". */
+  legacy: boolean;
 }
 
 const money = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
@@ -166,13 +183,15 @@ export async function stateCounts(): Promise<Record<string, number>> {
 }
 
 export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
-  const r = await prisma.purchaseOrder.findUnique({
+  const [r, perLine, approvedCount] = await Promise.all([
+    prisma.purchaseOrder.findUnique({
     where: { id },
     select: {
       id: true, refNo: true, state: true, createdAt: true, submittedAt: true, reviewedAt: true,
       completedAt: true, cancelledAt: true, cancelReason: true, requestedById: true,
       invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
-      sentBackBy: true, sentBackNote: true, sentBackFields: true,
+      sentBackBy: true, sentBackNote: true, sentBackFields: true, sentBackAt: true,
+      sentBackByUser: { select: { name: true } },
       _count: { select: { assets: true } },
       requestedBy: { select: { name: true } },
       reviewedBy: { select: { name: true } },
@@ -185,28 +204,41 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       // See the identical comment in listPurchases: units created in the
       // same batch tie on createdAt, so `unit.index` (unit-N anchors, the
       // bounce-back's "Jump to unit 02") needs a stable tiebreaker.
-      lines: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      lines: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: { category: { select: { name: true, cls: true } } } },
       notes: {
         orderBy: { createdAt: "asc" },
         select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
       },
     },
-  });
+  }),
+    // Registered per line: the asset's own PO-line link (Task 5 sets it on every registration; old units never had it).
+    prisma.asset.groupBy({ by: ["purchaseOrderLineId"], where: { purchaseOrderId: id }, _count: { _all: true } }),
+    prisma.asset.count({ where: { purchaseOrderId: id, financeConfirmedAt: { not: null } } }),
+  ]);
   if (!r) return null;
+  const registeredOn = new Map(perLine.filter((g) => g.purchaseOrderLineId).map((g) => [g.purchaseOrderLineId!, g._count._all]));
 
   const units = r.lines.map((u, i): PurchaseUnitView => {
     const price = money(u.unitPrice);
+    const registered = registeredOn.get(u.id) ?? 0;
+    const progress = lineProgress({ qty: u.qty, registered, closedShort: u.closedShort });
     return {
       id: u.id,
       index: i + 1,
       description: u.description,
       specs: u.specs,
       categoryId: u.categoryId,
+      categoryName: u.category?.name ?? null,
+      cls: u.category?.cls ?? null,
       qty: u.qty,
       unitPrice: u.unitPrice === null ? null : price,
       price: u.unitPrice === null ? "—" : fmtMoney(price),
       lineTotal: u.unitPrice === null ? "—" : fmtMoney(price * u.qty),
-      state: u.state,
+      registered,
+      closedShort: u.closedShort,
+      closedShortReason: u.closedShortReason,
+      remaining: progress.remaining,
+      progressLabel: progress.label,
       itSlotNotes: u.itSlotNotes,
       financeNotes: u.financeNotes,
     };
@@ -242,8 +274,14 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
     receiptRef: r.receiptRef,
     purchasedAt: r.purchasedAt ? r.purchasedAt.toISOString().slice(0, 10) : null,
     fees: r.fees === null ? null : Number(r.fees),
-    sentBack: r.state === "SENT_BACK" ? { by: r.sentBackBy, note: r.sentBackNote, fields: r.sentBackFields } : null,
+    sentBack: r.state === "SENT_BACK"
+      ? { by: r.sentBackBy, byName: r.sentBackByUser?.name ?? null, at: r.sentBackAt, note: r.sentBackNote, fields: r.sentBackFields }
+      : null,
     assetCount: r._count.assets,
+    approvedCount,
+    progress: poProgress(units, r._count.assets > 0 && approvedCount === r._count.assets),
+    hasItLines: units.some((u) => u.cls !== "PURCHASING"),
+    legacy: units.some((u) => u.categoryId === null),
   };
 }
 

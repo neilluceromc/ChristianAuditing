@@ -21,7 +21,10 @@ export const REASON_CHIPS = {
   "policy.exception.add":   ["Role needs it", "Client requirement", "Remote work setup", "Accessibility need"],
   "policy.exception.waive": ["Not needed for this role", "Uses own device", "Client provides it"],
   "approval.reject":   ["Not needed", "Duplicate request", "Wrong item"],
-  "purchase.reason":   ["Over budget", "Need specifications", "Duplicate request"],
+  // Purchase orders (Task 4): cancel, a cross-team money fix, and closing a line short.
+  "po.cancel":         ["Ordered by mistake", "Duplicate order", "Supplier cannot deliver"],
+  "po.fix":            ["Typo on the invoice", "Wrong supplier", "Price differs from the invoice"],
+  "po.close-short":    ["Supplier cancelled the rest", "Out of stock", "Ordered too many"],
   "hold.place":        ["New hire setup", "Replacement pending", "Project loan"],
   "hold.release":      ["No longer needed", "Assigned another unit", "Hire cancelled"],
 } as const satisfies Record<string, readonly string[]>;

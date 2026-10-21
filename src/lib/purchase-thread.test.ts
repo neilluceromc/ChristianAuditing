@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NoteKind } from "@prisma/client";
 import {
   NOTE_CHIP, THREAD_PAGE, THREAD_PREVIEW, bounceBack, stepperModel, submittedVisits, threadCountLine, unitAnchor,
-  type ThreadNote,
+  type StepperContext, type ThreadNote,
 } from "./purchase-thread";
 
 let seq = 0;
@@ -97,27 +97,65 @@ describe("submittedVisits", () => {
   });
 });
 
-describe("stepperModel", () => {
-  it("walks the three stops with the current one marked NOW", () => {
-    const m = stepperModel("WITH_IT", [note("SUBMIT", "P", "x", 0)]);
-    expect(m.stops.map((s) => s.state)).toEqual(["SENT_BACK", "WITH_IT", "READY"]);
-    expect(m.stops.map((s) => s.label)).toEqual(["With Purchasing", "With IT", "Ready to register"]);
-    expect(m.stops.map((s) => s.status)).toEqual(["done", "current", "upcoming"]);
+describe("stepperModel (purchase orders: PO saved → With IT → Registered → Approved)", () => {
+  const ctx = (over: Partial<StepperContext> = {}): StepperContext => ({
+    hasItLines: true, progress: null, sentBackBy: null, ...over,
+  });
+  const keys = (m: ReturnType<typeof stepperModel>) => m.stops.map((s) => s.key);
+  const statuses = (m: ReturnType<typeof stepperModel>) => m.stops.map((s) => s.status);
+
+  it("an order with IT lines: saved is done, With IT is current and marked NOW", () => {
+    const m = stepperModel("WITH_IT", [note("PO_SAVED", "P", "x", 0)], ctx());
+    expect(keys(m)).toEqual(["saved", "with-it", "registered", "approved"]);
+    expect(m.stops.map((s) => s.label)).toEqual(["PO saved", "With IT", "Registered", "Approved"]);
+    expect(statuses(m)).toEqual(["done", "current", "upcoming", "upcoming"]);
     expect(m.stops[1].note).toBe("NOW");
     expect(m.sentBack).toBeNull();
+    expect(m.returnAt).toBe(-1);
     expect(m.cancelled).toBe(false);
   });
 
-  it("marks the bounced stop NOW · 2nd time and flags the return connector", () => {
-    const m = stepperModel("WITH_IT", BOUNCED);
+  it("a non-IT order skips With IT and is waiting to be registered when READY", () => {
+    const m = stepperModel("READY", [note("PO_SAVED", "P", "x", 0)], ctx({ hasItLines: false }));
+    expect(keys(m)).toEqual(["saved", "registered", "approved"]);
+    expect(statuses(m)).toEqual(["done", "current", "upcoming"]);
+    expect(m.stops[1].note).toBe("NOW");
+  });
+
+  it("READY on an order with IT lines shows With IT as done only because it has moved on", () => {
+    const m = stepperModel("READY", [note("PO_SAVED", "P", "x", 0), note("PO_RESUBMITTED", "P", "fixed", 1)], ctx());
+    expect(statuses(m)).toEqual(["done", "done", "current", "upcoming"]);
+    expect(m.stops[2].label).toBe("Registered");
+  });
+
+  it("partly registered: With IT is done, Registered is current and says so", () => {
+    const m = stepperModel("WITH_IT", [note("PO_SAVED", "P", "x", 0)], ctx({ progress: "Partly registered" }));
+    expect(statuses(m)).toEqual(["done", "done", "current", "upcoming"]);
+    expect(m.stops[2].note).toBe("PARTLY");
+  });
+
+  it("registered: Approved is the current stop, with Finance", () => {
+    const m = stepperModel("READY", [note("PO_SAVED", "P", "x", 0)], ctx({ progress: "Registered" }));
+    expect(statuses(m)).toEqual(["done", "done", "done", "current"]);
+    expect(m.stops[3].note).toBe("WITH FINANCE");
+  });
+
+  it("approved: every stop is done", () => {
+    const m = stepperModel("READY", [note("PO_SAVED", "P", "x", 0)], ctx({ progress: "Approved" }));
+    expect(statuses(m)).toEqual(["done", "done", "done", "done"]);
+    expect(m.stops.every((s) => s.note === undefined)).toBe(true);
+  });
+
+  it("a legacy finance bounce marks With IT NOW · 2nd time and draws the return after it", () => {
+    const m = stepperModel("WITH_IT", BOUNCED, ctx());
     expect(m.stops[1].status).toBe("current");
     expect(m.stops[1].note).toBe("NOW · 2nd time");
     expect(m.sentBack).toBe("finance");
+    expect(m.returnAt).toBe(1);
   });
 
-  // The ordinal suffix table is only reachable through this note, so drive it
-  // past the 2nd-time case the happy path covers — 3rd, 11th and 21st are
-  // where a naive `n % 10` table goes wrong.
+  // The ordinal suffix table is only reachable through this note, so drive it past the 2nd-time case — 3rd, 11th
+  // and 21st are where a naive `n % 10` table goes wrong.
   it.each([
     [3, "NOW · 3rd time"],
     [4, "NOW · 4th time"],
@@ -125,40 +163,56 @@ describe("stepperModel", () => {
     [12, "NOW · 12th time"],
     [13, "NOW · 13th time"],
     [21, "NOW · 21st time"],
-  ])("marks visit %i as %s", (visits, expected) => {
-    // alternate SUBMIT / REQUEST_INFO so the last note is a genuine arrival
+  ])("marks legacy visit %i as %s", (visits, expected) => {
     const thread = Array.from({ length: visits }, (_, i) =>
       note(i % 2 === 0 ? "SUBMIT" : "REQUEST_INFO", "P", "x", i));
-    expect(stepperModel("WITH_IT", thread).stops[1].note).toBe(expected);
+    expect(stepperModel("WITH_IT", thread, ctx()).stops[1].note).toBe(expected);
   });
 
-  it("labels an IT rejection's return path", () => {
-    const m = stepperModel("SENT_BACK", [note("SUBMIT", "P", "x", 0), note("IT_REJECT", "J", "y", 1)]);
+  it("sent back by IT: PO saved is current (SENT BACK) and the return is drawn after it", () => {
+    const m = stepperModel("SENT_BACK", [note("PO_SAVED", "P", "x", 0), note("PO_SENT_BACK", "J", "wrong SI", 1)], ctx({ sentBackBy: "IT" }));
+    expect(statuses(m)).toEqual(["current", "upcoming", "upcoming", "upcoming"]);
+    expect(m.stops[0].note).toBe("SENT BACK");
     expect(m.sentBack).toBe("it");
-    expect(m.stops[0].status).toBe("current");
+    expect(m.returnAt).toBe(0);
   });
 
-  it("marks READY current with the earlier stops done", () => {
-    const m = stepperModel("READY", [note("PO_SAVED", "P", "x", 0)]);
-    expect(m.stops.map((s) => s.status)).toEqual(["done", "done", "current"]);
+  it("sent back by Finance after registering: Registered stays done, the return is drawn", () => {
+    const m = stepperModel("SENT_BACK", [note("PO_SAVED", "P", "x", 0)], ctx({ sentBackBy: "FINANCE", progress: "Registered" }));
+    expect(statuses(m)).toEqual(["current", "done", "done", "upcoming"]);
+    expect(m.sentBack).toBe("finance");
+    expect(m.returnAt).toBe(0);
   });
 
-  it("freezes a cancelled request at how far it actually got", () => {
-    const m = stepperModel("CANCELLED", [note("SUBMIT", "P", "x", 0), note("CANCEL", "P", "duplicate", 1)]);
-    expect(m.cancelled).toBe(true);
-    expect(m.stops.map((s) => s.status)).toEqual(["done", "done", "upcoming"]);
+  it("a legacy draft (sent back, never sent) is with Purchasing and has no return path", () => {
+    const m = stepperModel("SENT_BACK", [], ctx({ sentBackBy: null }));
+    expect(statuses(m)).toEqual(["current", "upcoming", "upcoming", "upcoming"]);
+    expect(m.sentBack).toBeNull();
+    expect(m.returnAt).toBe(-1);
   });
 
-  it("keeps With Purchasing reached for a cancel straight from a legacy draft", () => {
-    const m = stepperModel("CANCELLED", [note("CANCEL", "P", "duplicate", 0)]);
-    expect(m.stops.map((s) => s.status)).toEqual(["done", "upcoming", "upcoming"]);
+  it("a legacy IT rejection still draws its return path", () => {
+    const m = stepperModel("SENT_BACK", [note("SUBMIT", "P", "x", 0), note("IT_REJECT", "J", "y", 1)], ctx());
+    expect(m.sentBack).toBe("it");
+    expect(m.returnAt).toBe(0);
   });
 
-  it("freezes a legacy completed-then-cancelled thread at Ready, and reads the new kinds too", () => {
-    expect(stepperModel("CANCELLED", [note("SUBMIT", "P", "x", 0), note("COMPLETE", "F", "y", 1)]).stops.map((s) => s.status))
-      .toEqual(["done", "done", "done"]);
-    expect(stepperModel("CANCELLED", [note("PO_SAVED", "P", "x", 0), note("PO_CANCELLED", "P", "dup", 1)]).stops.map((s) => s.status))
-      .toEqual(["done", "done", "upcoming"]);
+  it("freezes a cancelled order at how far it actually got", () => {
+    const thread = [note("PO_SAVED", "P", "x", 0), note("PO_CANCELLED", "P", "dup", 1)];
+    const sent = stepperModel("CANCELLED", thread, ctx());
+    expect(sent.cancelled).toBe(true);
+    expect(statuses(sent)).toEqual(["done", "done", "upcoming", "upcoming"]);
+    expect(statuses(stepperModel("CANCELLED", thread, ctx({ hasItLines: false })))).toEqual(["done", "upcoming", "upcoming"]);
+  });
+
+  it("keeps PO saved reached for a cancel straight from a legacy draft", () => {
+    const m = stepperModel("CANCELLED", [note("CANCEL", "P", "duplicate", 0)], ctx());
+    expect(statuses(m)).toEqual(["done", "upcoming", "upcoming", "upcoming"]);
+  });
+
+  it("reads a legacy completed-then-cancelled thread as having been through IT", () => {
+    const m = stepperModel("CANCELLED", [note("SUBMIT", "P", "x", 0), note("COMPLETE", "F", "y", 1)], ctx());
+    expect(statuses(m)).toEqual(["done", "done", "upcoming", "upcoming"]);
   });
 });
 

@@ -5,7 +5,7 @@ import { prisma } from "./db/client";
 import { actionUser } from "./auth/guards";
 import { pathAllowedForRole } from "@/lib/workspaces";
 import { visibleClassWhere } from "@/lib/asset-class";
-import { PO_STATE_LABEL } from "@/lib/po-flow";
+import { PO_STATE_LABEL, poRefSearch } from "@/lib/po-flow";
 import {
   PALETTE_LIMIT,
   assetHint,
@@ -98,7 +98,8 @@ export async function paletteSearch(query: unknown): Promise<PaletteResults> {
       : [],
     canRequests
       ? prisma.purchaseOrder.findMany({
-          where: { refNo: { contains: q, mode: "insensitive" } },
+          // an old printed PR-0188 still finds PO-0188
+          where: { refNo: { contains: poRefSearch(q), mode: "insensitive" } },
           take: PALETTE_LIMIT,
           orderBy: { refNo: "desc" },
         })

@@ -37,7 +37,7 @@ export const SIGNATURE_HEADER = "x-backroom-signature";
 export const EVENT_LABELS: Record<WebhookEvent, string> = {
   "approval.executed": "An approval finished executing",
   "offboarding.completed": "An offboarding was completed",
-  "purchase_request.completed": "A purchase request was completed",
+  "purchase_request.completed": "A purchase order was fully registered and approved",
 };
 
 /**

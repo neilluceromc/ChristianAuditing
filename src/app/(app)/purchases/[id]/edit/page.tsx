@@ -5,9 +5,10 @@ import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { PO_WRITE_ROLES } from "@/lib/po-flow";
+import { poControls } from "@/lib/po-controls";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
-import { DraftForm, type UnitDraft } from "@/components/purchases/draft-form";
+import { PoForm, type UnitDraft } from "@/components/purchases/po-form";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -15,7 +16,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
-  await requireRole(...PO_WRITE_ROLES);
+  const user = await requireRole(...PO_WRITE_ROLES);
   const { id } = await params;
   const [request, loadouts, departments, vendors, categories] = await Promise.all([
     getPurchase(id),
@@ -25,11 +26,13 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } }),
   ]);
   if (!request) notFound();
-  // Editable while sent back, or with IT / ready with nothing registered (savePurchaseOrder enforces it, team-wide);
-  // this keeps the dead end off the screen.
-  const editable = request.state === "SENT_BACK"
-    || ((request.state === "WITH_IT" || request.state === "READY") && request.assetCount === 0);
-  if (!editable) redirect(`/purchases/${id}`);
+  // The same rule as the Edit button (poControls mirrors savePurchaseOrder's stage check); this keeps the dead end off
+  // the screen. The server re-checks.
+  const { edit } = poControls({
+    role: user.role, state: request.state, registeredCount: request.assetCount, approvedCount: request.approvedCount,
+    lines: request.units.map((u) => ({ id: u.id, cls: u.cls, qty: u.qty, registered: u.registered, closedShort: u.closedShort })),
+  });
+  if (!edit) redirect(`/purchases/${id}`);
 
   const units: UnitDraft[] = request.units.map((u) => ({
     id: u.id,
@@ -38,6 +41,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     categoryId: u.categoryId ?? "",
     qty: String(u.qty),
     unitPrice: u.unitPrice === null ? "" : String(u.unitPrice),
+    locked: u.registered + u.closedShort,
   }));
   // an edit keeps the current supplier even when it has since been archived
   const supplierOptions = request.supplier?.archived
@@ -49,12 +53,12 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
       <PageHeader
         title={`Edit ${request.refNo}`}
         breadcrumb={[
-          { label: "Purchase requests", href: "/purchases" },
+          { label: "Purchase orders", href: "/purchases" },
           { label: request.refNo, href: `/purchases/${id}` },
           { label: "Edit" },
         ]}
       />
-      <DraftForm
+      <PoForm
         loadouts={loadouts}
         departments={departments}
         vendors={supplierOptions}

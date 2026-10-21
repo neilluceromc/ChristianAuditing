@@ -14,7 +14,7 @@ import { paletteSearch, type PaletteHit, type PaletteResults } from "@/server/pa
 import { pushGuarded } from "@/lib/stuck-nav";
 
 const OPEN_EVENT = "br:open-palette";
-const PLACEHOLDER = "Search assets, people, requests…";
+const PLACEHOLDER = "Search assets, people, purchase orders…";
 
 /**
  * Opens the palette from anywhere on the page. `hint` replaces the input's
@@ -222,7 +222,7 @@ export function CommandPalette({ destinations }: { destinations: NavDestination[
       [
         { heading: "Assets", hits: results.assets, mono: true },
         { heading: "People", hits: results.people, mono: false },
-        { heading: "Requests", hits: results.requests, mono: true },
+        { heading: "Purchase orders", hits: results.requests, mono: true },
         { heading: "Suppliers", hits: results.suppliers, mono: false },
         { heading: "Stock", hits: results.stock, mono: true },
         { heading: "Actions", hits: actions, mono: false },

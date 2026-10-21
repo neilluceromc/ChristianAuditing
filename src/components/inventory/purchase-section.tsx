@@ -165,7 +165,7 @@ export function PurchaseSection(props: {
                   />
                 )}
               </FormField>
-              <FormField label="Purchase request" hint="Only if this delivery fulfils a completed request." error={errors.requestId}>
+              <FormField label="Purchase order" hint="Only if this delivery fulfils a purchase order." error={errors.requestId}>
                 {(p) => (
                   <Select
                     id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}

@@ -256,7 +256,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       items: [
         HOME,
         {
-          label: "Requests",
+          label: "Purchase orders",
           href: "/purchases",
           icon: "requests",
           views: [
@@ -266,7 +266,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
             { label: "Sent back", href: "/purchases?state=SENT_BACK", count: "poSentBack" },
             { label: "Ready to register", href: "/purchases?state=READY", count: "poReady" },
             { label: "Cancelled", href: "/purchases?state=CANCELLED" },
-            { label: "Register purchase", href: "/purchases/new" },
+            { label: "New purchase order", href: "/purchases/new" },
           ],
         },
         {

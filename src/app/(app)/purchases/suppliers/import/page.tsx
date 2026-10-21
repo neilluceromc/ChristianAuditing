@@ -19,7 +19,7 @@ export default async function ImportSuppliersPage() {
       <PageHeader
         title="Import suppliers"
         breadcrumb={[
-          { label: "Purchase requests", href: "/purchases" },
+          { label: "Purchase orders", href: "/purchases" },
           { label: "Suppliers", href: "/purchases/suppliers" },
           { label: "Import" },
         ]}

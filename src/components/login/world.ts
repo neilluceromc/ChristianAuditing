@@ -261,7 +261,7 @@ export function buildWorld(): string {
     R(1730, 224, 260, 170, "uibg", 'rx="3"');
   s +=
     R(1730, 224, 260, 22, "uibar") +
-    T(1742, 239, "PURCHASING · REQUESTS", "uism") +
+    T(1742, 239, "PURCHASING · ORDERS", "uism") +
     T(1742, 268, "PR-1042", "uit") +
     T(1742, 284, "For the November new hires", "uism");
   s += `<g class="lw-a-pend">${R(1906, 255, 72, 18, "chipw", 'rx="9"') + T(1942, 268, "Pending", "chiptw", 'text-anchor="middle"')}</g>`;

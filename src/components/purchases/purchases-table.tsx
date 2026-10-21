@@ -16,7 +16,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
         <Tr>
           <Th width={26} aria-label="Status colour" />
           <Th width={104}>Ref</Th>
-          <Th>Request</Th>
+          <Th>Purchase order</Th>
           <Th width={78} align="right">Items</Th>
           <Th width={124} align="right">Value</Th>
           {/* the department sits under the requester's name: one column, so State fits at 1280 px */}

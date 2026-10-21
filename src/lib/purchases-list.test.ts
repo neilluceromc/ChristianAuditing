@@ -57,6 +57,14 @@ describe("purchaseWhere", () => {
       ],
     });
   });
+  it("reads an old printed PR-0188 as PO-0188, and still searches the line descriptions for what was typed", () => {
+    expect(purchaseWhere(null, "PR-0188")).toEqual({
+      OR: [
+        { refNo: { contains: "PO-0188", mode: "insensitive" } },
+        { lines: { some: { description: { contains: "PR-0188", mode: "insensitive" } } } },
+      ],
+    });
+  });
   it("combines state and search", () => {
     const where = purchaseWhere("WITH_IT", "PO-0198");
     expect(where.state).toBe("WITH_IT");

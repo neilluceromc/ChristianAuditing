@@ -24,7 +24,10 @@ export interface RequestDocumentRow {
 
 type RequestDocKind = (typeof REQUEST_DOCUMENT_KINDS)[number];
 
-/** The attachments half of suppliers/supplier-documents-card.tsx, with a request in place of a supplier — spec §5.3. */
+/**
+ * A purchase order's documents (spec §2): Purchasing, IT and Finance can all upload. Uploading a kind again adds a new
+ * document — nothing is replaced or deleted. The form field is still `requestId` (uploadPoDocument reads it).
+ */
 export function RequestDocumentsCard({
   requestId,
   docs,
@@ -64,13 +67,13 @@ export function RequestDocumentsCard({
 
   return (
     <Card>
-      <CardHeader title="Attachments" />
+      <CardHeader title="Documents" />
       <CardBody className="flex flex-col gap-3">
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title="Upload rejected">{error}</Banner>}
 
         {docs.length === 0 ? (
-          <p className="py-2 text-center text-xs text-fg-muted">No attachments yet.</p>
+          <p className="py-2 text-center text-xs text-fg-muted">No documents yet.</p>
         ) : (
           <Table>
             <THead>
@@ -125,7 +128,7 @@ export function RequestDocumentsCard({
                 e.target.value = "";
               }}
             />
-            <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 4 MB</p>
+            <p className="font-mono text-[10px] text-fg-faint">PDF · PNG · JPG — max 4 MB · uploading again adds a new one</p>
           </div>
         )}
       </CardBody>

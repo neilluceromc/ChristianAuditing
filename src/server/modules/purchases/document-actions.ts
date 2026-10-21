@@ -12,7 +12,8 @@ import { storeUpload, validateUpload } from "@/server/uploads";
 
 /**
  * Mirrors suppliers/document-actions.ts's uploadSupplierDocument, with the PO's id (form field `requestId`, kept for
- * the existing form) in place of vendorId. Task 4 widens who may upload.
+ * the existing form) in place of vendorId. Spec §2: Purchasing, IT, Finance and admin can all upload or re-upload, on
+ * any PO that isn't cancelled. Uploading a kind again adds a new document; nothing is replaced or deleted.
  */
 export async function uploadPoDocument(formData: FormData): Promise<ActionResult<{ id: string }>> {
   const user = await actionUser();
@@ -22,13 +23,14 @@ export async function uploadPoDocument(formData: FormData): Promise<ActionResult
 
   const requestId = String(formData.get("requestId") ?? "");
   const kind = String(formData.get("kind") ?? "");
-  if (!requestId) return conflict("Missing request.");
+  if (!requestId) return conflict("Missing purchase order.");
   if (!(REQUEST_DOCUMENT_KINDS as readonly string[]).includes(kind)) return validationError({ kind: "Pick a document kind" });
   const checked = validateUpload(formData.get("file"));
   if (!checked.ok) return validationError({ file: checked.error });
 
   const request = await prisma.purchaseOrder.findUnique({ where: { id: requestId } });
   if (!request) return conflict("That purchase order no longer exists.");
+  if (request.state === "CANCELLED") return conflict(`${request.refNo} is cancelled — it takes no new documents.`);
 
   let stored: Awaited<ReturnType<typeof storeUpload>>;
   try {

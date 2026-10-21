@@ -209,7 +209,7 @@ export default async function FinanceAssetPage({
                   <LedgerCards
                     purchase={[
                       {
-                        label: "Purchase request",
+                        label: "Purchase order",
                         value: d.purchase.pr
                           ? <Link href={`/purchases/${d.purchase.pr.id}`} className="text-accent hover:underline">{d.purchase.pr.refNo}</Link>
                           : "Not recorded",

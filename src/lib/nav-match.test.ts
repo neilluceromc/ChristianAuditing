@@ -49,9 +49,9 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["purchasing", "purchasing_staff", "/inventory?sort=tag", "Assets", "Purchasing assets"],
   ["purchasing", "admin", "/inventory", "Assets", "IT inventory"],
   ["purchasing", "purchasing_staff", "/inventory/xyz", "Assets", null],
-  ["purchasing", "purchasing_staff", "/purchases?state=CANCELLED", "Requests", "Cancelled"],
-  ["purchasing", "purchasing_staff", "/purchases?state=READY", "Requests", "Ready to register"],
-  ["purchasing", "purchasing_staff", "/purchases?state=DRAFT", "Requests", null],
+  ["purchasing", "purchasing_staff", "/purchases?state=CANCELLED", "Purchase orders", "Cancelled"],
+  ["purchasing", "purchasing_staff", "/purchases?state=READY", "Purchase orders", "Ready to register"],
+  ["purchasing", "purchasing_staff", "/purchases?state=DRAFT", "Purchase orders", null],
   ["purchasing", "purchasing_staff", "/stock/stocktakes/xyz", "Stock", "Stocktakes"],
   ["purchasing", "purchasing_staff", "/stock/categories", "Setup", "Stock categories"],
   // Phase 46 spec §4.3: the new views.

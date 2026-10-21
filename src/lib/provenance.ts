@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 export type Provenance = "PURCHASE_REQUEST" | "DIRECT" | "HISTORICAL";
 export const PROVENANCES: readonly Provenance[] = ["PURCHASE_REQUEST", "DIRECT", "HISTORICAL"];
 export const PROVENANCE_LABEL: Record<Provenance, string> = {
-  PURCHASE_REQUEST: "From a purchase request",
+  PURCHASE_REQUEST: "From a purchase order",
   DIRECT: "Registered directly",
   HISTORICAL: "Historical import",
 };

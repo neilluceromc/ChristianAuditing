@@ -70,3 +70,12 @@ export function legacyPoState(old: "DRAFT" | "SUBMITTED" | "IT_REVIEWED" | "COMP
 export function poRefNo(n: number): string {
   return `PO-${String(n).padStart(4, "0")}`;
 }
+
+/**
+ * What a person typed into a search box, with a leading old printed `PR-` read as `PO-` — a number on paper from
+ * before migration 38 (PR-0188) still finds PO-0188. Only a leading `PR-` is touched, so "printer" and "x PR-1" stay.
+ */
+export function poRefSearch(q: string): string {
+  const t = q.trim();
+  return /^pr-/i.test(t) ? `PO-${t.slice(3)}` : t;
+}

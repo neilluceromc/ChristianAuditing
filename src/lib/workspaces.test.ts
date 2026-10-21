@@ -265,7 +265,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   });
   it("Purchasing, Finance and Admin groups", () => {
     expect(labels("purchasing", "purchasing_staff")).toEqual([
-      ["Home", "Requests", "Suppliers", "Stock", "Assets", "Approvals", "Employees"],
+      ["Home", "Purchase orders", "Suppliers", "Stock", "Assets", "Approvals", "Employees"],
       ["Activity", "Setup"],
     ]);
     expect(labels("finance", "finance_staff")).toEqual([
@@ -292,7 +292,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("it", "it_staff", "Approvals").views.map((v) => v.href)).toEqual(["/approvals", "/approvals?tab=mine", "/approvals?tab=closed"]);
     expect(item("it", "it_staff", "Purchase orders")).toMatchObject({ href: "/purchases?state=WITH_IT", badge: ["poWithIt"], views: [] });
     expect(item("it", "it_staff", "Setup").href).toBe("/admin/asset-categories");
-    expect(item("purchasing", "purchasing_staff", "Requests").views.map((v) => v.label)).toEqual(["All", "With IT", "Sent back", "Ready to register", "Cancelled", "Register purchase"]);
+    expect(item("purchasing", "purchasing_staff", "Purchase orders").views.map((v) => v.label)).toEqual(["All", "With IT", "Sent back", "Ready to register", "Cancelled", "New purchase order"]);
     expect(item("purchasing", "purchasing_staff", "Stock").views.map((v) => v.href)).toEqual(["/stock", "/stock?low=1", "/stock/receive", "/stock/issue", "/stock/stocktakes", "/stock/reports", "/stock/import"]);
   });
   it("the rest of the IT views, hrefs verbatim", () => {
@@ -333,7 +333,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(counts("it", "Inventory")).toEqual({ Spare: "itSpare", Repairs: "itDefective", Missing: "itMissing" });
     expect(counts("it", "Employees")).toEqual({ Leaving: "leaving" });
     expect(counts("it", "Approvals")).toEqual({ Open: "approvals" });
-    expect(counts("purchasing", "Requests")).toEqual({ "With IT": "poWithIt", "Sent back": "poSentBack", "Ready to register": "poReady" });
+    expect(counts("purchasing", "Purchase orders")).toEqual({ "With IT": "poWithIt", "Sent back": "poSentBack", "Ready to register": "poReady" });
     expect(counts("finance", "Purchases")).toEqual({ "Ready to register": "poReady" });
     // Phase 46 spec §4.3
     expect(counts("purchasing", "Suppliers")).toEqual({ "Renewing soon": "suppliersRenewing" });
@@ -439,8 +439,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       for (const i of items) expect(new Set(i.views.map((v) => v.label)).size, `${ws} ${i.label}`).toBe(i.views.length);
     }
   });
-  it("PURCHASE_TABS still match the Requests views", () => {
-    const views = item("purchasing", "purchasing_staff", "Requests").views;
+  it("PURCHASE_TABS still match the Purchase orders views", () => {
+    const views = item("purchasing", "purchasing_staff", "Purchase orders").views;
     for (const id of ["WITH_IT", "SENT_BACK", "READY", "CANCELLED"] as const) {
       const tab = PURCHASE_TABS.find((t) => t.id === id)!;
       expect(views.find((v) => v.href === tab.href)?.label).toBe(tab.label);

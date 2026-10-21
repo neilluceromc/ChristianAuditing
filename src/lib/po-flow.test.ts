@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PO_STATE_LABEL, canRegisterLine, legacyPoState, lineProgress, poProgress, poRefNo, stateAfterResubmit, stateAfterSave,
+  poRefSearch,
 } from "./po-flow";
 
 describe("stateAfterSave", () => {
@@ -93,5 +94,21 @@ describe("labels and refs", () => {
     expect(poRefNo(188)).toBe("PO-0188");
     expect(poRefNo(1)).toBe("PO-0001");
     expect(poRefNo(12345)).toBe("PO-12345");
+  });
+});
+
+describe("poRefSearch", () => {
+  it("maps an old printed PR- number onto its PO- number, so PR-0188 still finds PO-0188", () => {
+    expect(poRefSearch("PR-0188")).toBe("PO-0188");
+    expect(poRefSearch("pr-188")).toBe("PO-188");
+    expect(poRefSearch("  Pr-01 ")).toBe("PO-01");
+    expect(poRefSearch("PR-")).toBe("PO-");
+  });
+  it("leaves everything else alone", () => {
+    expect(poRefSearch("PO-0188")).toBe("PO-0188");
+    expect(poRefSearch("laptop")).toBe("laptop");
+    expect(poRefSearch("printer")).toBe("printer");
+    expect(poRefSearch("0188")).toBe("0188");
+    expect(poRefSearch("x PR-1")).toBe("x PR-1");
   });
 });

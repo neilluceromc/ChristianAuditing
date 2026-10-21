@@ -5,9 +5,9 @@ import { prisma } from "@/server/db/client";
 import { PO_WRITE_ROLES } from "@/lib/po-flow";
 import { policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
-import { DraftForm } from "@/components/purchases/draft-form";
+import { PoForm } from "@/components/purchases/po-form";
 
-export const metadata: Metadata = { title: pageTitle("Register purchase") };
+export const metadata: Metadata = { title: pageTitle("New purchase order") };
 
 export default async function NewPurchasePage() {
   await requireRole(...PO_WRITE_ROLES);
@@ -21,10 +21,10 @@ export default async function NewPurchasePage() {
   return (
     <>
       <PageHeader
-        title="Register purchase"
-        breadcrumb={[{ label: "Purchase requests", href: "/purchases" }, { label: "New" }]}
+        title="New purchase order"
+        breadcrumb={[{ label: "Purchase orders", href: "/purchases" }, { label: "New" }]}
       />
-      <DraftForm loadouts={loadouts} departments={departments} vendors={vendors} categories={categories} />
+      <PoForm loadouts={loadouts} departments={departments} vendors={vendors} categories={categories} />
     </>
   );
 }

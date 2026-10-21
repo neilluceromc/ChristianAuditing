@@ -4,6 +4,7 @@ import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { toSearchParams } from "@/lib/url-state";
 import { PURCHASE_TABS, parsePurchaseState } from "@/lib/purchases-list";
+import { PO_STATE_LABEL } from "@/lib/po-flow";
 import { parsePage } from "@/lib/paging";
 import { listPurchases, stateCounts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
@@ -18,7 +19,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { ChipFilterRow } from "@/components/patterns/chip-filter-row";
 import { PurchasesTable } from "@/components/purchases/purchases-table";
 
-export const metadata: Metadata = { title: pageTitle("Purchase requests") };
+export const metadata: Metadata = { title: pageTitle("Purchase orders") };
 
 export default async function PurchasesPage({
   searchParams,
@@ -70,13 +71,13 @@ export default async function PurchasesPage({
   return (
     <>
       <PageHeader
-        title="Purchase requests"
+        title="Purchase orders"
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
-        actions={canCreate ? <ButtonLink href="/purchases/new" variant="primary">New request</ButtonLink> : undefined}
+        actions={canCreate ? <ButtonLink href="/purchases/new" variant="primary">New purchase order</ButtonLink> : undefined}
       />
       <div className="flex flex-col gap-3">
         <Tabs
-          label="Request states"
+          label="Purchase order states"
           items={PURCHASE_TABS.map((t) => {
             const next = carry(new URLSearchParams());
             if (t.id !== "ALL") next.set("state", t.id);
@@ -101,13 +102,13 @@ export default async function PurchasesPage({
             name="q"
             data-page-search
             defaultValue={q}
-            placeholder="Search PR number or line description…"
-            aria-label="Search purchase requests"
+            placeholder="Search PO number or line description…"
+            aria-label="Search purchase orders"
             className="max-w-[320px]"
           />
           <Select
             name="department"
-            aria-label="Requesting department"
+            aria-label="Department"
             defaultValue={department ?? ""}
             className="max-w-[200px]"
           >
@@ -117,7 +118,7 @@ export default async function PurchasesPage({
           </Select>
           <Button type="submit" size="sm">Search</Button>
           <span className="ml-auto font-mono text-[10.5px] text-fg-muted">
-            {total} request{total === 1 ? "" : "s"}
+            {total} purchase order{total === 1 ? "" : "s"}
           </span>
         </form>
 
@@ -138,10 +139,10 @@ export default async function PurchasesPage({
           </>
         ) : filtered ? (
           <EmptyState
-            title="No request matches this filter"
+            title="No purchase order matches this filter"
             description={(() => {
               const parts: string[] = [];
-              if (state) parts.push(`state ${state}`);
+              if (state) parts.push(`state "${PO_STATE_LABEL[state]}"`);
               if (department === "none") parts.push("no department");
               else if (department) parts.push(`department "${departments.find((d) => d.id === department)?.name ?? department}"`);
               if (supplier && supplierRow) parts.push(`supplier "${supplierRow.name}"`);
@@ -152,9 +153,9 @@ export default async function PurchasesPage({
           />
         ) : (
           <EmptyState
-            title="No purchase requests yet"
-            description="A request starts as a draft, goes to IT for specs, then to finance for the money."
-            actions={canCreate ? <ButtonLink href="/purchases/new" variant="primary">New request</ButtonLink> : undefined}
+            title="No purchase orders yet"
+            description="A purchase order records something already bought. Saving it sends IT gear to IT to check; IT or Purchasing then registers the items, and Finance approves them."
+            actions={canCreate ? <ButtonLink href="/purchases/new" variant="primary">New purchase order</ButtonLink> : undefined}
           />
         )}
       </div>

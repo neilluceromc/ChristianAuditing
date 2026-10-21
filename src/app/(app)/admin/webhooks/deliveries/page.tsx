@@ -62,7 +62,7 @@ export default async function DeliveriesPage({
               title={tab === "ALL" ? "Nothing has been sent yet" : "Nothing in this tab"}
               description={
                 tab === "ALL"
-                  ? "An attempt is recorded the moment an approval executes, an offboarding completes or a purchase request is completed — provided an endpoint subscribes to that event."
+                  ? "An attempt is recorded the moment an approval executes, an offboarding completes or a purchase order is fully approved — provided an endpoint subscribes to that event."
                   : "Attempts move between these tabs as the worker retries them."
               }
             />

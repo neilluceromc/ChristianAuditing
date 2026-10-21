@@ -12,7 +12,10 @@ export const SUPPLIER_DOCUMENT_KINDS = ["registration", "certificate", "contract
 export const SUPPLIER_DOCUMENT_LABEL: Record<(typeof SUPPLIER_DOCUMENT_KINDS)[number], string> = {
   registration: "Registration record", certificate: "Certificate", contract: "Contract", other: "Other",
 };
-export const REQUEST_DOCUMENT_KINDS = ["quotation", "purchase-order", "invoice", "delivery-receipt", "other"] as const;
+// Purchase orders (spec §2): the money documents Finance checks (sales invoice, OR, delivery receipt), the warranty slip,
+// and the older quotation / purchase-order kinds that existing documents carry.
+export const REQUEST_DOCUMENT_KINDS = ["invoice", "official-receipt", "delivery-receipt", "warranty-slip", "quotation", "purchase-order", "other"] as const;
 export const REQUEST_DOCUMENT_LABEL: Record<(typeof REQUEST_DOCUMENT_KINDS)[number], string> = {
-  quotation: "Quotation", "purchase-order": "Purchase order", invoice: "Invoice", "delivery-receipt": "Delivery receipt", other: "Other",
+  quotation: "Quotation", "purchase-order": "Purchase order", invoice: "Sales invoice", "official-receipt": "Official receipt",
+  "delivery-receipt": "Delivery receipt", "warranty-slip": "Warranty slip", other: "Other",
 };
