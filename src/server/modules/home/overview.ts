@@ -11,10 +11,11 @@ import {
   adminNeeds, bookValueMakeUp, countDelta, deliveryMakeUp, directChangesPerDay, financeNeeds, fleetMakeUp, itMove,
   IT_MOVE_ACTIONS, kitGapRanked, liveSpark, monthBuckets, monthLabels, monthWindowStart, needsFromWork, pctDelta,
   pesosHistory, plural, purchasingNeeds, quarterStartManila, rankByLabel, requestStateMakeUp, roleRanked, sumHistories,
-  sumWeekBuckets, weekBuckets, weekLabels, weekOverWeek, weekWindowStart,
+  sumWeekBuckets, weekBuckets, weekLabels, weekOverWeek, weekWindowStart, withTeamCards,
   type ItMove, type KpiTile, type MoveEntry, type Overview, type TrendSeries,
 } from "@/lib/overview";
-import { PURCHASE_TABS, type PurchaseTabId } from "@/lib/purchases-list";
+import { PURCHASE_TABS, TO_REGISTER_HREF, type PurchaseTabId } from "@/lib/purchases-list";
+import type { CountKey } from "@/lib/workspaces";
 import { HISTORY_POINTS, type SnapshotKey } from "@/lib/snapshot";
 import { DEFAULT_EXPIRY_WINDOW } from "@/lib/stock-allocation";
 import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
@@ -28,6 +29,7 @@ import { overdueStocktakes, stockHomeSignals } from "@/server/modules/stock/quer
 import { financeViewWhere } from "@/server/modules/finance/queries";
 import { bookValueByCategory, capitalizedSince } from "@/server/modules/finance/depreciation-queries";
 import { adminHome, deliveriesByStatus, disabledAdmins, failingEndpoints } from "@/server/modules/admin/queries";
+import { NAV_COUNT_HREF, readNavCounts } from "./nav-counts";
 import {
   claimedByYou, completedSpend, directChangeRows, financeQueue, financeWaitingRows, fleet, purchasingTodo, SPEND_TOP,
   waitingDays, worklist,
@@ -210,7 +212,7 @@ export async function itOverview(user: Viewer, now: Date = new Date()): Promise<
   const viewer = user.role === "viewer";
   const openKeys = approvalsOpenKeys(user.role);
 
-  const [tiles, approvals, history, groups, claims, fleetData, trend, gaps] = await Promise.all([
+  const [tiles, approvals, history, groups, claims, fleetData, trend, gaps, team] = await Promise.all([
     inventoryTileCounts(parseListState(new URLSearchParams(), INVENTORY_LIST_CONFIG), null, "IT", now),
     approvalsOpenCounts(user, now),
     metricHistory<SnapshotKey>([...IT_TILES.map((t) => t.key), ...openKeys], now),
@@ -219,6 +221,8 @@ export async function itOverview(user: Viewer, now: Date = new Date()): Promise<
     fleet(now),
     itTrend(now),
     kitGapsByGroup(now),
+    // Task 7 (spec §7): the team's cards, the nav's own counts (state, never the bell). A viewer can fix nothing.
+    viewer ? Promise.resolve<Partial<Record<CountKey, number>>>({}) : readNavCounts(["itSentBack", "poWithIt"], user),
   ]);
 
   const kpis: KpiTile[] = [
@@ -232,7 +236,13 @@ export async function itOverview(user: Viewer, now: Date = new Date()): Promise<
 
   return {
     kpis,
-    needsYou: needsFromWork(groups, claims, !viewer),
+    needsYou: withTeamCards(
+      {
+        sentBack: { n: team.itSentBack ?? 0, href: NAV_COUNT_HREF.itSentBack, meta: "Finance sent these back · fix them and send them on" },
+        toCheck: { n: team.poWithIt ?? 0, href: NAV_COUNT_HREF.poWithIt, meta: "Purchase orders waiting for IT's check" },
+      },
+      needsFromWork(groups, claims, !viewer),
+    ),
     needsYouHref: "/inventory/work",
     trend,
     makeUp: fleetMakeUp(fleetData),
@@ -280,15 +290,16 @@ async function purchaseFlowTrend(now: Date): Promise<TrendSeries> {
 }
 
 const PURCHASING_KEYS = [
-  // Task 6: pr.itReviewed counts Finance's review groups now, so the Ready to register tile no longer reads it.
-  "pr.submitted", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue",
+  // Task 7: pr.itReviewed snapshots Purchasing's To register count again (the tile's live value).
+  "pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue",
 ] as const satisfies readonly SnapshotKey[];
 
 /**
  * Spec §3.2, the Purchasing row. Linked values are read the way their pages count them:
- * - With IT / Ready to register are stateCounts() — the /purchases tab counts — linked to those tabs (With IT's
- *   snapshot key keeps its old name, pr.submitted, so the history carries on; Ready to register has no history since
- *   Task 6 gave pr.itReviewed back its old meaning, Finance's queue);
+ * - With IT is stateCounts() — the /purchases tab count — linked to that tab (its snapshot key keeps its old name,
+ *   pr.submitted, so the history carries on);
+ * - To register (Task 7) is the nav's poToRegister — every PO with a line Purchasing can register and units left, a
+ *   mixed one still with IT included — linked to /purchases?register=1; pr.itReviewed snapshots the same count;
  * - Below reorder and Lots expiring are stockHomeSignals(), the counts /stock?low=1 and the expiry report's Expiring
  *   tab (30-day window) list;
  * - Spend this month (Manila month, completed requests) and Stocktakes overdue are plain cards: no page lists exactly
@@ -297,7 +308,7 @@ const PURCHASING_KEYS = [
 export async function purchasingOverview(user: Viewer, now: Date = new Date()): Promise<Overview> {
   const today = localDateISO(now);
   // One completed-spend read: the sparkline's 8 weeks, which hold this Manila month (the value and the supplier breakdown).
-  const [states, stock, spend, todo, overdue, history, trend] = await Promise.all([
+  const [states, stock, spend, todo, overdue, history, trend, team] = await Promise.all([
     stateCounts(),
     stockHomeSignals(today),
     completedSpend(sparkSince(now)),
@@ -305,6 +316,8 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
     overdueStocktakes(today),
     metricHistory<SnapshotKey>([...PURCHASING_KEYS], now),
     purchaseFlowTrend(now),
+    // Task 7 (spec §7): the Sent back card and To register, the nav's own counts (state, never the bell)
+    readNavCounts(["poSentBack", "poToRegister"], user),
   ]);
   const lowHref = stockLowHref();
   const suppliers = rankByLabel(
@@ -317,10 +330,8 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
       states.WITH_IT ?? 0, history["pr.submitted"],
     ),
     historyTile(
-      { key: "pr.itReviewed", label: "Ready to register", hint: "Past IT, waiting to be registered", upIs: "bad", href: purchaseTabHref("READY") },
-      // Task 6: the pr.itReviewed snapshot now counts Finance's review groups (its old meaning, "past IT, waiting on
-      // Finance"), so this tile's READY count no longer has a history of its own: live value only.
-      states.READY ?? 0, [],
+      { key: "pr.itReviewed", label: "To register", hint: "Lines Purchasing can register", upIs: "bad", href: TO_REGISTER_HREF },
+      team.poToRegister ?? 0, history["pr.itReviewed"],
     ),
     monthToDateTile({ key: "spend.month", label: "Spend this month", upIs: "neutral" }, spend, now, {
       money: true, hint: (m) => `${plural(m.length, "purchase order", "purchase orders")} registered`,
@@ -341,7 +352,10 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
 
   return {
     kpis,
-    needsYou: purchasingNeeds(todo, overdue, stock.low, lowHref, today),
+    needsYou: withTeamCards(
+      { sentBack: { n: team.poSentBack ?? 0, href: NAV_COUNT_HREF.poSentBack, meta: "Purchase orders sent back · correct them and save" } },
+      purchasingNeeds(todo, overdue, stock.low, lowHref, today),
+    ),
     needsYouHref: "/purchases",
     trend,
     makeUp: requestStateMakeUp(states),
@@ -429,7 +443,11 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
 
   return {
     kpis,
-    needsYou: financeNeeds(financeQueue(waiting, now), { it: toConfirmIt, purchasing: toConfirmPurchasing }),
+    // Task 7 (spec §7): "N to check" is the review queue's own count (reviewGroups, as finGroupsToReview counts it).
+    needsYou: withTeamCards(
+      { toCheck: { n: waiting.length, href: waitingHref, meta: "Registration groups waiting for your review" }, toCheckIcon: "approval" },
+      financeNeeds(financeQueue(waiting, now), { it: toConfirmIt, purchasing: toConfirmPurchasing }),
+    ),
     needsYouHref: waitingHref,
     trend: {
       title: "Capitalized per month",

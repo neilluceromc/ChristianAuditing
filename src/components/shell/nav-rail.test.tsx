@@ -116,7 +116,8 @@ describe("NavRail", () => {
         expect(id, `${it.label} has a description`).toBeDefined();
         expect(body).toContain(`<span id="${id}" hidden="">Has ${it.views.length} view${it.views.length === 1 ? "" : "s"}</span>`);
       }
-      expect(item(html, "/inventory").body).toContain(">Has 5 views</span>");
+      // Task 7: All, Spare, Repairs, Missing, Sent back, Register assets
+      expect(item(html, "/inventory").body).toContain(">Has 6 views</span>");
     });
 
     it("hides every flyout until hover or focus, and its title from assistive tech", () => {

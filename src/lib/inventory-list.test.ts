@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSET_STATUSES, assigneeWhere, attentionFacetOption, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
-  parsePurchaseYear, purchaseYearChips, scannerRedirect, withPurchaseYearQS,
+  parsePurchaseYear, purchaseYearChips, regFilterWhere, scannerRedirect, sentBackToWhere, withPurchaseYearQS,
 } from "./inventory-list";
+import { regWhere } from "./registration";
 import { parseListState } from "./url-state";
 import { STATUSES_BY_CLASS } from "./asset-class";
 import { attentionWhere } from "./inventory-attention";
@@ -301,5 +302,33 @@ describe("the scanner contract by URL opens an exact tag only with go=1 (spec 7.
     expect(await scannerRedirect(sp("cls=PURCHASING&q=Carlo&go=1&purchaseYear=2024"), "Carlo", hit))
       .toBe("/inventory?cls=PURCHASING&q=Carlo&purchaseYear=2024");
     expect(await scannerRedirect(sp("go=1"), "", hit)).toBe("/inventory");
+  });
+});
+
+describe("the Sent back views (Task 7, spec §7): to=IT|PURCHASING narrows reg=needs-correction by financeReturnedTo", () => {
+  it("to names the team Finance sent it back to; a return from before teams were recorded is its class's team", () => {
+    expect(sentBackToWhere(["IT"])).toEqual({
+      OR: [{ financeReturnedTo: "IT" }, { financeReturnedTo: null, cls: "IT" }],
+    });
+    expect(sentBackToWhere(["IT", "PURCHASING"])).toEqual({
+      OR: [
+        { financeReturnedTo: "IT" }, { financeReturnedTo: null, cls: "IT" },
+        { financeReturnedTo: "PURCHASING" }, { financeReturnedTo: null, cls: "PURCHASING" },
+      ],
+    });
+  });
+
+  it("reg=needs-correction&to=IT is needs-correction AND sent back to IT", () => {
+    expect(buildAssetWhere(parse("reg=needs-correction&to=IT"), null, "IT")).toEqual({
+      cls: "IT",
+      AND: [{ OR: [{ AND: [regWhere("needs-correction"), sentBackToWhere(["IT"])] }] }],
+    });
+  });
+
+  it("to narrows only the needs-correction state, and alone (or with a bad value) filters nothing", () => {
+    expect(regFilterWhere("with-finance", ["IT"])).toEqual(regWhere("with-finance"));
+    expect(regFilterWhere("needs-correction", [])).toEqual(regWhere("needs-correction"));
+    expect(buildAssetWhere(parse("to=IT"), null, "IT")).toEqual({ cls: "IT" });
+    expect(parse("reg=needs-correction&to=FINANCE").filters).toEqual({ reg: ["needs-correction"] });
   });
 });

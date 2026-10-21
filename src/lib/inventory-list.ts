@@ -24,8 +24,11 @@ export const BULK_MAX = 200;
 export const INVENTORY_LIST_CONFIG: ListConfig = {
   facets: ["status", "category", "type", "assignee", "stage", "provenance", "reg",
     // Phase 45 (spec §2.1): the Need attention tile, `?attention=1` - a filter, where `sort=attention` is only an order
-    "attention"],
-  facetValues: { attention: ["1"] },
+    "attention",
+    // Task 7 (purchase-orders spec §7): the Sent back views, `?reg=needs-correction&to=IT` - the team Finance sent
+    // the asset back to (sentBackToWhere); it narrows only the needs-correction state
+    "to"],
+  facetValues: { attention: ["1"], to: ["IT", "PURCHASING"] },
   sortable: [
     "tag", "model", "category", "status", "purchasedAt", "warrantyUntil",
     // the repairs view's Down column
@@ -119,6 +122,22 @@ export function assigneeWhere(values: readonly string[]): Prisma.AssetWhereInput
   return null;
 }
 
+/**
+ * Task 7 (purchase-orders spec §7): the assets Finance sent back to these teams (`?to=IT|PURCHASING`). A return from
+ * before teams were recorded (no financeReturnedTo) went to the class's team — the class and the team share names —
+ * as resubmitAssetToFinance and assetMoneyStage read it.
+ */
+export function sentBackToWhere(teams: readonly string[]): Prisma.AssetWhereInput {
+  const cls = teams.filter((t): t is AssetClass => t === "IT" || t === "PURCHASING");
+  return { OR: cls.flatMap((t) => [{ financeReturnedTo: t }, { financeReturnedTo: null, cls: t }]) };
+}
+
+/** One registration state's where; with `to`, the needs-correction state is only what went back to those teams. */
+export function regFilterWhere(r: RegState, to: readonly string[]): Prisma.AssetWhereInput {
+  if (r !== "needs-correction" || to.length === 0) return regWhere(r);
+  return { AND: [regWhere(r), sentBackToWhere(to)] };
+}
+
 export function buildAssetWhere(
   state: ListState,
   purchaseYear: PurchaseYearValue | null = null,
@@ -175,11 +194,12 @@ export function buildAssetWhere(
     and.push({ OR: provenances.map(provenanceWhere) });
     where.AND = and;
   }
-  // Phase 35 (spec §3.1): registration is derived the same way — an OR of where-shapes appended to AND.
+  // Phase 35 (spec §3.1): registration is derived the same way — an OR of where-shapes appended to AND. Task 7: `to`
+  // narrows its needs-correction branch to the team Finance sent the asset back to.
   const regs = (f.reg ?? []).map(parseRegState).filter((r): r is RegState => r !== null);
   if (regs.length) {
     const and = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
-    and.push({ OR: regs.map(regWhere) });
+    and.push({ OR: regs.map((r) => regFilterWhere(r, f.to ?? [])) });
     where.AND = and;
   }
   // Phase 45 (spec §2.1): the Need attention tile - attentionWhere agrees with attentionOf boundary for boundary,

@@ -592,8 +592,8 @@ export async function purchasingTodo(userId: string, now: Date = new Date()): Pr
 /**
  * Finance's queue: the registration groups waiting for its review (Task 6, spec §5 — reviewGroups, the /finance/review
  * page's rows), oldest first. Finance Home's headline and queue, and the snapshot's `fin.waitingC` / `fin.waitingCount`
- * (Phase 46) and `pr.itReviewed`, so they can never disagree. Replaces migration 38's interim READY-orders read, which
- * counted every old completed request as waiting.
+ * (Phase 46), so they can never disagree. Replaces migration 38's interim READY-orders read, which counted every old
+ * completed request as waiting.
  */
 export function financeWaitingRows(): Promise<ReviewGroup[]> {
   return reviewGroups();

@@ -8,7 +8,7 @@ export type IconName =
   | "keyboard" | "webcam" | "ups" | "license" | "menu"
   | "home" | "worklist" | "offboarding" | "reservations" | "reports" | "activity" | "setup"
   | "requests" | "suppliers" | "stock" | "depreciation" | "users" | "webhooks" | "flags" | "chevron" | "sidebar"
-  | "disposal";
+  | "disposal" | "bell";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   laptop: (<><rect x="3" y="4" width="12" height="8" /><line x1="1.5" y1="14.5" x2="16.5" y2="14.5" /></>),
@@ -59,6 +59,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   sidebar: (<><rect x="2.5" y="3" width="13" height="12" /><line x1="7" y1="3" x2="7" y2="15" /></>),
   // Phase 47: Finance › Disposal — a bin.
   disposal: (<><line x1="2.5" y1="4.5" x2="15.5" y2="4.5" /><polyline points="7,4.5 7,2.5 11,2.5 11,4.5" /><polyline points="4,4.5 5,15.5 13,15.5 14,4.5" /><line x1="7.5" y1="7.5" x2="7.5" y2="12.5" /><line x1="10.5" y1="7.5" x2="10.5" y2="12.5" /></>),
+  // Task 7 (purchase-orders spec §7): the notification bell.
+  bell: (<><path d="M4.5 13 V8 a4.5 4.5 0 0 1 9 0 V13" /><line x1="2.5" y1="13" x2="15.5" y2="13" /><path d="M7.3 15.2 a1.8 1.8 0 0 0 3.4 0" /></>),
 };
 
 export function Icon({

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import type { Role } from "@prisma/client";
 import { cookies } from "next/headers";
 import { requireUser } from "@/server/auth/guards";
 import {
@@ -22,6 +23,7 @@ import { UiPrefsSync } from "@/components/shell/ui-prefs-sync";
 import { navCountKeys, type NavBadges } from "@/lib/nav-badges";
 import { defaultClassFor } from "@/lib/asset-class";
 import { getApprovalsBadge, readNavCounts } from "@/server/modules/home/nav-counts";
+import { unreadCount } from "@/server/notifications/queries";
 import { CrisOrbDefs } from "@/components/cris/orb";
 import { CrisWidget } from "@/components/cris/cris-widget";
 import { crisAvailability, crisPrefsFor } from "@/server/cris/settings-read";
@@ -37,12 +39,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // which keys the visible nav carries; readNavCounts keeps the Worklist and Purchase reviews counts admin's and
   // IT's only; both it and getApprovalsBadge fail each count to 0 rather than failing every page's shell.
   const keys = navCountKeys(sections);
-  const [approvals, counts, cris] = await Promise.all([
+  // Task 7 (purchase-orders spec §7): the bell's first count. A viewer has no team, so no bell (null); an admin's bell
+  // never rings (0). Like the nav counts, a failed read shows 0 rather than failing every page's shell.
+  const [approvals, counts, cris, unread] = await Promise.all([
     keys.includes("approvals") ? getApprovalsBadge(user.role) : Promise.resolve({ open: 0, overdue: 0 }),
     readNavCounts(keys.filter((k) => k !== "approvals"), user),
     // Phase 41 (spec §2, §4): Cris is admin's and IT's only, and only while the admin switch is on (with no key,
     // Cris shows in preview). A failed read hides Cris rather than failing every page's shell.
     reviewer ? crisFor(user.id, user.name, jar.get("br.theme")?.value) : Promise.resolve(null),
+    user.role === "viewer" ? Promise.resolve(null) : bellStart(user),
   ]);
   const badges: NavBadges = { approvals, counts: { ...counts, approvals: approvals.open } };
   // Spec §4.2: /inventory drops `cls` from its URLs when it is the viewer's default, so the nav matcher needs it.
@@ -79,6 +84,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             allowed={ROLE_WORKSPACES[user.role]}
             meta={WORKSPACE_META}
             defaultCls={defaultCls}
+            unread={unread}
           />
         </div>
         <main id="main" tabIndex={-1} className="flex-1 p-6 print:p-0">
@@ -97,6 +103,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <StuckNavGuard />
     </SidebarShell>
   );
+}
+
+/** The bell's count for the first paint; 0 (with a log) when the read fails, as every nav count does. */
+async function bellStart(user: { id: string; role: Role }): Promise<number> {
+  try {
+    return await unreadCount(user);
+  } catch (err: unknown) {
+    console.error("[nav counts] notifications failed:", err);
+    return 0;
+  }
 }
 
 /**

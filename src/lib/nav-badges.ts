@@ -32,6 +32,9 @@ const LABEL: Record<CountKey, (n: number) => string> = {
   poSentBack: (n) => `${n} sent back`,
   poWithIt: (n) => `${n} with IT`,
   poReady: (n) => `${n} ready to register`,
+  // Task 7 (spec §7)
+  itSentBack: (n) => `${n} sent back`,
+  poToRegister: (n) => `${n} to register`,
   // Phase 46 spec §4.3
   stockLow: (n) => `${n} below reorder level`,
   stocktakesOverdue: (n) => `${n} overdue`,
@@ -46,8 +49,11 @@ const LABEL: Record<CountKey, (n: number) => string> = {
   flagsUnavailable: (n) => `${n} unavailable`,
 };
 
-/** Counts drawn red with a dot whenever they show (spec §4.3): failed webhook deliveries wait on a replay. */
-const ALWAYS_URGENT: ReadonlySet<CountKey> = new Set<CountKey>(["deadDeliveries"]);
+/**
+ * Counts drawn red with a dot whenever they show (spec §4.3): failed webhook deliveries wait on a replay; and (Task 7,
+ * purchase-orders spec §7) the Sent back counts — work another team sent back to this one.
+ */
+const ALWAYS_URGENT: ReadonlySet<CountKey> = new Set<CountKey>(["deadDeliveries", "itSentBack", "poSentBack"]);
 
 /** The count keys the visible links and views use, each once: only these are read (spec §4.3). */
 export function navCountKeys(sections: VisibleSection[]): CountKey[] {

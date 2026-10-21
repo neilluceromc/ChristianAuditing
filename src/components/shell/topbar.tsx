@@ -4,6 +4,7 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import type { VisibleSection, WorkspaceId } from "@/lib/workspaces";
 import { CommandPaletteTrigger, ScanTagButton } from "./command-palette";
 import { KeyboardShortcutsButton } from "./keyboard-shortcuts-dialog";
+import { NotificationBell } from "./notification-bell";
 import { MobileNav, PageName, type ShellUser } from "./mobile-nav";
 import type { NavBadges } from "@/lib/nav-badges";
 
@@ -12,7 +13,8 @@ import type { NavBadges } from "@/lib/nav-badges";
  * "CRIS" mark and page name, Search, and Scan a tag. From `lg` up the sidebar
  * carries the app name and the nav, and the bar shows the wide search trigger.
  * Density and Keyboard shortcuts are desktop aids and step aside below `sm`
- * so a 375 px bar keeps room for the page name.
+ * so a 375 px bar keeps room for the page name. Task 7 (purchase-orders spec §7): the notification bell sits first in
+ * the right cluster, on every width; `unread` is null for a viewer, who has no team and so no bell.
  */
 export function Topbar({
   sections,
@@ -23,6 +25,7 @@ export function Topbar({
   allowed,
   meta,
   defaultCls,
+  unread,
 }: {
   sections: VisibleSection[];
   badges: NavBadges;
@@ -32,6 +35,7 @@ export function Topbar({
   allowed: WorkspaceId[];
   meta: Record<WorkspaceId, { label: string; landing: string }>;
   defaultCls: AssetClass;
+  unread: number | null;
 }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-border bg-surface px-4 sm:gap-3">
@@ -49,6 +53,7 @@ export function Topbar({
       <CommandPaletteTrigger />
       <ScanTagButton />
       <div className="flex shrink-0 items-center gap-2 lg:ml-auto">
+        {unread !== null && <NotificationBell initialCount={unread} admin={user.role === "admin"} />}
         <span className="hidden sm:contents">
           <DensityToggle />
         </span>

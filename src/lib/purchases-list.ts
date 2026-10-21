@@ -21,6 +21,17 @@ export const PURCHASE_TABS = [
 
 export type PurchaseTabId = (typeof PURCHASE_TABS)[number]["id"];
 
+/**
+ * Task 7: Purchasing's To register view — the POs (READY or WITH_IT) with a line Purchasing can register and units
+ * left (server/modules/purchases/to-register.ts). A filter, not a state tab: a mixed PO still with IT is in it.
+ */
+export const TO_REGISTER_PARAM = "register";
+export const TO_REGISTER_HREF = `/purchases?${TO_REGISTER_PARAM}=1`;
+
+export function parseToRegister(raw: string | null | undefined): boolean {
+  return raw === "1";
+}
+
 export function parsePurchaseState(raw: string | null | undefined): PurchaseOrderState | null {
   return (PURCHASE_STATES as readonly string[]).includes(raw ?? "")
     ? (raw as PurchaseOrderState)

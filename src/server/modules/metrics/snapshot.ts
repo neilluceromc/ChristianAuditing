@@ -9,6 +9,7 @@ import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState } from "@/lib/url-state";
 import { inventoryTileCounts } from "@/server/modules/inventory/queries";
 import { stateCounts } from "@/server/modules/purchases/queries";
+import { purchasingToRegisterCount } from "@/server/modules/purchases/to-register";
 import { stockHomeSignals } from "@/server/modules/stock/queries";
 import { financeViewWhere } from "@/server/modules/finance/queries";
 import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
@@ -47,7 +48,7 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
 
   const [
     tiles, openIt, openPurchasing, openNone, pastIt, pastPurchasing, pastNone,
-    prStates, stock, waiting, toConfirmIt, toConfirmPurchasing, book, admin,
+    prStates, stock, waiting, toConfirmIt, toConfirmPurchasing, book, admin, toRegister,
   ] = await Promise.all([
     // /inventory's IT tiles with nothing else filtered: each tile's count is what `?status=…` / `?attention=1` lists.
     inventoryTileCounts(parseListState(new URLSearchParams(), INVENTORY_LIST_CONFIG), null, "IT", now),
@@ -59,6 +60,7 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     toConfirm("IT"), toConfirm("PURCHASING"),
     bookValueTotals({}, now),
     adminHome(),
+    purchasingToRegisterCount(),
   ]);
 
   const waitingPesos = waiting.reduce((sum, r) => sum + Number(r.total), 0);
@@ -75,10 +77,10 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     "approvals.pastSla.purchasing": pastPurchasing,
     "approvals.pastSla.none": pastNone,
     // Migration 38: the keys keep their names so the histories carry on. pr.submitted counts WITH_IT orders;
-    // pr.itReviewed (Task 6) counts Finance's review groups — its old meaning, past IT and waiting on Finance — not
-    // READY orders, which include every old completed request.
+    // pr.itReviewed (Task 7) is Purchasing's To register count — the POs with a line Purchasing can register and units
+    // left — which its only reader, Purchasing's To register tile, shows live (fin.waitingCount has Finance's queue).
     "pr.submitted": prStates.WITH_IT ?? 0,
-    "pr.itReviewed": waiting.length,
+    "pr.itReviewed": toRegister,
     "stock.low": stock.low,
     "stock.expiringLots": stock.expiringLots,
     "stock.stocktakesOverdue": stock.stocktakesOverdue,

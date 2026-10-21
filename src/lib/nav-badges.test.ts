@@ -21,6 +21,12 @@ describe("countBadge", () => {
     expect(countBadge("poReady", 6, b)?.label).toBe("6 ready to register");
   });
 
+  it("Task 7 (purchase-orders spec §7): the Sent back counts are red; To register is not", () => {
+    expect(countBadge("itSentBack", 2, b)).toEqual({ n: 2, label: "2 sent back", fault: true });
+    expect(countBadge("poSentBack", 1, b)).toEqual({ n: 1, label: "1 sent back", fault: true });
+    expect(countBadge("poToRegister", 4, b)).toEqual({ n: 4, label: "4 to register", fault: false });
+  });
+
   it("labels the Phase 46 counts", () => {
     expect(countBadge("stockLow", 3, b)?.label).toBe("3 below reorder level");
     expect(countBadge("stocktakesOverdue", 1, b)?.label).toBe("1 overdue");
@@ -82,13 +88,13 @@ describe("navCountKeys", () => {
   it("adds the purchase orders with IT for IT's reviewers, and nothing twice", () => {
     const keys = navCountKeys(filterSectionsForRole(WORKSPACE_NAV.it, "it_staff"));
     expect([...keys].sort())
-      .toEqual(["approvals", "itDefective", "itMissing", "itSpare", "leaving", "poWithIt", "worklist"]);
+      .toEqual(["approvals", "itDefective", "itMissing", "itSentBack", "itSpare", "leaving", "poWithIt", "worklist"]);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("covers the other workspaces", () => {
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.purchasing, "purchasing_staff")).sort())
-      .toEqual(["approvals", "poReady", "poSentBack", "poWithIt", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
+      .toEqual(["approvals", "poSentBack", "poToRegister", "poWithIt", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff")).sort())
       .toEqual(["approvals", "finGroupsToReview", "finToConfirmIt", "finToConfirmPurchasing", "poReady"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin")).sort())

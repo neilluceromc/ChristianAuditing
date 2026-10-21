@@ -6,7 +6,7 @@ import type { CountKey } from "@/lib/workspaces";
 import { parseListState } from "@/lib/url-state";
 import { buildAssetWhere, INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { buildEmployeeWhere, EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
-import { parsePurchaseState, purchaseWhere } from "@/lib/purchases-list";
+import { parsePurchaseState, purchaseWhere, TO_REGISTER_HREF } from "@/lib/purchases-list";
 import { STOCK_LIST_CONFIG } from "@/lib/stock-list";
 import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { parseCls } from "@/lib/asset-class";
@@ -18,6 +18,7 @@ import { localDateISO } from "@/lib/format";
 import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
 import { financeViewWhere } from "@/server/modules/finance/queries";
 import { reviewGroupCount } from "@/server/modules/finance/groups";
+import { purchasingToRegisterCount } from "@/server/modules/purchases/to-register";
 import { worklistCount } from "./queries";
 
 /**
@@ -29,11 +30,15 @@ export const NAV_COUNT_HREF = {
   itSpare: "/inventory?status=SPARE",
   itDefective: "/inventory?status=DEFECTIVE&sort=defectiveSince",
   itMissing: "/inventory?status=MISSING",
+  // Task 7 (spec §7): what Finance sent back to IT, from state (the asset's return), never from the bell's reads.
+  itSentBack: "/inventory?reg=needs-correction&to=IT",
   leaving: "/employees?employment=OFFBOARDING",
   // Migration 38: the purchase-order tabs (prDraft → poSentBack, prSubmitted → poWithIt, prItReviewed → poReady).
   poSentBack: "/purchases?state=SENT_BACK",
   poWithIt: "/purchases?state=WITH_IT",
   poReady: "/purchases?state=READY",
+  // Task 7: Purchasing's To register view; the page lists exactly purchasingToRegisterIds(), which this counts.
+  poToRegister: TO_REGISTER_HREF,
   // Phase 46 spec §4.3
   stockLow: "/stock?low=1",
   suppliersRenewing: "/purchases/suppliers?renewing=30",
@@ -101,6 +106,11 @@ async function readItStatusCounts(keys: ItStatusKey[]): Promise<Array<[ItStatusK
   }
 }
 
+// Task 7 (spec §7): /inventory's own where for the Sent back view (cls IT, as for the status views above): the needs-
+// correction state narrowed to what went back to IT. It drops when someone fixes it and sends it on, not when read.
+const itSentBack = () =>
+  prisma.asset.count({ where: buildAssetWhere(parseListState(paramsOf("itSentBack"), INVENTORY_LIST_CONFIG), null, "IT") });
+
 // /employees: parseListState → buildEmployeeWhere(state); pageEmployees counts that where (no gaps, no loadout sort).
 const employees = (key: "leaving") => () =>
   prisma.employee.count({ where: buildEmployeeWhere(parseListState(paramsOf(key), EMPLOYEES_LIST_CONFIG)) });
@@ -149,6 +159,8 @@ const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<num
   poSentBack: purchases("poSentBack"),
   poWithIt: purchases("poWithIt"),
   poReady: purchases("poReady"),
+  itSentBack,
+  poToRegister: () => purchasingToRegisterCount(),
   stockLow,
   stocktakesOverdue,
   suppliersRenewing,

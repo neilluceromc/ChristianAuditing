@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   spendSince: [] as Date[],
   capitalizedSince: [] as Date[],
   directSince: [] as Date[],
+  nav: {} as Record<string, number>,
+  navKeys: [] as string[][],
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -34,6 +36,14 @@ vi.mock("@/server/db/client", () => ({
           ? [{ createdAt: new Date("2026-10-19T02:00:00Z") }, { createdAt: new Date("2026-10-18T02:00:00Z") }, { createdAt: new Date("2026-10-12T02:00:00Z") }]
           : [{ completedAt: new Date("2026-10-19T02:00:00Z") }],
     },
+  },
+}));
+// Task 7: the team cards and Purchasing's To register read the nav's own counts (from state).
+vi.mock("./nav-counts", async (orig) => ({
+  ...(await orig<object>()),
+  readNavCounts: async (keys: string[]) => {
+    h.navKeys.push(keys);
+    return Object.fromEntries(keys.map((k) => [k, h.nav[k] ?? 0]));
   },
 }));
 vi.mock("@/server/modules/metrics/history", () => ({
@@ -135,6 +145,8 @@ beforeEach(() => {
   h.spendSince = [];
   h.capitalizedSince = [];
   h.directSince = [];
+  h.nav = { poSentBack: 4, poToRegister: 17 };
+  h.navKeys = [];
 });
 
 describe("purchasingOverview", () => {
@@ -142,15 +154,23 @@ describe("purchasingOverview", () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
       ["With IT", 21, "/purchases?state=WITH_IT"],
-      ["Ready to register", 22, "/purchases?state=READY"],
+      ["To register", 17, "/purchases?register=1"],
       ["Spend this month", 1550.1, undefined],
       ["Below reorder", 31, "/stock?low=1"],
       ["Lots expiring", 32, "/stock/reports/expiry?days=30&tab=expiring"],
       ["Stocktakes overdue", 33, undefined],
     ]);
-    // Task 6: pr.itReviewed counts Finance's review groups, so Ready to register shows its live count only
-    expect(h.historyKeys).toEqual(["pr.submitted", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
-    expect(o.kpis[1].spark).toEqual([22]);
+    // Task 7: pr.itReviewed snapshots this same To register count again, so the tile has its history back
+    expect(h.historyKeys).toEqual(["pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
+    expect(h.navKeys).toEqual([["poSentBack", "poToRegister"]]);
+  });
+
+  it("To register: the spark ends at the live value, with pr.itReviewed's history", async () => {
+    h.history["pr.itReviewed"] = [1, 2, 3, 4, 5, 6, 15, 16];
+    const o = await purchasingOverview(user("purchasing_staff"), NOW);
+    expect(o.kpis[1]).toMatchObject({
+      key: "pr.itReviewed", hint: "Lines Purchasing can register", spark: [1, 2, 3, 4, 5, 6, 15, 17], delta: { kind: "count", value: 2 },
+    });
   });
 
   it("Spend this month: Manila month to date, weekly sparkline, this week vs last week in percent", async () => {
@@ -173,6 +193,8 @@ describe("purchasingOverview", () => {
   it("needs-you, trend, make-up and breakdown", async () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(o.needsYou.map((n) => [n.tone, n.title, n.href])).toEqual([
+      // Task 7 (spec §7): the team's card, from state
+      ["bad", "4 sent back to you", "/purchases?state=SENT_BACK"],
       ["bad", "STK-0003 · Pantry", "/stock/stocktakes/s1"],
       ["warn", "31 items below reorder level", "/stock?low=1"],
       ["warn", "PR-2 · came back from Ina", "/purchases/p2"],
@@ -257,6 +279,8 @@ describe("financeOverview", () => {
   it("needs-you, trend, make-up and breakdown", async () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.needsYou.map((n) => [n.title, n.href])).toEqual([
+      // Task 7 (spec §7): the review queue's own count
+      ["2 to check", "/finance/review"],
       ["5 IT registrations to confirm", "/finance/assets?fin=with-finance"],
       ["6 Purchasing registrations to confirm", "/finance/assets?cls=PURCHASING&fin=with-finance"],
       ["PO-0010 · 2 laptops from IT", "/finance/review/rec1"],

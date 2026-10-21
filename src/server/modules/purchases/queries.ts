@@ -1,4 +1,4 @@
-import type { AssetClass, PurchaseOrderState, Team } from "@prisma/client";
+import type { AssetClass, Prisma, PurchaseOrderState, Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
@@ -96,8 +96,11 @@ export async function listPurchases(
   page: number,
   department: string | null = null,
   supplier: string | null = null,
+  /** Task 7: only these POs (Purchasing's To register view, purchasingToRegisterIds); null = no such filter */
+  onlyIds: string[] | null = null,
 ): Promise<{ rows: PurchaseListRow[]; total: number; page: number; pageCount: number }> {
-  const where = purchaseWhere(state, q, department, supplier);
+  const base = purchaseWhere(state, q, department, supplier);
+  const where: Prisma.PurchaseOrderWhereInput = onlyIds ? { AND: [base, { id: { in: onlyIds } }] } : base;
   const { rows, total, page: pg, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
     page,

@@ -50,7 +50,12 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["purchasing", "admin", "/inventory", "Assets", "IT inventory"],
   ["purchasing", "purchasing_staff", "/inventory/xyz", "Assets", null],
   ["purchasing", "purchasing_staff", "/purchases?state=CANCELLED", "Purchase orders", "Cancelled"],
-  ["purchasing", "purchasing_staff", "/purchases?state=READY", "Purchase orders", "Ready to register"],
+  // Task 7: Purchasing's view is To register (a mixed PO still with IT included); the READY tab is the page's own.
+  ["purchasing", "purchasing_staff", "/purchases?state=READY", "Purchase orders", null],
+  ["purchasing", "purchasing_staff", "/purchases?register=1", "Purchase orders", "To register"],
+  ["purchasing", "purchasing_staff", "/inventory?cls=PURCHASING&reg=needs-correction&to=PURCHASING", "Assets", "Sent back"],
+  ["it", "it_staff", "/inventory?reg=needs-correction&to=IT", "Inventory", "Sent back"],
+  ["it", "it_staff", "/inventory?reg=needs-correction", "Inventory", null],
   ["purchasing", "purchasing_staff", "/purchases?state=DRAFT", "Purchase orders", null],
   ["purchasing", "purchasing_staff", "/stock/stocktakes/xyz", "Stock", "Stocktakes"],
   ["purchasing", "purchasing_staff", "/stock/categories", "Setup", "Stock categories"],

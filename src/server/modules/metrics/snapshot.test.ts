@@ -50,6 +50,8 @@ vi.mock("@/server/modules/inventory/queries", () => ({
 vi.mock("@/server/modules/purchases/queries", () => ({
   stateCounts: async () => ({ ALL: 50, SENT_BACK: 1, WITH_IT: 21, READY: 22, CANCELLED: 3 }),
 }));
+// Task 7: Purchasing's To register count (POs with a line Purchasing can register and units left)
+vi.mock("@/server/modules/purchases/to-register", () => ({ purchasingToRegisterCount: async () => 9 }));
 vi.mock("@/server/modules/stock/queries", () => ({
   stockHomeSignals: async (today: string) => {
     h.stockToday = today;
@@ -93,8 +95,8 @@ describe("collectSnapshot", () => {
       "it.spare": 11n, "it.deployed": 12n, "it.defective": 13n, "it.missing": 14n, "it.attention": 15n,
       "approvals.open.it": 100n, "approvals.open.purchasing": 200n, "approvals.open.none": 300n,
       "approvals.pastSla.it": 10n, "approvals.pastSla.purchasing": 20n, "approvals.pastSla.none": 30n,
-      // Task 6: pr.itReviewed counts Finance's review groups (its old "past IT, waiting on Finance"), not READY orders
-      "pr.submitted": 21n, "pr.itReviewed": 2n,
+      // Task 7: pr.itReviewed is Purchasing's To register count, the one its Home tile shows live
+      "pr.submitted": 21n, "pr.itReviewed": 9n,
       "stock.low": 31n, "stock.expiringLots": 32n, "stock.stocktakesOverdue": 33n,
       // ₱2,000.20 + ₱0.90 = ₱2,001.10
       "fin.waitingC": 200_110n, "fin.waitingCount": 2n,

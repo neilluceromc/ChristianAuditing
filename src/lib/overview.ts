@@ -533,6 +533,37 @@ function byTone(items: NeedItem[], max: number): NeedItem[] {
   return items.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]).slice(0, max);
 }
 
+/** One of a team's Home cards (Task 7, spec §7): its count — from state, never from the bell — and the tab it opens. */
+export interface TeamCard {
+  n: number;
+  href: string;
+  meta: string;
+}
+
+/**
+ * Task 7 (spec §7): each team's Home shows "N sent back to you" (bad: another team returned work to this one) and
+ * "N to check" (warn), each linking to its tab; a card at 0 is left out. They come first within their tone, ahead of
+ * the workspace's own items, and `max` still holds.
+ */
+export function withTeamCards(
+  cards: { sentBack?: TeamCard; toCheck?: TeamCard; toCheckIcon?: IconName }, items: NeedItem[], max = 6,
+): NeedItem[] {
+  const out: NeedItem[] = [];
+  if (cards.sentBack && cards.sentBack.n > 0) {
+    out.push({
+      tone: "bad", icon: "alert", title: `${cards.sentBack.n} sent back to you`, meta: cards.sentBack.meta,
+      action: "Fix", href: cards.sentBack.href,
+    });
+  }
+  if (cards.toCheck && cards.toCheck.n > 0) {
+    out.push({
+      tone: "warn", icon: cards.toCheckIcon ?? "requests",
+      title: `${cards.toCheck.n} to check`, meta: cards.toCheck.meta, action: "Review", href: cards.toCheck.href,
+    });
+  }
+  return byTone([...out, ...items], max);
+}
+
 /**
  * Purchasing's "Needs you" (spec §3.2): stocktakes past their close-by date (bad), stock below reorder and requests
  * that came back (warn), then the rest of the viewer's own requests (drafts, waiting on IT).

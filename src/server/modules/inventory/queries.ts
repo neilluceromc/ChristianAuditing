@@ -3,7 +3,7 @@ import { Prisma, type AssetClass, type AssetStatus, type Role } from "@prisma/cl
 import { prisma } from "@/server/db/client";
 import { fmtDate } from "@/lib/format";
 import {
-  attentionFacetOption, buildAssetOrderBy, buildAssetWhere, UNASSIGNED, type PurchaseYearValue,
+  attentionFacetOption, buildAssetOrderBy, buildAssetWhere, regFilterWhere, UNASSIGNED, type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import { ASSET_CLASSES, ASSIGNABLE_FROM, STATUS_LABEL, canSeeClass, statusesFor } from "@/lib/asset-class";
 import { primarySortOf, type ListState } from "@/lib/url-state";
@@ -19,7 +19,7 @@ import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
 import { auditPhrase, auditSentence } from "@/lib/activity";
-import { REG_LABEL, REG_STATES, regWhere, registrationState, returnSummary, type RegState } from "@/lib/registration";
+import { REG_LABEL, REG_STATES, registrationState, returnSummary, type RegState } from "@/lib/registration";
 import { attentionOf, attentionWhere, orderByAttention, type Attention } from "@/lib/inventory-attention";
 
 /** Serializable DTO for the client table island — strings only, preformatted. */
@@ -438,7 +438,10 @@ export async function facetOptions(
     ),
     Promise.all(
       REG_STATES.map((r) =>
-        prisma.asset.count({ where: { AND: [buildAssetWhere(without("reg"), purchaseYear, cls), regWhere(r)] } }),
+        // Task 7: a Sent back view's `to` narrows the Needs correction count the way it narrows the list
+        prisma.asset.count({
+          where: { AND: [buildAssetWhere(without("reg"), purchaseYear, cls), regFilterWhere(r, state.filters.to ?? [])] },
+        }),
       ),
     ),
     // the Need attention filter is derived too: the count is what turning it on would show

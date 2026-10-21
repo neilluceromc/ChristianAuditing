@@ -286,17 +286,17 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     }
   });
   it("views are the spec §3 sets, in order", () => {
-    expect(item("it", "it_staff", "Inventory").views.map((v) => v.label)).toEqual(["All", "Spare", "Repairs", "Missing", "Register assets"]);
+    expect(item("it", "it_staff", "Inventory").views.map((v) => v.label)).toEqual(["All", "Spare", "Repairs", "Missing", "Sent back", "Register assets"]);
     expect(item("it", "it_staff", "Approvals").views.map((v) => v.href)).toEqual(["/approvals", "/approvals?tab=mine", "/approvals?tab=closed"]);
     expect(item("it", "it_staff", "Purchase orders")).toMatchObject({ href: "/purchases?state=WITH_IT", badge: ["poWithIt"], views: [] });
     expect(item("it", "it_staff", "Setup").href).toBe("/admin/asset-categories");
-    expect(item("purchasing", "purchasing_staff", "Purchase orders").views.map((v) => v.label)).toEqual(["All", "With IT", "Sent back", "Ready to register", "Cancelled", "New purchase order"]);
+    expect(item("purchasing", "purchasing_staff", "Purchase orders").views.map((v) => v.label)).toEqual(["All", "With IT", "Sent back", "To register", "Cancelled", "New purchase order"]);
     expect(item("purchasing", "purchasing_staff", "Stock").views.map((v) => v.href)).toEqual(["/stock", "/stock?low=1", "/stock/receive", "/stock/issue", "/stock/stocktakes", "/stock/reports", "/stock/import"]);
   });
   it("the rest of the IT views, hrefs verbatim", () => {
     expect(item("it", "it_staff", "Inventory").views.map((v) => v.href)).toEqual([
       "/inventory", "/inventory?status=SPARE", "/inventory?status=DEFECTIVE&sort=defectiveSince",
-      "/inventory?status=MISSING", "/inventory/register",
+      "/inventory?status=MISSING", "/inventory?reg=needs-correction&to=IT", "/inventory/register",
     ]);
     expect(item("it", "it_staff", "Employees").views.map((v) => [v.label, v.href])).toEqual([
       ["Everyone", "/employees"], ["Client staff", "/employees?kind=CLIENT"],
@@ -328,10 +328,10 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   it("counts sit on the spec §3 views", () => {
     const counts = (ws: WorkspaceId, label: string) =>
       Object.fromEntries(item(ws, "admin", label).views.filter((v) => v.count).map((v) => [v.label, v.count]));
-    expect(counts("it", "Inventory")).toEqual({ Spare: "itSpare", Repairs: "itDefective", Missing: "itMissing" });
+    expect(counts("it", "Inventory")).toEqual({ Spare: "itSpare", Repairs: "itDefective", Missing: "itMissing", "Sent back": "itSentBack" });
     expect(counts("it", "Employees")).toEqual({ Leaving: "leaving" });
     expect(counts("it", "Approvals")).toEqual({ Open: "approvals" });
-    expect(counts("purchasing", "Purchase orders")).toEqual({ "With IT": "poWithIt", "Sent back": "poSentBack", "Ready to register": "poReady" });
+    expect(counts("purchasing", "Purchase orders")).toEqual({ "With IT": "poWithIt", "Sent back": "poSentBack", "To register": "poToRegister" });
     expect(counts("finance", "Purchases")).toEqual({ "Ready to register": "poReady" });
     // Phase 46 spec §4.3
     expect(counts("purchasing", "Suppliers")).toEqual({ "Renewing soon": "suppliersRenewing" });
@@ -352,7 +352,11 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("finance", "finance_staff", "Purchases").badge).toEqual(["poReady"]);
     // Task 6 (spec §5): Finance's group queue, one link with its badge
     expect(item("finance", "finance_staff", "To review")).toMatchObject({ href: "/finance/review", badge: ["finGroupsToReview"], views: [] });
-    expect(item("it", "it_staff", "Inventory").badge).toEqual([]);
+    // Task 7 (spec §7): the Sent back counts stay on the closed links (red); a viewer, who can fix nothing, has neither.
+    expect(item("it", "it_staff", "Inventory").badge).toEqual(["itSentBack"]);
+    expect(item("it", "viewer", "Inventory").badge).toEqual([]);
+    expect(item("it", "viewer", "Inventory").views.map((v) => v.label)).not.toContain("Sent back");
+    expect(item("purchasing", "purchasing_staff", "Purchase orders").badge).toEqual(["poSentBack"]);
     // Phase 46: failed deliveries are waiting work (a replay), so the closed Webhooks link keeps their red count.
     expect(item("admin", "admin", "Webhooks").badge).toEqual(["deadDeliveries"]);
   });
@@ -369,7 +373,10 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   it("Purchasing Assets points at its own class, with IT inventory one view away", () => {
     expect(item("purchasing", "purchasing_staff", "Assets").href).toBe("/inventory?cls=PURCHASING");
     expect(item("purchasing", "purchasing_staff", "Assets").views.map((v) => [v.label, v.href])).toEqual([
-      ["Purchasing assets", "/inventory?cls=PURCHASING"], ["IT inventory", "/inventory?cls=IT"],
+      ["Purchasing assets", "/inventory?cls=PURCHASING"],
+      // Task 7 (spec §7): Purchasing assets Finance sent back to Purchasing
+      ["Sent back", "/inventory?cls=PURCHASING&reg=needs-correction&to=PURCHASING"],
+      ["IT inventory", "/inventory?cls=IT"],
     ]);
     // Spec §4: Purchasing registers from a purchase order; an admin in the Purchasing workspace keeps Register.
     expect(item("purchasing", "admin", "Assets").views.map((v) => v.href)).toContain("/inventory/register");
@@ -443,7 +450,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   });
   it("PURCHASE_TABS still match the Purchase orders views", () => {
     const views = item("purchasing", "purchasing_staff", "Purchase orders").views;
-    for (const id of ["WITH_IT", "SENT_BACK", "READY", "CANCELLED"] as const) {
+    // Task 7: READY's view became To register (/purchases?register=1); the READY tab stays on the page.
+    for (const id of ["WITH_IT", "SENT_BACK", "CANCELLED"] as const) {
       const tab = PURCHASE_TABS.find((t) => t.id === id)!;
       expect(views.find((v) => v.href === tab.href)?.label).toBe(tab.label);
     }

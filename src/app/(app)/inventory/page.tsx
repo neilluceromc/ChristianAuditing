@@ -38,6 +38,7 @@ import { REPAIR_STAGE_LABEL, isRepairStage, isRepairView } from "@/lib/repairs";
 import { RepairChips } from "@/components/inventory/repair-chips";
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
+import { parseTeam, TEAM_LABEL } from "@/lib/notifications";
 
 /** Spec §5: the tab names the list the heading names — "Inventory", or "{Class} assets" for another class. */
 export async function generateMetadata({
@@ -174,6 +175,9 @@ export default async function InventoryPage({
       const label =
         facet === "stage" && isRepairStage(value)
           ? REPAIR_STAGE_LABEL[value]
+          // Task 7 (spec §7): the Sent back views' team
+          : facet === "to" && parseTeam(value)
+          ? `Sent back to ${TEAM_LABEL[parseTeam(value)!]}`
           : facets[facet]?.find((o) => o.value === value)?.label ?? value;
       chips.push({
         label,

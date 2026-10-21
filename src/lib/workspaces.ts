@@ -33,6 +33,8 @@ export type CountKey =
   | "worklist" | "approvals"
   | "itSpare" | "itDefective" | "itMissing" | "leaving"
   | "poSentBack" | "poWithIt" | "poReady"
+  // Task 7 (spec §7): IT's Sent back view (assets Finance sent back to IT) and Purchasing's To register view
+  | "itSentBack" | "poToRegister"
   // Phase 46 spec §4.3
   | "stockLow" | "stocktakesOverdue" | "suppliersRenewing"
   | "finToConfirmIt" | "finToConfirmPurchasing"
@@ -148,6 +150,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Inventory",
           href: "/inventory",
           icon: "inventory",
+          badge: ["itSentBack"],
           views: [
             { label: "All", href: "/inventory" },
             { label: "Spare", href: "/inventory?status=SPARE", count: "itSpare" },
@@ -160,6 +163,14 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
               match: [{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }],
             },
             { label: "Missing", href: "/inventory?status=MISSING", count: "itMissing" },
+            // Task 7 (spec §7): what Finance sent back to IT, until someone on IT fixes it and sends it on (state, never
+            // the bell's read marks). Red, like every Sent back count. IT's and admin's: a viewer can fix nothing.
+            {
+              label: "Sent back",
+              href: "/inventory?reg=needs-correction&to=IT",
+              count: "itSentBack",
+              roles: ["admin", "it_staff"],
+            },
             // The direct Register (spec §4 way 3): the /inventory/register PATH_RULE's roles.
             { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
           ],
@@ -190,6 +201,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         // Migration 38: the purchase orders waiting on IT's check, on their own item (was Approvals › Purchase
         // reviews). The `roles` key is the only thing keeping it out of a viewer's sidebar: every IT-workspace role
         // passes the /purchases path gate.
+        // Task 7 (spec §7): IT's PO queue's Sent back tab is the /purchases page's own (PURCHASE_TABS), one click away.
         {
           label: "Purchase orders",
           href: "/purchases?state=WITH_IT",
@@ -260,12 +272,16 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Purchase orders",
           href: "/purchases",
           icon: "requests",
+          // Task 7 (spec §7): the Sent back count stays on the closed link, red.
+          badge: ["poSentBack"],
           views: [
             { label: "All", href: "/purchases" },
             // Labels match PURCHASE_TABS (purchases-list.ts), asserted in workspaces.test.ts.
             { label: "With IT", href: "/purchases?state=WITH_IT", count: "poWithIt" },
             { label: "Sent back", href: "/purchases?state=SENT_BACK", count: "poSentBack" },
-            { label: "Ready to register", href: "/purchases?state=READY", count: "poReady" },
+            // Task 7: every PO with a line Purchasing can register and units left, a mixed one still with IT included
+            // (server/modules/purchases/to-register.ts); the READY tab alone hid those.
+            { label: "To register", href: "/purchases?register=1", count: "poToRegister" },
             { label: "Cancelled", href: "/purchases?state=CANCELLED" },
             { label: "New purchase order", href: "/purchases/new" },
           ],
@@ -307,6 +323,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           icon: "inventory",
           views: [
             { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
+            // Task 7 (spec §7): Purchasing assets Finance sent back to Purchasing (a PO's own send-back is on the PO).
+            { label: "Sent back", href: "/inventory?cls=PURCHASING&reg=needs-correction&to=PURCHASING" },
             { label: "IT inventory", href: "/inventory?cls=IT" },
             // Spec §4: Purchasing registers from a purchase order (Purchase orders → Register); an admin keeps this.
             { label: "Register assets", href: "/inventory/register", roles: ["admin"] },
@@ -628,6 +646,13 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Phase 41 (spec §2, §9): Settings › Cris is for the two roles that have Cris. `roles` keeps viewer out of the
   // IT workspace it otherwise shares with it_staff; the page's own requireRole says the same.
   { test: /^\/settings\/cris(\/|$)/, workspaces: ["it", "admin"], roles: ["admin", "it_staff"] },
+  // Task 7 (purchase-orders spec §7): the bell's full page, for every team and for admins (any team's); a viewer
+  // has no team, so no notifications and no bell.
+  {
+    test: /^\/notifications(\/|$)/,
+    workspaces: ["it", "purchasing", "finance", "admin"],
+    roles: ["admin", "it_staff", "purchasing_staff", "finance_staff"],
+  },
 ];
 
 export function pathAllowedForRole(pathname: string, role: Role): boolean {
