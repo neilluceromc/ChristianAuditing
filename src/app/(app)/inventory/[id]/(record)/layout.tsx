@@ -44,6 +44,7 @@ export default async function AssetRecordLayout({
     cls: asset.cls, status: asset.status, hasHolder: !!asset.assignee,
     returnedAt: asset.returnedAt, itVerifiedAt: asset.itVerifiedAt,
     financeConfirmedAt: asset.financeConfirmedAt, financeReturnedAt: asset.financeReturnedAt,
+    financeReturnedTo: asset.financeReturnedTo,
     pending: !!pending, held: !!hold,
   };
   const plan = recordActions(state, user.role);

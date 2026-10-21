@@ -1,5 +1,6 @@
 import type { AssetClass, AssetStatus, Role } from "@prisma/client";
 import { canEditAsset, canManageClass, isAssignable, isAwaitingItCheck, isDirectLifecycle, statusTargets } from "./asset-class";
+import { teamOfRole, type Team } from "./intake-rules";
 
 /** Phase 30 (spec §4.1, plan P-4): everything a record header or a list row can offer. */
 export type RecordAction =
@@ -14,6 +15,8 @@ export interface RecordState {
   itVerifiedAt: Date | null;
   financeConfirmedAt: Date | null;
   financeReturnedAt: Date | null;
+  /** Task 6: the team Finance sent it back to; absent or null = a return from before teams, the class's team. */
+  financeReturnedTo?: Team | null;
   /** an open (PENDING / CLAIMED / APPROVED) approval on this asset */
   pending: boolean;
   /** an ACTIVE reservation on this asset */
@@ -35,7 +38,9 @@ function applicable(a: RecordState, role: Role): Record<RecordAction, boolean> {
   return {
     triage: direct && live && a.returnedAt !== null,
     "mark-checked": awaitingIt && canManageClass(role, "IT"),
-    "mark-corrected": canMutate && a.financeReturnedAt !== null,
+    // Task 6 (spec §5): the team it went back to marks it corrected (resubmitAssetToFinance's rule); an admin is every team.
+    "mark-corrected": a.financeReturnedAt !== null
+      && (role === "admin" || teamOfRole(role) === (a.financeReturnedTo ?? (a.cls === "IT" ? "IT" : "PURCHASING"))),
     return: canMutate && live && a.hasHolder,
     assign: canMutate && live && !a.hasHolder && assignable,
     replace: direct && live && a.hasHolder,

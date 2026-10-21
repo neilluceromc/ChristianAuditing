@@ -24,6 +24,8 @@ export interface FinanceAssetDetail {
   approvedBy: string | null; approvedAt: Date | null; notCapitalised: boolean;
   /** When Finance last sent it back (`financeReturnedAt`): the Undo banner's rules read it (finance-undo.ts). */
   returnedAt: Date | null;
+  /** Task 6: the team Finance sent it back to; null when not sent back or sent back before teams were recorded. */
+  returnedTo: "IT" | "PURCHASING" | "FINANCE" | null;
   costC: number | null; result: DepResult | null; note: string | null; policyText: string; custom: boolean;
   lifeMonths: number | null; salvageC: number | null;
   startLabel: string | null; endLabel: string | null; monthsUsed: number | null;
@@ -163,6 +165,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     returnSummary: returnSummary(a), resubmitNote: a.financeResubmitNote,
     approvedBy: a.financeConfirmedBy?.name ?? null, approvedAt: a.financeConfirmedAt, notCapitalised: a.financeNotCapitalised,
     returnedAt: a.financeReturnedAt,
+    returnedTo: a.financeReturnedAt ? a.financeReturnedTo : null,
     costC, result, note, policyText, custom: policy?.basis === "custom",
     lifeMonths: policy?.lifeMonths ?? null, salvageC: policy?.salvage ?? null,
     startLabel: startOk ? monthLabel(start) : null,

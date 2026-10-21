@@ -2,6 +2,7 @@ import { Prisma, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { teamOfRole } from "@/lib/intake-rules";
 import { regWhere, registrationState, REG_LABEL_FINANCE, type RegState } from "@/lib/registration";
+import { groupUndoCheck, manilaTime, UNDO_WINDOW_MS } from "@/lib/finance-undo";
 import { DOCUMENT_KIND_LABEL, REQUEST_DOCUMENT_LABEL } from "@/lib/documents";
 import { fmtDate } from "@/lib/format";
 import { assetDocHref } from "@/lib/finance-asset-page";
@@ -153,7 +154,12 @@ export interface GroupDoc {
 export interface GroupDetail {
   recordId: string;
   refNo: string | null;
-  po: { id: string; state: PoState; fees: number | null; lines: Array<{ id: string; description: string; qty: number; unitPrice: number | null }> } | null;
+  po: {
+    id: string; state: PoState; fees: number | null;
+    lines: Array<{ id: string; description: string; qty: number; unitPrice: number | null }>;
+    /** Every asset from the PO (all its registrations) and how many Finance approved: what the PO's controls read. */
+    registeredCount: number; approvedCount: number;
+  } | null;
   registeredAt: Date;
   registeredBy: string;
   registeredByRole: Role;
@@ -210,6 +216,12 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
   });
   if (!record) return null;
   const po = record.purchaseOrder;
+  const [poAssets, poApproved] = po
+    ? await Promise.all([
+      prisma.asset.count({ where: { purchaseOrderId: po.id } }),
+      prisma.asset.count({ where: { purchaseOrderId: po.id, financeConfirmedAt: { not: null } } }),
+    ])
+    : [0, 0];
 
   const assets: GroupAsset[] = record.assets.map((a) => {
     const reg = registrationState(a);
@@ -255,7 +267,10 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
     recordId: record.id,
     refNo: po?.refNo ?? null,
     po: po
-      ? { id: po.id, state: po.state, fees: num(po.fees), lines: po.lines.map((l) => ({ id: l.id, description: l.description, qty: l.qty, unitPrice: num(l.unitPrice) })) }
+      ? {
+        id: po.id, state: po.state, fees: num(po.fees), registeredCount: poAssets, approvedCount: poApproved,
+        lines: po.lines.map((l) => ({ id: l.id, description: l.description, qty: l.qty, unitPrice: num(l.unitPrice) })),
+      }
       : null,
     registeredAt: record.createdAt,
     registeredBy: record.createdBy.name,
@@ -274,4 +289,44 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
       cost, fees, total: cost + fees,
     },
   };
+}
+
+// ---- the group's Undo banner ---------------------------------------------------------------------------------------
+
+export interface GroupUndoBanner {
+  /** "You approved 3 and held back 1 at 10:42". */
+  label: string;
+  /** When the 15 minutes end (ms since epoch, the server's clock), and what was left when the page was read. */
+  endsAt: number;
+  msLeft: number;
+}
+
+/**
+ * What `userId` can undo on this group now — their latest Approve all, all of it — or null. The same rules the server
+ * action re-checks inside its transaction (groupUndoCheck); the banner is only a hint.
+ */
+export async function groupUndoBanner(recordId: string, userId: string, now: Date): Promise<GroupUndoBanner | null> {
+  const assets = await prisma.asset.findMany({
+    where: { purchaseRecordId: recordId },
+    select: { id: true, tag: true, financeConfirmedAt: true, financeReturnedAt: true },
+  });
+  if (assets.length === 0) return null;
+  const entries = await prisma.auditEntry.findMany({
+    where: {
+      OR: [
+        { entityType: "asset", entityId: { in: assets.map((a) => a.id) } },
+        { entityType: "purchase-record", entityId: recordId },
+      ],
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 500,
+    select: { id: true, actorId: true, actorLabel: true, entityType: true, entityId: true, action: true, diff: true, createdAt: true },
+  });
+  const check = groupUndoCheck(recordId, assets, entries, userId, now);
+  if (!check.ok) return null;
+  const approved = check.items.filter((i) => i.kind === "approve").length;
+  const held = check.items.length - approved;
+  const what = [approved ? `approved ${approved}` : null, held ? `held back ${held}` : null].filter(Boolean).join(" and ");
+  const endsAt = check.at.getTime() + UNDO_WINDOW_MS;
+  return { label: `You ${what} at ${manilaTime(check.at)}`, endsAt, msLeft: endsAt - now.getTime() };
 }

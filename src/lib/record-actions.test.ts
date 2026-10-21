@@ -48,6 +48,14 @@ describe("recordActions — one state-chosen primary per record (spec §4.1, pla
       edit: true,
     });
   });
+  it("Mark corrected is for the team Finance sent it back to (Task 6), a legacy return the class's team", () => {
+    const returned = { ...base, financeConfirmedAt: null, financeReturnedAt: new Date("2026-10-20") };
+    expect(recordPrimary({ ...returned, financeReturnedTo: "PURCHASING" }, "purchasing_staff")).toBe("mark-corrected");
+    expect(recordActions({ ...returned, financeReturnedTo: "PURCHASING" }, "it_staff").primary).not.toBe("mark-corrected");
+    expect(recordPrimary({ ...returned, financeReturnedTo: "IT" }, "it_staff")).toBe("mark-corrected");
+    expect(recordPrimary({ ...returned, financeReturnedTo: null }, "it_staff")).toBe("mark-corrected");
+    expect(recordActions({ ...returned, financeReturnedTo: null }, "purchasing_staff").primary).not.toBe("mark-corrected");
+  });
   it("a Purchasing record on the approval path: Assign (as a request), no Replace or Reserve", () => {
     const car = { ...base, cls: "PURCHASING" as const, status: "STORED" as const, itVerifiedAt: null };
     expect(recordActions(car, "purchasing_staff")).toEqual({ primary: "assign", more: ["change-status", "print-label"], edit: true });

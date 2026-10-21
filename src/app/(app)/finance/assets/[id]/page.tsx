@@ -32,6 +32,7 @@ import { NotesTab } from "@/components/assets/notes-tab";
 import { AttachmentsTab } from "@/components/assets/attachments-tab";
 import { DocPreview } from "@/components/assets/doc-preview";
 import { SettingsButton } from "./settings-button";
+import { FixMoneyButton, type FixMoneyTarget } from "@/components/finance/fix-money-dialog";
 
 const peso = (c: number | null | undefined) => (c === null || c === undefined ? "Not recorded" : fmtMoneyExact(c / 100));
 const text = (v: string | null | undefined) => (v ? v : "Not recorded");
@@ -72,6 +73,14 @@ export default async function FinanceAssetPage({
         assignee: { select: { id: true, department: { select: { name: true } } } },
         // Task 6: who registered its batch decides where its money goes back when it has no PO.
         purchaseRecord: { select: { createdBy: { select: { role: true } } } },
+        // Task 6: what "Fix money details" starts from — the PO's money for an asset from one, else its own
+        cost: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true,
+        purchaseOrder: {
+          select: {
+            id: true, refNo: true, state: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
+            lines: { orderBy: { createdAt: "asc" }, select: { id: true, description: true, unitPrice: true } },
+          },
+        },
       },
     }),
     state.tab === "notes" ? assetNotes(id) : Promise.resolve([]),
@@ -109,6 +118,37 @@ export default async function FinanceAssetPage({
   // approving would start, for the approve toast.
   const banner = undoBanner({ financeConfirmedAt: d.approvedAt, financeReturnedAt: d.returnedAt }, d.audit, user.id, now);
   const reopen = canReopenReview(user.role, d.approvedAt);
+  // Task 6 (spec §5): Finance fixes money with a reason while the asset is with it or approved — on the PO when it has
+  // one (the fix flows to every asset from it), else on the asset. The server re-checks who and when.
+  const po = extra?.purchaseOrder ?? null;
+  const day = (v: Date | null) => (v ? v.toISOString().slice(0, 10) : null);
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const fixTarget: FixMoneyTarget | null = !extra || (d.reg !== "with-finance" && d.reg !== "registered")
+    ? null
+    : po
+      ? po.state === "SENT_BACK" || po.state === "CANCELLED"
+        ? null
+        : {
+            kind: "po",
+            po: {
+              id: po.id, refNo: po.refNo, vendorId: po.vendorId, invoiceRef: po.invoiceRef, receiptRef: po.receiptRef,
+              purchasedAt: day(po.purchasedAt), fees: num(po.fees),
+            },
+            lines: po.lines.map((l, i) => ({ id: l.id, index: i + 1, description: l.description, unitPrice: num(l.unitPrice) })),
+          }
+      : {
+          kind: "asset",
+          asset: {
+            id: d.id, tag: d.tag, cost: num(extra.cost), vendorId: extra.vendorId, invoiceRef: extra.invoiceRef,
+            receiptRef: extra.receiptRef, purchasedAt: day(extra.purchasedAt),
+          },
+        };
+  const vendors = fixTarget
+    ? await prisma.vendor.findMany({
+      where: { OR: [{ archivedAt: null }, { id: (po ? po.vendorId : extra?.vendorId) ?? "" }] },
+      orderBy: { name: "asc" }, select: { id: true, name: true },
+    })
+    : [];
   const approveText = d.reg === "with-finance"
     ? approveDetail({
         costC: d.result ? d.costC : null,
@@ -142,6 +182,7 @@ export default async function FinanceAssetPage({
                 }}
               />
             )}
+            {fixTarget && <FixMoneyButton target={fixTarget} vendors={vendors} />}
             {reopen && <ReopenReview id={d.id} tag={d.tag} />}
             <ButtonLink native href={`/finance/assets/${d.id}/export`}>Export</ButtonLink>
           </>
@@ -160,7 +201,7 @@ export default async function FinanceAssetPage({
             />
           ) : (
             <p className="text-[13px] text-fg-secondary">
-              Sent back to {dept}
+              Sent back to {d.returnedTo === "PURCHASING" ? "Purchasing" : d.returnedTo === "IT" ? "IT" : dept}
               {d.returnSummary.items.length > 0 ? `: ${d.returnSummary.items.join(", ")}` : ""}
               {d.returnSummary.note ? ` — “${d.returnSummary.note}”` : ""}
             </p>

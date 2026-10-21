@@ -74,6 +74,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
       itVerifiedAt: true,
       financeConfirmedAt: true,
       financeReturnedAt: true,
+      financeReturnedTo: true,
       category: { select: { name: true } },
       // The record layout's `pending`: the newest open approval (getVisibleAsset's filter and order).
       approvals: {
@@ -135,6 +136,7 @@ export default async function ScanCardPage({ params }: { params: Promise<{ tag: 
     cls: asset.cls, status: asset.status, hasHolder: !!asset.assignee,
     returnedAt: asset.returnedAt, itVerifiedAt: asset.itVerifiedAt,
     financeConfirmedAt: asset.financeConfirmedAt, financeReturnedAt: asset.financeReturnedAt,
+    financeReturnedTo: asset.financeReturnedTo,
     pending: !!pending, held: !!hold,
   };
   const primary = recordPrimary(state, user.role);
