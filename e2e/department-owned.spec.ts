@@ -545,7 +545,7 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await expect(approve).toBeVisible();
     await page.waitForTimeout(500);
     await approve.click();
-    await expect(page.getByText(`${tag} approved`)).toBeVisible();
+    await expect(page.locator("[data-toast-id]").filter({ hasText: `Approved ${tag}` })).toBeVisible();
     await expect.poll(async () => (await db.asset.findUniqueOrThrow({ where: { id } })).financeConfirmedAt !== null).toBe(true);
   });
 });

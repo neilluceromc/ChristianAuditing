@@ -22,7 +22,7 @@ test("quick sign-in is absent by default", async ({ page }) => {
   await expect(page.getByLabel("Account", { exact: true })).toHaveCount(0);
 });
 
-test("a quick sign-in account signs in and lands on the role's start page", async ({ page }) => {
+test("a quick sign-in account signs in and lands on Home", async ({ page }) => {
   test.skip(!ON, "runs only with QUICK_LOGIN_EMAILS set");
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: /Quick sign-in/ })).toBeVisible();
@@ -30,7 +30,8 @@ test("a quick sign-in account signs in and lands on the role's start page", asyn
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
   await page.getByLabel("Account", { exact: true }).selectOption({ label: "IT staff" });
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.waitForURL((url) => url.pathname.startsWith("/inventory"));
+  // Finance follow-up (spec §7.1): every sign-in, quick sign-in included, lands on Home.
+  await page.waitForURL((url) => url.pathname === "/");
   await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
 });
 

@@ -233,14 +233,11 @@ test.describe("inventory list", () => {
     await page.goto("/inventory");
     await page.getByLabel("Search assets").fill("BR-LT-0148");
     await page.getByLabel("Search assets").press("Enter");
-    // Enter is a client-side router.replace to /inventory?q=…&go=1 (spec §7.2: only Enter sends go=1); the server component
-    // there resolves the exact tag and redirect()s on to /inventory/<id>. That is
-    // TWO server renders behind one keypress, and `inventory/loading.tsx` covers
-    // both — so a slow render shows an all-Skeleton `main` with no accessible
-    // content, which is what the 5s default caught against a cold dev server
-    // (measured: 12.6s for this test alone with `.next` deleted). Headroom, not a
-    // weaker assertion: landing on the record with this exact heading is still
-    // the whole contract. 20s matches the hydration helper above.
+    // Enter (spec §7.2: only Enter opens an exact tag) asks the server for the tag (`findExactTag`) and, on a hit,
+    // pushes /inventory/<id> — a server lookup plus a cold render of the record behind one keypress, which
+    // `inventory/[id]/(record)/loading.tsx` covers with an all-Skeleton `main`. `?q=<tag>&go=1` is no longer what the box sends:
+    // it stays only for direct links and the e2e shortcuts. Headroom, not a weaker assertion: landing on the record
+    // with this exact heading is still the whole contract. 20s matches the hydration helper above.
     await expect(page.getByRole("heading", { name: "BR-LT-0148" })).toBeVisible({ timeout: 20_000 });
   });
 

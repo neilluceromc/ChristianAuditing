@@ -102,7 +102,7 @@ test.describe("login page", () => {
     expect(page.url()).toBe(url);
   });
 
-  test("3. a wrong password errors on step 2 with the email kept; the right one lands on the role's page", async ({ page }) => {
+  test("3. a wrong password errors on step 2 with the email kept; the right one lands on Home", async ({ page }) => {
     await toLoginEmail(page);
     await workEmail(page).fill(IT);
     await cont(page).click();
@@ -116,7 +116,8 @@ test.describe("login page", () => {
     await password(page).fill(SEED_PASSWORD);
     await page.getByRole("button", { name: "Log in", exact: true }).click();
     // Headroom: the credentials POST, the session write and a cold render of the landing page.
-    await expect(page).toHaveURL(/\/inventory/, { timeout: 30_000 });
+    // Finance follow-up (spec §7.1): every sign-in lands on Home.
+    await expect(page).toHaveURL((u) => u.pathname === "/", { timeout: 30_000 });
   });
 
   test("4. Sign up: a duplicate email returns to step 1 with fields kept; a new one signs in", async ({ page }) => {
@@ -143,9 +144,9 @@ test.describe("login page", () => {
     await page.getByRole("button", { name: "Create account", exact: true }).click();
 
     await expect(page.getByRole("heading", { name: "You're in, Casey" })).toBeVisible({ timeout: 30_000 });
-    // The session cookie is already set, so the link lands signed in on the viewer's page.
+    // The session cookie is already set, so the link lands signed in on Home (Finance follow-up, spec §7.1).
     await page.getByRole("link", { name: "Go to Cris" }).click();
-    await expect(page).toHaveURL(/\/inventory/, { timeout: 30_000 });
+    await expect(page).toHaveURL((u) => u.pathname === "/", { timeout: 30_000 });
   });
 
   test("5. Back from Log in 1 returns to Welcome and the day log is visible again", async ({ page }) => {

@@ -302,7 +302,7 @@ test.describe("Finance review — confirm", () => {
     await expect(approve).toBeVisible();
     await page.waitForTimeout(500);
     await approve.click();
-    await expect(page.getByText(`${tag1} approved as not capitalised`)).toBeVisible();
+    await expect(page.locator("[data-toast-id]").filter({ hasText: `Approved ${tag1} as not capitalised` })).toBeVisible();
 
     // The next record waiting on Finance opens straight away: the URL lands on /finance/assets/{next}
     // (seeded IT assets are all still waiting, so a next one always exists).
@@ -388,7 +388,7 @@ test.describe("Finance review — send back and correct", () => {
     await expect(dialog.getByLabel("Cost", { exact: true })).toBeChecked();
     await dialog.getByLabel("Note for IT").fill(reason);
     await dialog.getByRole("button", { name: "Send back", exact: true }).click();
-    await expect(page.getByText(`${assetReturn.tag} sent back to IT`)).toBeVisible();
+    await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${assetReturn.tag} back to IT` })).toBeVisible();
 
     // Finance's own page says what went back to whom.
     await expect(page.getByText(/Sent back to IT: Cost/)).toContainText(reason);
@@ -504,7 +504,7 @@ test.describe("Finance review — send back and correct", () => {
     await expect(approve).toBeVisible();
     await page.waitForTimeout(500);
     await approve.click();
-    await expect(page.getByText(`${assetReturn.tag} approved as not capitalised`)).toBeVisible();
+    await expect(page.locator("[data-toast-id]").filter({ hasText: `Approved ${assetReturn.tag} as not capitalised` })).toBeVisible();
     await expect.poll(async () => (await db.asset.findUniqueOrThrow({ where: { id: assetReturn.id } })).financeConfirmedAt !== null).toBe(true);
     updated = await db.asset.findUniqueOrThrow({ where: { id: assetReturn.id } });
     expect(updated.financeConfirmedAt).not.toBeNull();

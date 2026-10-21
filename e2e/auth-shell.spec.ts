@@ -87,9 +87,10 @@ test.describe("auth", () => {
     await expect(page.getByText("it@thebackroomop.com", { exact: true })).toBeVisible();
   });
 
-  test("roles land on their brief-mandated defaults", async ({ page }) => {
+  // Finance follow-up (spec §7.1): every sign-in lands on Home, whatever the role (a `next` link still wins — above).
+  test("every role lands on Home after signing in", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
-    await expect(page).toHaveURL(/\/purchases$/);
+    await expect(page).toHaveURL((u) => u.pathname === "/");
   });
 
   test("bootstrap 404s once users exist", async ({ page }) => {
@@ -100,7 +101,7 @@ test.describe("auth", () => {
   test("signed-in users are bounced off /login", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     await page.goto("/login");
-    await expect(page).toHaveURL(/\/inventory/);
+    await expect(page).toHaveURL((u) => u.pathname === "/");
   });
 });
 

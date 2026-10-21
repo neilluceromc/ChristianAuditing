@@ -157,7 +157,8 @@ test.describe.serial("users & roles", () => {
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD);
     await page.getByRole("button", { name: "Log in", exact: true }).click();
-    await expect(page).toHaveURL(/\/inventory/, { timeout: 20_000 });
+    // Finance follow-up (spec §7.1): every sign-in lands on Home.
+    await expect(page).toHaveURL((u) => u.pathname === "/", { timeout: 20_000 });
   });
 });
 

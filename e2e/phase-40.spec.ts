@@ -238,7 +238,7 @@ test.describe("phase 40 — readable asset history", () => {
       await dialog.getByLabel("Sales invoice").check();
       await dialog.getByLabel("Note for IT").fill("Invoice is for another PO");
       await dialog.getByRole("button", { name: "Send back", exact: true }).click();
-      await expect(page.getByText(`${tag} sent back to IT`)).toBeVisible();
+      await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${tag} back to IT` })).toBeVisible();
 
       // An edit records ids (categoryId, assigneeId) — written as updateAsset does — plus one id that no longer exists.
       const [fromCat, toCat] = await db.assetCategory.findMany({ where: { cls: "IT" }, orderBy: { name: "asc" }, take: 2 });
@@ -562,9 +562,13 @@ test.describe("phase 40 — axe on the new overlays, and toast keyboard hand-off
     await login(page, ADMIN);
     const menu = page.getByRole("button", { name: "Open menu", exact: true });
     await waitForHydration(menu);
-    await menu.click();
     const drawer = page.getByRole("dialog", { name: "IT" });
-    await expect(drawer).toBeVisible();
+    // Sign-in now lands on Home (Finance follow-up, spec §7.1), whose post-sign-in refresh is heavier than the old
+    // landing page's: a click that lands mid-refresh can be lost, so press again until the drawer is open.
+    await expect(async () => {
+      if (!(await drawer.isVisible())) await menu.click();
+      await expect(drawer).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
     await expect(drawer.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
     await expectDialogClean(page, "the phone drawer at 375 px");
   });
