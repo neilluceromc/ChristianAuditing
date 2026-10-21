@@ -62,7 +62,7 @@ export const BlobStage = forwardRef<HTMLDivElement, BlobStageProps>(function Blo
   return (
     <div ref={ref} className="lw-left" style={style} aria-hidden="true">
       <div className={cn("lw-stage", `lw-ph-${focus ? "focus" : scene.id}`)} style={vars}>
-        <svg className="lw-back" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet">
+        <svg className="lw-scene-back" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet">
           <defs>
             <filter id="lw-goo" x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="9" />
@@ -73,23 +73,20 @@ export const BlobStage = forwardRef<HTMLDivElement, BlobStageProps>(function Blo
               <feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" />
               <feGaussianBlur stdDeviation="10" />
             </filter>
-            {/* The blob's shape, drawn twice through <use>: as the wall (so no full-size rect can ever show as a square
-                when a browser paints it outside the mask) and as the mask that keeps the room inside the blob. */}
-            <g id="lw-blob-shape" filter="url(#lw-goo)">
-              {BLOB_SHAPES[0]!.map(([x, y, r], i) => (
-                <circle
-                  key={i}
-                  ref={(el) => {
-                    drops.current[i] = el;
-                  }}
-                  cx={x}
-                  cy={y}
-                  r={r}
-                />
-              ))}
-            </g>
             <mask id="lw-blob" maskUnits="userSpaceOnUse" x="0" y="0" width="520" height="380">
-              <use href="#lw-blob-shape" fill="#FFFFFF" />
+              <g filter="url(#lw-goo)" fill="#FFFFFF">
+                {BLOB_SHAPES[0]!.map(([x, y, r], i) => (
+                  <circle
+                    key={i}
+                    ref={(el) => {
+                      drops.current[i] = el;
+                    }}
+                    cx={x}
+                    cy={y}
+                    r={r}
+                  />
+                ))}
+              </g>
             </mask>
             <clipPath id="lw-win">
               <rect x="76" y="146" width="62" height="52" />
@@ -108,8 +105,8 @@ export const BlobStage = forwardRef<HTMLDivElement, BlobStageProps>(function Blo
               />
             ))}
           </g>
-          <use href="#lw-blob-shape" className="lw-f-wall lw-blobwall" />
           <g mask="url(#lw-blob)" className="lw-blobfill">
+            <rect className="lw-f-wall" x="-10" y="-10" width="540" height="410" />
             <g className="lw-room">
               <g className="lw-cam">
                 <g dangerouslySetInnerHTML={{ __html: ROOM_SVG }} />
