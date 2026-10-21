@@ -199,7 +199,10 @@ export function GroupReview({
             {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
             <Button variant="primary" loading={pending} disabled={blocked !== null || issues.length > 0} onClick={approve}>{label}</Button>
           </div>
-          {(blocked || error) && <Banner className="w-full" tone="fault" title={blocked ?? error} />}
+          {/* why it can't be approved is part of the page on every load (a status); an action's error interrupts */}
+          {(blocked || error) && (
+            <Banner className="w-full" tone="fault" live={blocked ? "status" : "alert"} title={blocked ?? error} />
+          )}
         </div>
       )}
 
