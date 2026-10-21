@@ -372,9 +372,14 @@ export function LoginExperience({ initialStep, autoFocus, card }: LoginExperienc
       enterTimers.current.forEach(clearTimeout);
       enterTimers.current = [];
       if (!any) {
+        // At once, not on the next render: a refusal's error cue follows straight after and must reach Cris.
+        live.current.entering = false;
         setEntering(null);
         return;
       }
+      // In flight: Cris thinks; after a moment the sequence takes over.
+      setLine(null);
+      setMood("think");
       const email = sources.current.card.pending ? sources.current.card.email : sources.current.quick.email;
       enterTimers.current = [setTimeout(() => startEntering(email), ENTER_DELAY_MS)];
     },

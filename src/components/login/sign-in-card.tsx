@@ -118,6 +118,13 @@ export function SignInCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
+  // The signed-in sequence follows the request exactly: on while it is in flight, off when it ends (an error). Declared
+  // before the error effect below, so the sequence has ended by the time the error reaches Cris.
+  const signingIn = loginPending || msPending;
+  useEffect(() => {
+    onSignIn?.({ pending: signingIn, email: latest.current.email.trim() });
+  }, [signingIn, onSignIn]);
+
   // A failed sign-in stays on the form with the message under Password.
   useEffect(() => {
     if (!loginState.error) return;
@@ -147,12 +154,6 @@ export function SignInCard({
     latest.current.onCue?.({ kind: "error", message: signupState.error });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signupState]);
-
-  // The signed-in sequence follows the request exactly: on while it is in flight, off when it ends (an error).
-  const signingIn = loginPending || msPending;
-  useEffect(() => {
-    onSignIn?.({ pending: signingIn, email: latest.current.email.trim() });
-  }, [signingIn, onSignIn]);
 
   useEffect(() => {
     if (signupPending) latest.current.onCue?.({ kind: "busy" });
