@@ -50,8 +50,9 @@ describe("the purchase-order wording sweep", () => {
   });
 
   it("the login scene draws the same PO number its caption names", () => {
-    const world = readFileSync(path.join(ROOT, "src/components/login/world.ts"), "utf8");
-    expect(world).not.toMatch(/PR-\d{4}/);
+    const room = readFileSync(path.join(ROOT, "src/components/login/room-svg.ts"), "utf8");
+    expect(room).not.toMatch(/PR-\d{4}|PURCHASE REQUEST/);
+    expect(room).toContain("PO-1042");
   });
 
   it("Purchasing's sidebar says Purchase orders and New purchase order", () => {

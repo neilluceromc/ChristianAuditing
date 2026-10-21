@@ -1,188 +1,157 @@
-// The six scenes of Cris's day in the room (spec §4.3, §4.4). Pure data and maths; the room
-// component drives the timing and the camera from these.
+// The six scenes of Cris's day on the login page (spec §4.3, §4.4; Task 10's blob stage). Pure data and maths; the
+// day loop drives the timing from these. Positions are stage units: the stage is 520 × 380 and Cris's home spot is
+// (215, 242), the centre of her 200-unit orb.
 import type { CrisMood } from "@/lib/cris-mood";
 
 export type SceneId = "scan" | "missing" | "stamp" | "short" | "dep" | "off";
 
 export type Scene = {
   id: SceneId;
-  /** Minutes after midnight, for the day log. */
-  minute: number;
   area: string;
   task: string;
   line: string;
   /** Moods to play, with the ms after arrival each one starts. */
   moods: [CrisMood, number][];
-  /** ms after arrival when the bubble starts typing. */
+  /** ms after arrival when her line shows. */
   sayAt: number;
-  /** Cris's position in world units. */
-  cx: number;
-  cy: number;
-  /** Camera focus x in world units. */
-  focus: number;
-  /** Bubble anchor in world units. */
-  anchor: [number, number];
-  align: "left" | "right";
-  /** Sky gradient, top and bottom. */
-  sky: [string, string];
+  /** Her station: an offset from her home spot, in stage units. */
+  station: [number, number];
+  /** What flies from the desk to her side while she works there. */
+  prop: "laptop" | "paper" | null;
 };
 
 export const SCENES: readonly Scene[] = [
   {
     id: "scan",
-    minute: 520,
     area: "Stockroom",
     task: "Checking in a returned laptop",
     line: "BR-LT-0230 is checked in. Back on shelf A2.",
     moods: [["search", 0], ["talk", 2500]],
     sayAt: 2500,
-    cx: 560,
-    cy: 340,
-    focus: 700,
-    anchor: [604, 226],
-    align: "right",
-    sky: ["#a9d6f7", "#eef8ff"],
+    station: [60, -6],
+    prop: "laptop",
   },
   {
     id: "missing",
-    minute: 595,
     area: "Stockroom",
     task: "Looking for a laptop that isn't on its shelf",
     line: "Shelf B3 says BR-LT-0027. Shelf B3 disagrees.",
     moods: [["look", 0]],
     sayAt: 2200,
-    cx: 1000,
-    cy: 340,
-    focus: 1110,
-    anchor: [968, 226],
-    align: "left",
-    sky: ["#97cdf4", "#e3f3ff"],
+    station: [-45, -12],
+    prop: null,
   },
   {
     id: "stamp",
-    minute: 680,
     area: "Purchasing",
     task: "Approving a purchase order",
     line: "PO-1042 approved. Five headsets for the new hires.",
     moods: [["think", 0], ["talk", 2600]],
     sayAt: 2600,
-    cx: 1650,
-    cy: 350,
-    focus: 1830,
-    anchor: [1620, 238],
-    align: "left",
-    sky: ["#86c4f2", "#d6eeff"],
+    station: [0, 0],
+    prop: "paper",
   },
   {
     id: "short",
-    minute: 825,
     area: "Receiving",
     task: "Receiving a delivery that came up short",
     line: "Ordered 10. Received 9. Again.",
     moods: [["search", 0], ["cross", 2400]],
     sayAt: 2400,
-    cx: 2100,
-    cy: 350,
-    focus: 2300,
-    anchor: [2068, 238],
-    align: "left",
-    sky: ["#86c0ee", "#dcefff"],
+    station: [125, 6],
+    prop: null,
   },
   {
     id: "dep",
-    minute: 930,
     area: "Finance",
     task: "Running this month's depreciation",
     line: "Month 7 of 36. Book value ₱58,000.",
     moods: [["think", 0], ["talk", 2600]],
     sayAt: 2600,
-    cx: 2850,
-    cy: 350,
-    focus: 3050,
-    anchor: [2818, 238],
-    align: "left",
-    sky: ["#f2c58f", "#fdebd0"],
+    station: [70, -26],
+    prop: "paper",
   },
   {
     id: "off",
-    minute: 1025,
     area: "Offboarding",
     task: "Collecting a leaver's equipment",
     line: "Laptop, headset, badge. All 3 back.",
     moods: [["search", 0], ["idle", 2500]],
     sayAt: 2500,
-    cx: 3370,
-    cy: 340,
-    focus: 3560,
-    anchor: [3404, 226],
-    align: "right",
-    sky: ["#f2a372", "#ffd7a8"],
+    station: [-30, 6],
+    prop: "laptop",
   },
 ];
 
 /** How long Cris stays at a station before the next scene. */
 export const DWELL_MS = 6200;
 
-/** Travel time between two stations' x: 0 when there is no move, else clamped to 1.3 s to 2.4 s. */
-export function travelSeconds(fromCx: number | null, toCx: number): number {
-  if (fromCx === null || fromCx === toCx) return 0;
-  return Math.min(2.4, Math.max(1.3, Math.abs(toCx - fromCx) / 1100));
+/** Travel time between two stations: 0 when there is no move, else the distance at 70 units/s, from 1.3 s to 2.4 s. */
+export function travelSeconds(from: [number, number] | null, to: [number, number]): number {
+  if (from === null) return 0;
+  const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  if (dist < 1) return 0;
+  return Math.min(2.4, Math.max(1.3, dist / 70));
 }
 
-/** A minute of the day as "HH:MM", wrapping past midnight. */
-export function fmtClock(minute: number): string {
-  const m = ((Math.round(minute) % 1440) + 1440) % 1440;
-  return `${String((m / 60) | 0).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+/** The mood a scene plays `ms` after Cris arrives. */
+export function moodAt(scene: Scene, ms: number): CrisMood {
+  let mood = scene.moods[0]![0];
+  for (const [m, at] of scene.moods) if (ms >= at) mood = m;
+  return mood;
 }
 
-/** How far a minute sits along the day log's 08:00 to 18:00 bar, 0 to 100. */
-export function dayPct(minute: number): number {
-  return ((minute - 480) / 600) * 100;
+/** Cris's home spot in the stage. */
+export const HOME: [number, number] = [215, 242];
+
+/**
+ * Where Cris stands beside the card in focus mode, as an offset from home: toward the card when it sits beside the
+ * stage, less when the stage is narrower, and a little right of centre on a phone (room for her bubble).
+ */
+export function focusOffset(viewportWidth: number): number {
+  if (viewportWidth < 720) return 95;
+  return viewportWidth < 960 ? 45 : 120;
+}
+
+/** Which side of Cris a prop lands on: toward the middle of the stage. */
+export function propSide(station: [number, number]): 1 | -1 {
+  return HOME[0] + station[0] > 260 ? -1 : 1;
 }
 
 /**
- * The world's left offset so the camera centres `focus` in the visible part of the room
- * (`visibleRight` is where the visible part ends), clamped so the world never shows past
- * either end. The world is 3960 units wide.
+ * The liquid blob (stage units): nine drops merged by a goo filter. Three shapes it melts between while Cris works,
+ * and a small round blob around her in focus mode. Each drop is [cx, cy, r].
  */
-export function cameraX(focus: number, scale: number, visibleRight: number, viewportWidth: number): number {
-  const x = visibleRight / 2 - focus * scale;
-  return Math.min(0, Math.max(viewportWidth - 3960 * scale, x));
-}
+export const BLOB_SHAPES: readonly (readonly [number, number, number])[][] = [
+  [[165, 215, 112], [300, 165, 75], [335, 265, 85], [252, 236, 92], [240, 73, 17], [424, 178, 28], [234, 341, 12], [90, 104, 8], [470, 250, 9]],
+  [[150, 230, 100], [285, 150, 82], [370, 230, 88], [240, 250, 100], [110, 105, 14], [470, 140, 20], [330, 345, 16], [60, 300, 10], [452, 320, 12]],
+  [[190, 200, 118], [320, 180, 80], [300, 280, 80], [230, 270, 90], [330, 62, 20], [440, 250, 24], [140, 340, 14], [70, 170, 12], [420, 95, 10]],
+];
+export const BLOB_FOCUS: readonly (readonly [number, number, number])[] = [
+  [215, 238, 104], [262, 200, 58], [172, 282, 56], [256, 284, 62], [330, 132, 13], [108, 168, 11], [300, 352, 9], [112, 300, 8], [354, 262, 10],
+];
+const HOLD = 3;
+const MORPH = 2.4;
 
 /**
- * The day-log clock during a travel: the minute `k` (0 to 1) of the way from `from` to `to`, eased in and out.
- * Always counts forward, so the loop from 17:05 back to 08:40 runs through the night. Not wrapped: format
- * with `fmtClock`.
+ * Drop `i` of the blob at time `t` (seconds): holding a shape for 3 s, then melting into the next over 2.4 s, with
+ * a small wobble; `focus` (0 to 1) blends it into the focus blob, moved `dx` units toward the card.
  */
-export function clockAt(from: number, to: number, k: number): number {
-  const t = Math.min(1, Math.max(0, k));
-  const target = to < from ? to + 1440 : to;
-  const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-  return from + (target - from) * e;
-}
-
-/**
- * Where the room's speech bubble goes, in scene pixels (spec §4.5): at the scene's anchor, kept 12 px inside
- * the visible room (`right` is where it ends, so never under the card) and at least 70 px from the top. `left`
- * is the bubble's CSS left (its right edge for a right-aligned bubble, which is drawn translated by -100 %);
- * `tail` is the tail's offset from the bubble's left edge, still pointing at Cris after a clamp.
- */
-export function roomBubble(p: {
-  anchor: [number, number];
-  align: "left" | "right";
-  tx: number;
-  scale: number;
-  right: number;
-  width: number;
-}): { left: number; top: number; tail: number } {
-  const ax = p.tx + p.anchor[0] * p.scale;
-  const leftEdge = p.align === "right" ? ax - p.width : ax;
-  const fix = Math.min(Math.max(leftEdge, 12), p.right - p.width - 12) - leftEdge;
-  const tail = p.align === "right" ? p.width - 40 - fix : 26 - fix;
+export function blobDrop(i: number, t: number, focus: number, dx: number): { x: number; y: number; r: number } {
+  const seg = HOLD + MORPH;
+  const n = Math.max(0, Math.floor(t / seg));
+  const f = t - n * seg;
+  const m = f < HOLD ? 0 : (f - HOLD) / MORPH;
+  const e = m * m * m * (m * (m * 6 - 15) + 10);
+  const a = BLOB_SHAPES[n % 3]![i]!;
+  const b = BLOB_SHAPES[(n + 1) % 3]![i]!;
+  const c = BLOB_FOCUS[i]!;
+  const w = (Math.PI * 2 * t) / (4 + i * 0.7) + i;
+  const k = focus * focus * (3 - 2 * focus);
+  const mix = (p: number, q: number, r: number) => (p + (q - p) * e) * (1 - k) + r * k;
   return {
-    left: ax + fix,
-    top: Math.max(p.anchor[1] * p.scale, 70),
-    tail: Math.min(Math.max(tail, 14), p.width - 26),
+    x: mix(a[0], b[0], c[0] + dx) + 4 * Math.sin(w),
+    y: mix(a[1], b[1], c[1]) + 4 * Math.cos(w * 0.8 + 1),
+    r: mix(a[2], b[2], c[2]) * (1 + 0.04 * Math.sin(w * 1.3 + 0.5)),
   };
 }
