@@ -305,6 +305,46 @@ describe("registerFromPurchaseOrder", () => {
     expect(t("notification")[0]).toMatchObject({ team: "FINANCE", title: "PO-0214 · 1 office chairs registered, ready to check" });
   });
 
+  it("a mixed WITH_IT PO stays with IT when Purchasing registers its chairs, and is READY once IT registers the laptops", async () => {
+    seedPo({ state: "WITH_IT" });
+    seedLine("ln1", { qty: 2 });
+    seedLine("ln2", { description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500 });
+
+    h.user = PAT;
+    const chairs = await registerFromPurchaseOrder({ poId: "po1", lines: [{ lineId: "ln2", model: "Ergo mesh", units: [{ tag: "BR-CH-0001" }] }] });
+    expect(chairs.ok).toBe(true);
+    expect(po().state).toBe("WITH_IT");
+    expect(audits("po.register")).toHaveLength(1);
+    expect(audits("po.register")[0].diff).not.toHaveProperty("state");
+
+    // Even with IT units still to come, one IT unit in the submit is IT's check done.
+    h.user = IVAN;
+    const it = await registerFromPurchaseOrder({ poId: "po1", lines: [laptops(["BR-LT-0201"])] });
+    expect(it.ok).toBe(true);
+    expect(po().state).toBe("READY");
+    expect(audits("po.register")[1].diff).toMatchObject({ state: { from: "WITH_IT", to: "READY" } });
+  });
+
+  it("a legacy WITH_IT PO is READY once its last unclassified units are registered as non-IT", async () => {
+    seedPo({ state: "WITH_IT", invoiceRef: null });
+    seedLine("ln1", { categoryId: null, description: "desks", qty: 2, unitPrice: 7000 });
+    seedLine("ln2", { categoryId: null, description: "cabinets", qty: 1, unitPrice: 9000 });
+    h.user = PAT;
+    const desk = (tags: string[]) => ({ lineId: "ln1", categoryId: "cat-ch", model: "Oak desk", units: tags.map((tag) => ({ tag })) });
+
+    // One unclassified unit is still open on each line: it could still be IT gear, so the PO stays with IT.
+    expect((await registerFromPurchaseOrder({ poId: "po1", lines: [desk(["BR-CH-0001"])] })).ok).toBe(true);
+    expect(po().state).toBe("WITH_IT");
+
+    const last = await registerFromPurchaseOrder({
+      poId: "po1",
+      lines: [desk(["BR-CH-0002"]), { lineId: "ln2", categoryId: "cat-ch", model: "Steel cabinet", units: [{ tag: "BR-CH-0003" }] }],
+    });
+    expect(last.ok).toBe(true);
+    expect(po().state).toBe("READY");
+    expect(audits("po.register")[1].diff).toMatchObject({ state: { from: "WITH_IT", to: "READY" } });
+  });
+
   it("only an admin may mix classes in one submit", async () => {
     seedPo({ state: "READY" });
     seedLine("ln1");

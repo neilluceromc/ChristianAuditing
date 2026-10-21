@@ -116,18 +116,22 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
         return;
       }
 
-      const lines = await tx.purchaseOrderLine.findMany({
-        where: { id: { in: lineIds }, orderId: po.id },
+      // Every line of the PO, not only the submitted ones: whether the PO leaves IT's queue depends on all of them.
+      const allLines = await tx.purchaseOrderLine.findMany({
+        where: { orderId: po.id },
         select: { id: true, description: true, categoryId: true, qty: true, unitPrice: true, closedShort: true },
       });
-      if (lines.length !== lineIds.length) {
+      const lineById = new Map(allLines.map((l) => [l.id, l]));
+      if (lineIds.some((id) => !lineById.has(id))) {
         failure = conflict("This purchase order changed elsewhere — reload and try again.");
         return;
       }
-      const lineById = new Map(lines.map((l) => [l.id, l]));
 
       // ---- category and class per line: the line's own, or (an old unit) the one picked here ----
-      const catIds = [...new Set(d.lines.flatMap((l) => [lineById.get(l.lineId)!.categoryId, l.categoryId]).filter((x): x is string => !!x))];
+      const catIds = [...new Set([
+        ...allLines.map((l) => l.categoryId),
+        ...d.lines.map((l) => l.categoryId),
+      ].filter((x): x is string => !!x))];
       const cats = await tx.assetCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true, cls: true } });
       const catById = new Map(cats.map((c) => [c.id, c]));
       const plan: Array<{ categoryId: string; cls: AssetClass } | null> = d.lines.map((l, i) => {
@@ -168,7 +172,7 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
 
       // ---- what is left on each line, re-read under the lock ----
       const done = await tx.asset.groupBy({
-        by: ["purchaseOrderLineId"], where: { purchaseOrderLineId: { in: lineIds } }, _count: { _all: true },
+        by: ["purchaseOrderLineId"], where: { purchaseOrderLineId: { in: allLines.map((l) => l.id) } }, _count: { _all: true },
       });
       const registeredOn = new Map(done.map((g) => [g.purchaseOrderLineId, g._count._all]));
       for (const [i, l] of d.lines.entries()) {
@@ -195,9 +199,26 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
 
       if (Object.keys(errors).length) { failure = validationError(errors); return; }
 
+      /*
+       * Controller ruling (Task 5 fix round 1): a WITH_IT PO leaves IT's queue for READY only when IT's part is done —
+       * (a) this submit registers at least one IT unit (IT registering is IT's check), or (b) after it, no line whose
+       * class is IT or still unknown (an old unit with no category) has units left. Purchasing registering the chairs
+       * of a mixed PO first leaves it WITH_IT, so IT still sees its laptops to check.
+       */
+      function leavesIt(): boolean {
+        if (classes.has("IT")) return true;
+        const adding = new Map(d.lines.map((l) => [l.lineId, l.units.length]));
+        return allLines.every((line) => {
+          const cls = line.categoryId ? catById.get(line.categoryId)?.cls ?? null : null;
+          if (cls === "PURCHASING") return true;
+          const registered = (registeredOn.get(line.id) ?? 0) + (adding.get(line.id) ?? 0);
+          return lineProgress({ qty: line.qty, registered, closedShort: line.closedShort }).remaining === 0;
+        });
+      }
+
       // ---- writes (every refusal is above this line) ----
       const now = new Date();
-      const next: PoState = state === "WITH_IT" ? "READY" : state;
+      const next: PoState = state === "WITH_IT" && leavesIt() ? "READY" : state;
       const hit = await tx.purchaseOrder.updateMany({ where: { id: po.id, state }, data: { state: next, updatedAt: now } });
       if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
 
