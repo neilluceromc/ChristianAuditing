@@ -4,7 +4,7 @@ import { depreciate, monthLabel, type MonthIndex, type Policy } from "./deprecia
 import { fmtMoneyExact } from "./format";
 import { cleanReason } from "./reason";
 import {
-  REOPEN_REASON_MAX, REOPEN_REASON_MESSAGE, REOPEN_REASON_MIN, UNDO_WHAT, UNDO_WINDOW_MS, undoCheck, type UndoAsset, type UndoEntry, type UndoKind,
+  REOPEN_REASON_MAX, REOPEN_REASON_MESSAGE, REOPEN_REASON_MIN, UNDO_WHAT, UNDO_WINDOW_MS, undoState, type UndoAsset, type UndoEntry, type UndoKind,
 } from "./finance-undo";
 
 /*
@@ -161,10 +161,10 @@ export interface UndoBannerState {
 }
 
 export function undoBanner(asset: UndoAsset, entries: readonly UndoEntry[], userId: string, now: Date): UndoBannerState | null {
-  const r = undoCheck(asset, entries, userId, now);
-  if (!r.ok) return null;
-  const endsAt = r.state.at.getTime() + UNDO_WINDOW_MS;
-  return { kind: r.state.kind, label: r.state.label, minutesLeft: r.state.minutesLeft, endsAt, msLeft: endsAt - now.getTime() };
+  const s = undoState(asset, entries, userId, now); // `undoCheck`'s state when it allows the undo, else null
+  if (!s) return null;
+  const endsAt = s.at.getTime() + UNDO_WINDOW_MS;
+  return { kind: s.kind, label: s.label, minutesLeft: s.minutesLeft, endsAt, msLeft: endsAt - now.getTime() };
 }
 
 /** The banner's countdown on the client: whole minutes rounded up, 0 once the window has ended. */
