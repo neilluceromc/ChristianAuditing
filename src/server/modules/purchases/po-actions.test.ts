@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   /** Row locks and reads, in order. */
   ops: [] as string[],
   revalidated: [] as string[],
+  webhooks: [] as Array<{ event: string; data: Record<string, unknown> }>,
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
@@ -24,6 +25,9 @@ vi.mock("@/server/auth/guards", () => ({
   actionRole: async (...roles: string[]) => (h.user && roles.includes(h.user.role) ? h.user : null),
 }));
 vi.mock("@/server/rate-limit", () => ({ checkRate: async () => ({ allowed: true, retryAfterSec: 0 }) }));
+vi.mock("@/server/webhooks/emit", () => ({
+  emitWebhook: async (_tx: unknown, event: string, data: Record<string, unknown>) => { h.webhooks.push({ event, data }); },
+}));
 vi.mock("@/server/db/client", () => {
   type R = Record<string, unknown>;
   const same = (a: unknown, b: unknown) =>
@@ -161,6 +165,7 @@ beforeEach(() => {
   h.seq = 214;
   h.ops = [];
   h.revalidated = [];
+  h.webhooks = [];
   h.tables = {
     user: [PAT, IVAN, ANA, ADA].map((u) => ({ ...u })),
     vendor: [{ id: "v1", name: "Octagon", archivedAt: null }, { id: "v2", name: "PC Express", archivedAt: null }],
@@ -307,6 +312,16 @@ describe("sendBackPurchaseOrder", () => {
       expect(asset(id).financeReturnedAt).toBeInstanceOf(Date);
     }
     expect(t("notification")).toEqual([expect.objectContaining({ team: "PURCHASING", kind: "SENT_BACK" })]);
+    // Task 6: each returned asset's own history shows the return, to Purchasing, as the PO's
+    const returns = audits("finance.return");
+    expect(returns.map((a) => a.entityId)).toEqual(["a1", "a2"]);
+    for (const a of returns) {
+      expect(a).toMatchObject({ entityType: "asset", actorId: ANA.id, source: "web", reason: "price is per box" });
+      expect(a.diff).toMatchObject({
+        financeReturn: { from: null, to: { fields: ["Cost", "Sales invoice"], note: "price is per box", team: "PURCHASING" } },
+        po: { from: null, to: "PO-0214" },
+      });
+    }
   });
 
   it("Finance can't send back a PO with nothing registered", async () => {
@@ -444,6 +459,7 @@ describe("fix round 1", () => {
     expect((await sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "wrong SI number" })).ok).toBe(true);
     expect(asset("a1")).toMatchObject({ financeReturnedTo: "PURCHASING", financeReturnFields: ["invoiceRef"] });
     expect(asset("a2")).toMatchObject(itReturn);
+    expect(audits("finance.return").map((a) => a.entityId)).toEqual(["a1"]);
 
     h.user = PAT;
     const r = await savePurchaseOrder(order({ id: "po1", invoiceRef: "SI-0021", lines: [line({ id: "ln1", qty: 2 })], reply: "SI number corrected" }));
@@ -528,6 +544,22 @@ describe("closeLineShort", () => {
     expect(t("purchaseOrderLine")[0]).toMatchObject({ closedShort: 2, closedShortReason: "supplier cancelled 2 units" });
     expect(audits("po.line-closed")).toHaveLength(1);
     expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_LINE_CLOSED"]);
+    expect(h.webhooks).toEqual([]); // nothing from it is approved
+  });
+
+  it("closing the last units short on an otherwise fully approved PO fires both approval webhooks, once", async () => {
+    const APPROVED = new Date("2026-10-20T00:00:00Z");
+    seedPo({ state: "READY", completedAt: null });
+    seedLine("ln1", { qty: 5 });
+    for (const id of ["a1", "a2", "a3"]) seedAsset(id, { financeConfirmedAt: APPROVED, financeConfirmedById: ANA.id });
+    expect((await closeLineShort({ lineId: "ln1", qty: 1, reason: "supplier cancelled 1 unit" })).ok).toBe(true);
+    expect(h.webhooks).toEqual([]); // one unit still to come
+    expect((await closeLineShort({ lineId: "ln1", qty: 1, reason: "supplier cancelled 1 unit" })).ok).toBe(true);
+    expect(h.webhooks).toEqual([
+      { event: "purchase_order.approved", data: { purchaseOrderId: "po1", refNo: "PO-0214" } },
+      { event: "purchase_request.completed", data: { purchaseRequestId: "po1", refNo: "PO-0214" } },
+    ]);
+    expect(po().completedAt).toBeInstanceOf(Date);
   });
 });
 

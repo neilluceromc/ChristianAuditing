@@ -83,11 +83,13 @@ vi.mock("@/server/db/client", () => {
     h.ops.push(`raw:${strings.join("$").replace(/\s+/g, " ").trim()}:${values.join(",")}`);
     return [];
   };
-  const client = { asset, auditEntry, $queryRaw };
+  // Task 6: a send-back and a resubmit ring a team's bell.
+  const notification = { create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "n1", ...data }) };
+  const client = { asset, auditEntry, notification, $queryRaw };
   return { prisma: { ...client, $transaction: async (fn: (tx: typeof client) => Promise<unknown>) => fn(client) } };
 });
 
-import { confirmAssetDetails, resubmitAssetToFinance, returnAssetToIt } from "@/server/modules/inventory/actions";
+import { confirmAssetDetails, resubmitAssetToFinance, returnAsset } from "@/server/modules/inventory/actions";
 import { clearAssetOverride, setAssetOverride } from "./depreciation-actions";
 import { reopenFinanceReview, undoFinanceAction } from "./undo-actions";
 import { toReviewCount } from "./review-queue";
@@ -105,7 +107,8 @@ function seed(id: string, extra: Rec = {}): Rec {
   const a: Rec = {
     id, tag: `BR-LT-${id}`, cls: "IT", itVerifiedAt: new Date("2026-10-01T00:00:00Z"), cost: 50000, purchaseRecordId: null,
     financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false,
-    financeReturnedAt: null, financeReturnedById: null, financeReturnReason: null, financeReturnFields: [], financeResubmitNote: null,
+    financeReturnedAt: null, financeReturnedById: null, financeReturnedTo: null, financeReturnReason: null, financeReturnFields: [],
+    financeResubmitNote: null,
     depreciationLifeMonths: null, depreciationSalvage: null, depreciationNote: null,
     ...extra,
   };
@@ -200,7 +203,7 @@ describe("undo approve", () => {
 describe("undo send back", () => {
   it("clears the send-back, its checklist and note, and puts IT's reply back", async () => {
     const before = seed("0210", { financeResubmitNote: "Fixed the serial" });
-    expect((await returnAssetToIt({ id: "0210", fields: ["cost", "doc:official-receipt"], note: "Check the OR" })).ok).toBe(true);
+    expect((await returnAsset({ id: "0210", team: "IT", fields: ["cost", "doc:official-receipt"], note: "Check the OR" })).ok).toBe(true);
     expect(h.audits[0].diff).toMatchObject({
       financeReturn: { from: null, to: { fields: ["Cost", "Official receipt"], note: "Check the OR" } },
       resubmitNote: { from: "Fixed the serial", to: null },
@@ -219,9 +222,9 @@ describe("undo send back", () => {
 
   it("a send-back over an earlier one records it, and is final", async () => {
     seed("0211");
-    await returnAssetToIt({ id: "0211", fields: ["cost"] });
+    await returnAsset({ id: "0211", team: "IT", fields: ["cost"] });
     at(1);
-    await returnAssetToIt({ id: "0211", fields: ["serial"] });
+    await returnAsset({ id: "0211", team: "IT", fields: ["serial"] });
     expect(h.audits[1].diff).toMatchObject({ financeReturn: { from: "returned" } });
     await expectRefused(() => undoFinanceAction({ assetId: "0211", kind: "send-back" }), "Can't undo: this send-back replaced an earlier one.");
   });
@@ -279,7 +282,7 @@ describe("undo refusals, on the server", () => {
 
   it("not after IT resubmitted it (Review Focus 1)", async () => {
     seed("0232");
-    await returnAssetToIt({ id: "0232", fields: ["cost"] });
+    await returnAsset({ id: "0232", team: "IT", fields: ["cost"] });
     at(2);
     as(IVAN);
     expect((await resubmitAssetToFinance({ id: "0232", reply: "Cost fixed" })).ok).toBe(true);

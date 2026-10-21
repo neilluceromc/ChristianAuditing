@@ -90,7 +90,7 @@ describe("navCountKeys", () => {
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.purchasing, "purchasing_staff")).sort())
       .toEqual(["approvals", "poReady", "poSentBack", "poWithIt", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff")).sort())
-      .toEqual(["approvals", "finToConfirmIt", "finToConfirmPurchasing", "poReady"]);
+      .toEqual(["approvals", "finGroupsToReview", "finToConfirmIt", "finToConfirmPurchasing", "poReady"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin")).sort())
       .toEqual(["deadDeliveries", "flagsUnavailable", "usersDisabled"]);
   });

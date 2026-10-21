@@ -271,6 +271,8 @@ export function isFinanceRelevant(e: { entityType: string; action: string; diff:
 const HIDDEN_FIELDS = new Set([
   "via", "financeConfirmed", "itVerified", "financeReturn", "reply", "note", "noteId", "document", "attachment",
   "resubmitNote", "depreciationNote",
+  // Task 6: which group action or PO send-back an entry belongs to (finance-undo.ts)
+  "group", "batch", "po",
 ]);
 const MONEY_FIELDS = new Set(["cost", "total", "fees", "salvage", "unitCost", "price", "repairQuote"]);
 const CHIP_LABELS: Record<string, string> = {

@@ -267,7 +267,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       ["Activity", "Setup"],
     ]);
     expect(labels("finance", "finance_staff")).toEqual([
-      ["Home", "Assets", "Disposal", "Depreciation", "Approvals", "Purchases", "Suppliers", "Stock"],
+      ["Home", "To review", "Assets", "Disposal", "Depreciation", "Approvals", "Purchases", "Suppliers", "Stock"],
       ["Reports"],
       ["Activity"],
     ]);
@@ -350,6 +350,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("purchasing", "purchasing_staff", "Approvals").badge).toEqual(["approvals"]);
     expect(item("finance", "finance_staff", "Approvals").badge).toEqual(["approvals"]);
     expect(item("finance", "finance_staff", "Purchases").badge).toEqual(["poReady"]);
+    // Task 6 (spec §5): Finance's group queue, one link with its badge
+    expect(item("finance", "finance_staff", "To review")).toMatchObject({ href: "/finance/review", badge: ["finGroupsToReview"], views: [] });
     expect(item("it", "it_staff", "Inventory").badge).toEqual([]);
     // Phase 46: failed deliveries are waiting work (a replay), so the closed Webhooks link keeps their red count.
     expect(item("admin", "admin", "Webhooks").badge).toEqual(["deadDeliveries"]);

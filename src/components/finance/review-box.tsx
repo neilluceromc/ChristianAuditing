@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { AssetClass, Role } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -18,9 +19,11 @@ import { useFinanceUndo } from "./use-finance-undo";
  * next asset and names it and how many are left; its toast offers Undo and "Open <tag>" to go back.
  */
 export function ReviewBox({
-  id, tag, hasCost, reply, deptLabel, approveDetail = null,
+  id, tag, cls, refNo = null, registeredByRole = null, hasCost, reply, deptLabel, approveDetail = null,
 }: {
-  id: string; tag: string; cls?: string; hasCost: boolean; reply: string | null; deptLabel: string;
+  id: string; tag: string; cls: AssetClass; hasCost: boolean; reply: string | null; deptLabel: string;
+  /** Task 6: the asset's PO (its money is sent back or fixed there) and who registered its batch. */
+  refNo?: string | null; registeredByRole?: Role | null;
   /** "Depreciation starts Oct 2026 · ₱2,131.11 a month" (finance-review-ui.ts `approveDetail`). */
   approveDetail?: string | null;
 }) {
@@ -61,9 +64,12 @@ export function ReviewBox({
         <Button variant="primary" loading={pending} onClick={approve}>
           {hasCost ? "Approve" : "Approve as not capitalised"}
         </Button>
-        <Button onClick={() => setSending(true)} disabled={pending}>Send back to {deptLabel}…</Button>
+        <Button onClick={() => setSending(true)} disabled={pending}>Send back…</Button>
       </div>
-      <SendBackDialog open={sending} onClose={() => setSending(false)} id={id} tag={tag} deptLabel={deptLabel} hasCost={hasCost} />
+      <SendBackDialog
+        open={sending} onClose={() => setSending(false)} id={id} tag={tag} cls={cls} refNo={refNo}
+        registeredByRole={registeredByRole} hasCost={hasCost}
+      />
     </section>
   );
 }

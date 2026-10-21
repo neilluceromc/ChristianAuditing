@@ -97,14 +97,15 @@ vi.mock("./queries", async (orig) => ({
     { id: "p1", refNo: "PR-1", what: "still a draft", meta: "₱100 · 1 d", href: "/purchases/p1", action: "Submit", bounced: false },
     { id: "p2", refNo: "PR-2", what: "came back from Ina", meta: "₱200 · 3 d", href: "/purchases/p2", action: "Fix and resubmit", bounced: true },
   ],
+  // Task 6: Finance's review groups (reviewGroups), oldest first
   financeWaitingRows: async () => [
     {
-      id: "w1", refNo: "PR-10", reviewedAt: new Date("2026-10-17T02:00:00Z"), updatedAt: new Date("2026-10-17T02:00:00Z"),
-      requestedBy: { name: "Ina" }, lines: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }],
+      key: "rec1", recordId: "rec1", assetId: null, refNo: "PO-0010", title: "2 laptops", count: 2, total: "2000.20",
+      registeredAt: new Date("2026-10-17T02:00:00Z"), team: "IT",
     },
     {
-      id: "w2", refNo: "PR-11", reviewedAt: null, updatedAt: new Date("2026-10-19T02:00:00Z"),
-      requestedBy: { name: "Bo" }, lines: [{ qty: 3, unitPrice: "0.30" }],
+      key: "asset:a9", recordId: null, assetId: "a9", refNo: null, title: "BR-LT-0009 · Desk", count: 1, total: "0.90",
+      registeredAt: new Date("2026-10-19T02:00:00Z"), team: "PURCHASING",
     },
   ],
   directChangeRows: async (since: Date) => {
@@ -147,7 +148,9 @@ describe("purchasingOverview", () => {
       ["Lots expiring", 32, "/stock/reports/expiry?days=30&tab=expiring"],
       ["Stocktakes overdue", 33, undefined],
     ]);
-    expect(h.historyKeys).toEqual(["pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
+    // Task 6: pr.itReviewed counts Finance's review groups, so Ready to register shows its live count only
+    expect(h.historyKeys).toEqual(["pr.submitted", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue"]);
+    expect(o.kpis[1].spark).toEqual([22]);
   });
 
   it("Spend this month: Manila month to date, weekly sparkline, this week vs last week in percent", async () => {
@@ -196,7 +199,7 @@ describe("financeOverview", () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
       ["Waiting on you", 2001.1, undefined],
-      ["Purchase orders waiting", 2, "/purchases?state=READY"],
+      ["Groups to review", 2, "/finance/review"],
       ["Approved this month", 3, undefined],
       ["Capitalized this month", 55_000, undefined],
       ["Book value", 48_442_000, undefined],
@@ -256,10 +259,10 @@ describe("financeOverview", () => {
     expect(o.needsYou.map((n) => [n.title, n.href])).toEqual([
       ["5 IT registrations to confirm", "/finance/assets?fin=with-finance"],
       ["6 Purchasing registrations to confirm", "/finance/assets?cls=PURCHASING&fin=with-finance"],
-      ["PR-10 · from Ina", "/purchases/w1"],
-      ["PR-11 · from Bo", "/purchases/w2"],
+      ["PO-0010 · 2 laptops from IT", "/finance/review/rec1"],
+      ["No PO · BR-LT-0009 · Desk", "/finance/assets/a9"],
     ]);
-    expect(o.needsYouHref).toBe("/purchases?state=READY");
+    expect(o.needsYouHref).toBe("/finance/review");
     expect(o.trend).toMatchObject({ title: "Capitalized per month", unit: "₱" });
     expect(o.trend.labels).toEqual(expect.arrayContaining(["Nov 2025", "Oct 2026"]));
     expect(o.trend.series).toHaveLength(1);

@@ -10,7 +10,7 @@ import { statusFamily } from "./status";
 describe("WEBHOOK_EVENTS", () => {
   it("is the short, deliberate list from scope decision #9", () => {
     expect(WEBHOOK_EVENTS).toEqual([
-      "approval.executed", "offboarding.completed", "purchase_request.completed",
+      "approval.executed", "offboarding.completed", "purchase_request.completed", "purchase_order.approved",
     ]);
   });
 

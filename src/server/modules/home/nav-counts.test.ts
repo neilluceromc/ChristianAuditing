@@ -47,6 +47,7 @@ import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { finWhere } from "@/lib/registration";
 import { FLAG_SPECS } from "@/lib/admin-flags";
 import { financeListWhere } from "@/server/modules/finance/queries";
+import { REVIEW_GROUP_WHERE } from "@/server/modules/finance/groups";
 import { stocktakesOverdueWhere } from "@/server/modules/stock/queries";
 import { getApprovalsBadge, NAV_COUNT_HREF, NAV_COUNT_UNFILTERED, readNavCounts } from "./nav-counts";
 
@@ -241,6 +242,15 @@ describe("readNavCounts: the Phase 46 counts (spec §4.3), each the page's own p
     }
   });
 
+  it("finGroupsToReview is /finance/review's group count: one per registration, one per asset with none (Task 6)", async () => {
+    h.assetGroup.mockResolvedValue([
+      { purchaseRecordId: "rec1", _count: { _all: 3 } },
+      { purchaseRecordId: null, _count: { _all: 2 } },
+    ]);
+    expect(await readNavCounts(["finGroupsToReview"], { id: "f", role: "finance_staff" })).toEqual({ finGroupsToReview: 3 });
+    expect(h.assetGroup).toHaveBeenCalledWith({ by: ["purchaseRecordId"], where: REVIEW_GROUP_WHERE, _count: { _all: true } });
+  });
+
   it("usersDisabled, deadDeliveries and flagsUnavailable read their pages' filters", async () => {
     h.user.mockResolvedValue(4);
     h.delivery.mockResolvedValue(7);
@@ -291,8 +301,9 @@ describe("NAV_COUNT_HREF", () => {
       }
     }
     // itSpare, itDefective, itMissing, leaving, poWithIt, poSentBack, poReady ×2; Phase 46: stockLow,
-    // suppliersRenewing, finToConfirmIt, finToConfirmPurchasing, usersDisabled, deadDeliveries, flagsUnavailable
-    expect(checked).toBe(15);
+    // suppliersRenewing, finToConfirmIt, finToConfirmPurchasing, usersDisabled, deadDeliveries, flagsUnavailable;
+    // Task 6: finGroupsToReview
+    expect(checked).toBe(16);
   });
 
   it("accounts for every counted view: a list count (equal to its page), an exempt one, or a work count", () => {

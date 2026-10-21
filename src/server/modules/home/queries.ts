@@ -16,6 +16,7 @@ import {
 } from "@/lib/worklist";
 import { orderByOffboardingAttention } from "@/lib/offboarding";
 import { leaverStates } from "@/server/modules/offboarding/queries";
+import { reviewGroups, type ReviewGroup } from "@/server/modules/finance/groups";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -589,37 +590,31 @@ export async function purchasingTodo(userId: string, now: Date = new Date()): Pr
 }
 
 /**
- * The orders past IT and not yet registered (READY), oldest first: Finance Home's headline and queue, and the
- * snapshot's `fin.waitingC` / `fin.waitingCount` (Phase 46), so the two can never disagree. Migration 38 interim:
- * the old IT_REVIEWED queue maps to READY (the nav's prItReviewed → poReady); Finance's own group review is Task 6.
+ * Finance's queue: the registration groups waiting for its review (Task 6, spec §5 — reviewGroups, the /finance/review
+ * page's rows), oldest first. Finance Home's headline and queue, and the snapshot's `fin.waitingC` / `fin.waitingCount`
+ * (Phase 46) and `pr.itReviewed`, so they can never disagree. Replaces migration 38's interim READY-orders read, which
+ * counted every old completed request as waiting.
  */
-export function financeWaitingRows() {
-  return prisma.purchaseOrder.findMany({
-    where: { state: "READY" },
-    orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
-    select: {
-      id: true, refNo: true, reviewedAt: true, updatedAt: true,
-      requestedBy: { select: { name: true } },
-      lines: { select: { qty: true, unitPrice: true } },
-    },
-  });
+export function financeWaitingRows(): Promise<ReviewGroup[]> {
+  return reviewGroups();
 }
 
-export type FinanceWaitingRow = Awaited<ReturnType<typeof financeWaitingRows>>[number];
+export type FinanceWaitingRow = ReviewGroup;
 
-/** Days a waiting request has sat with Finance: since IT's review (or its last update, for a pre-review row). */
-export function waitingDays(r: Pick<FinanceWaitingRow, "reviewedAt" | "updatedAt">, now: Date): number {
-  return daysSince(r.reviewedAt ?? r.updatedAt, now);
+/** Days a group has waited for Finance: since it was registered. */
+export function waitingDays(r: Pick<FinanceWaitingRow, "registeredAt">, now: Date): number {
+  return daysSince(r.registeredAt, now);
 }
 
-/** Finance's queue (Home and the Overview's Needs you): the first `take` waiting requests, each opened to review. */
+/** Finance's queue (Home and the Overview's Needs you): the first `take` waiting groups, each opened to review. */
 export function financeQueue(rows: FinanceWaitingRow[], now: Date, take = 8): TodoRow[] {
   return rows.slice(0, take).map((r) => ({
-    id: r.id,
-    refNo: r.refNo,
-    what: `from ${r.requestedBy.name}`,
-    meta: `${fmtMoney(unitsValue(r.lines))} · waiting ${waitingDays(r, now)} d`,
-    href: `/purchases/${r.id}`,
+    id: r.key,
+    refNo: r.refNo ?? (r.recordId ? "Direct registration" : "No PO"),
+    // a registration says who sent it; an asset from before registrations were recorded is its tag and model
+    what: r.recordId ? `${r.title} from ${r.team === "IT" ? "IT" : "Purchasing"}` : r.title,
+    meta: `${fmtMoney(Number(r.total))} · waiting ${waitingDays(r, now)} d`,
+    href: r.recordId ? `/finance/review/${r.recordId}` : `/finance/assets/${r.assetId}`,
     action: "Review",
   }));
 }

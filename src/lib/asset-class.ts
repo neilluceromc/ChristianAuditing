@@ -216,6 +216,9 @@ export function canEditAsset(role: Role, a: { cls: AssetClass; itVerifiedAt: Dat
  * "Registered — the invoice did not attach."
  */
 export function canAttachDocuments(role: Role, a: { cls: AssetClass; itVerifiedAt: Date | null }): boolean {
+  // Task 6 (spec §2): Purchasing, IT and Finance can all upload or re-upload documents — Finance on any asset it can
+  // see, so it can replace a blurry receipt itself instead of sending the asset back for it.
+  if (role === "finance_staff") return canSeeClass(role, a.cls);
   return canManageClass(role, a.cls) || (REGISTRANT_CLASSES[role].includes(a.cls) && a.itVerifiedAt === null);
 }
 

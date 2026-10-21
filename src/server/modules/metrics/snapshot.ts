@@ -13,7 +13,7 @@ import { stockHomeSignals } from "@/server/modules/stock/queries";
 import { financeViewWhere } from "@/server/modules/finance/queries";
 import { bookValueTotals } from "@/server/modules/finance/depreciation-queries";
 import { adminHome } from "@/server/modules/admin/queries";
-import { financeWaitingRows, unitsValue } from "@/server/modules/home/queries";
+import { financeWaitingRows } from "@/server/modules/home/queries";
 
 /**
  * Spec §2.2 ruling: approvals are stored per class. The three fragments split every approval exactly once (an
@@ -61,7 +61,7 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     adminHome(),
   ]);
 
-  const waitingPesos = waiting.reduce((sum, r) => sum + unitsValue(r.lines), 0);
+  const waitingPesos = waiting.reduce((sum, r) => sum + Number(r.total), 0);
   const values: Record<SnapshotKey, number> = {
     "it.spare": tiles["in-stock"] ?? 0,
     "it.deployed": tiles["deployed"] ?? 0,
@@ -74,9 +74,11 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     "approvals.pastSla.it": pastIt,
     "approvals.pastSla.purchasing": pastPurchasing,
     "approvals.pastSla.none": pastNone,
-    // Migration 38: the keys keep their names so the histories carry on; they now count WITH_IT and READY orders.
+    // Migration 38: the keys keep their names so the histories carry on. pr.submitted counts WITH_IT orders;
+    // pr.itReviewed (Task 6) counts Finance's review groups — its old meaning, past IT and waiting on Finance — not
+    // READY orders, which include every old completed request.
     "pr.submitted": prStates.WITH_IT ?? 0,
-    "pr.itReviewed": prStates.READY ?? 0,
+    "pr.itReviewed": waiting.length,
     "stock.low": stock.low,
     "stock.expiringLots": stock.expiringLots,
     "stock.stocktakesOverdue": stock.stocktakesOverdue,

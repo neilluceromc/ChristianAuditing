@@ -36,6 +36,8 @@ export type CountKey =
   // Phase 46 spec §4.3
   | "stockLow" | "stocktakesOverdue" | "suppliersRenewing"
   | "finToConfirmIt" | "finToConfirmPurchasing"
+  // Task 6 (spec §5): Finance's To review queue, one per registration group
+  | "finGroupsToReview"
   | "usersDisabled" | "deadDeliveries" | "flagsUnavailable";
 
 /**
@@ -346,6 +348,16 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "work",
       items: [
         HOME,
+        {
+          // Task 6 (spec §5): the registration groups waiting for Finance — a PO's registered lines, or a direct batch.
+          // One view, so the count sits on the page it counts (NAV_COUNT_HREF); a single view is never listed.
+          label: "To review",
+          href: "/finance/review",
+          icon: "approval",
+          badge: ["finGroupsToReview"],
+          views: [{ label: "To review", href: "/finance/review", count: "finGroupsToReview" }],
+          also: ["Review groups", "Purchase orders to review"],
+        },
         {
           // Phase 46 spec §4.3: the page shows one class at a time, so To confirm has a view per class. The IT views
           // match on the page's default class (PAGE_DEFAULTS), so a Purchasing URL never lights them.

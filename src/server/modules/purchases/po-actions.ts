@@ -15,7 +15,9 @@ import { GROUP_ARCHIVED } from "@/lib/groups";
 import { canEditField, MONEY_FIELDS, poMoneyStage, reasonError, teamOfRole, type IntakeStage } from "@/lib/intake-rules";
 import { lineProgress, PO_WRITE_ROLES, poRefNo, stateAfterResubmit, stateAfterSave, type PoState } from "@/lib/po-flow";
 import { moneyForAsset } from "@/lib/po-money";
-import { shouldReopen } from "@/lib/registration";
+import { fieldLabels, shouldReopen } from "@/lib/registration";
+import { returnOne } from "@/server/modules/finance/review-writes";
+import { emitIfPoFullyApproved } from "./po-complete";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -563,7 +565,10 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
     if (!po) { failure = conflict("That purchase order no longer exists."); return; }
     if (po.state === "CANCELLED") { failure = conflict(`${po.refNo} is cancelled.`); return; }
     if (po.state === "SENT_BACK") { failure = conflict(`${po.refNo} is already with Purchasing.`); return; }
-    const assets = await tx.asset.findMany({ where: { purchaseOrderId: id }, select: { id: true, financeConfirmedAt: true } });
+    const assets = await tx.asset.findMany({
+      where: { purchaseOrderId: id },
+      select: { id: true, tag: true, financeConfirmedAt: true, financeReturnedAt: true, financeResubmitNote: true },
+    });
     const c = counts(assets);
     if (c.approvedCount > 0) {
       failure = conflict(`Some assets from ${po.refNo} are approved. Fix it yourself with a reason.`);
@@ -602,14 +607,14 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
 
     if (team === "FINANCE") {
       // Only assets not already returned: one Finance sent to IT (a serial, say) keeps that return, its fields and
-      // its note — Purchasing's resubmit must not clear an IT problem IT never fixed.
-      await tx.asset.updateMany({
-        where: { purchaseOrderId: id, financeConfirmedAt: null, financeReturnedAt: null },
-        data: {
-          financeReturnedAt: now, financeReturnedById: user.id, financeReturnedTo: "PURCHASING",
-          financeReturnFields: fields, financeReturnReason: note, financeResubmitNote: null,
-        },
-      });
+      // its note — Purchasing's resubmit must not clear an IT problem IT never fixed. Each gets its own
+      // finance.return entry (Task 6), so its history shows the return; `po` marks it as the PO's, which comes back
+      // with the PO's correction rather than by a per-asset undo (finance-undo.ts).
+      const labels = fields.map((f) => fieldLabels([f])[0] ?? capitalise(FIELD_WORDS[f] ?? f));
+      for (const a of assets.filter((x) => x.financeConfirmedAt === null && x.financeReturnedAt === null)) {
+        const hit = await returnOne(tx, a, user, { team: "PURCHASING", fields, note, labels }, { po: { from: null, to: po.refNo } });
+        if (!hit) throw new StaleAssetError(a.tag);
+      }
       touchedAssets = true;
     }
 
@@ -869,6 +874,8 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
       diff: { line: { from: null, to: line.description }, closedShort: { from: line.closedShort, to: closedShort } },
       reason, source: "web",
     });
+    // The last units closed short on an otherwise fully approved PO complete it: its approval webhooks, once.
+    await emitIfPoFullyApproved(tx, id);
     out = { refNo: po.refNo, remaining: remaining - qty };
   });
 

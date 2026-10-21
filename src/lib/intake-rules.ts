@@ -28,7 +28,8 @@ export type OwnedKey = IntakeField | Exclude<RegFieldKey, "other">;
 
 const MONEY_DOCS: readonly string[] = ["doc:invoice", "doc:official-receipt", "doc:delivery-receipt"];
 
-function isMoneyKey(key: OwnedKey): boolean {
+/** A money field, or a document that proves the money (sales invoice, OR, delivery receipt). */
+export function isMoneyKey(key: OwnedKey): boolean {
   return (MONEY_FIELDS as readonly string[]).includes(key) || MONEY_DOCS.includes(key);
 }
 

@@ -17,6 +17,7 @@ import { deliveryTabWhere, parseDeliveryTab } from "@/lib/webhooks";
 import { localDateISO } from "@/lib/format";
 import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
 import { financeViewWhere } from "@/server/modules/finance/queries";
+import { reviewGroupCount } from "@/server/modules/finance/groups";
 import { worklistCount } from "./queries";
 
 /**
@@ -38,6 +39,8 @@ export const NAV_COUNT_HREF = {
   suppliersRenewing: "/purchases/suppliers?renewing=30",
   finToConfirmIt: "/finance/assets?fin=with-finance",
   finToConfirmPurchasing: "/finance/assets?cls=PURCHASING&fin=with-finance",
+  // Task 6 (spec §5): Finance's group queue; the page lists exactly reviewGroups(), which reviewGroupCount counts.
+  finGroupsToReview: "/finance/review",
   usersDisabled: "/admin/users?disabled=1",
   deadDeliveries: "/admin/webhooks/deliveries?state=DEAD",
   flagsUnavailable: "/admin/flags?state=unavailable",
@@ -151,6 +154,7 @@ const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<num
   suppliersRenewing,
   finToConfirmIt: toConfirm("finToConfirmIt"),
   finToConfirmPurchasing: toConfirm("finToConfirmPurchasing"),
+  finGroupsToReview: () => reviewGroupCount(),
   usersDisabled,
   deadDeliveries,
   flagsUnavailable,

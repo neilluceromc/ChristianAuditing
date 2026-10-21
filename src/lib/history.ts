@@ -138,12 +138,18 @@ export function historyNameIds(entries: AuditEntryLike[]): { category: string[];
   };
 }
 
+/**
+ * Task 6: keys that say which action an entry belongs to, not what changed — a registration group's id, a group
+ * action's id, the PO a send-back went with (finance-undo.ts). Never a row of their own.
+ */
+const META_KEYS: ReadonlySet<string> = new Set(["group", "batch", "po"]);
+
 /** "One row per field, not per save. Two rows sharing a timestamp were one action." */
 export function historyRows(entries: AuditEntryLike[], names: HistoryNames): HistoryRow[] {
   const rows: HistoryRow[] = [];
   for (const entry of entries) {
     const diff = (entry.diff ?? null) as Diff | null;
-    const fields = diff ? Object.keys(diff) : [];
+    const fields = diff ? Object.keys(diff).filter((k) => !META_KEYS.has(k)) : [];
     const action = actionLabel(entry.action);
     if (fields.length === 0) {
       rows.push({

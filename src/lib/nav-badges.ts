@@ -39,6 +39,8 @@ const LABEL: Record<CountKey, (n: number) => string> = {
   suppliersRenewing: (n) => `${n} renewing within 30 days`,
   finToConfirmIt: (n) => `${n} IT registration${n === 1 ? "" : "s"} to confirm`,
   finToConfirmPurchasing: (n) => `${n} Purchasing registration${n === 1 ? "" : "s"} to confirm`,
+  // Task 6 (spec §5)
+  finGroupsToReview: (n) => `${n} group${n === 1 ? "" : "s"} to review`,
   usersDisabled: (n) => `${n} disabled`,
   deadDeliveries: (n) => `${n} failed deliver${n === 1 ? "y" : "ies"}`,
   flagsUnavailable: (n) => `${n} unavailable`,

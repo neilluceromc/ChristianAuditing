@@ -66,10 +66,8 @@ vi.mock("@/server/modules/admin/queries", () => ({
 }));
 vi.mock("@/server/modules/home/queries", async (orig) => ({
   ...(await orig<object>()),
-  financeWaitingRows: async () => [
-    { lines: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }] },
-    { lines: [{ qty: 3, unitPrice: "0.30" }] },
-  ],
+  // Task 6: Finance's review groups, each with its waiting assets' total
+  financeWaitingRows: async () => [{ total: "2000.20" }, { total: "0.90" }],
 }));
 
 import { collectSnapshot, writeSnapshot } from "./snapshot";
@@ -95,9 +93,10 @@ describe("collectSnapshot", () => {
       "it.spare": 11n, "it.deployed": 12n, "it.defective": 13n, "it.missing": 14n, "it.attention": 15n,
       "approvals.open.it": 100n, "approvals.open.purchasing": 200n, "approvals.open.none": 300n,
       "approvals.pastSla.it": 10n, "approvals.pastSla.purchasing": 20n, "approvals.pastSla.none": 30n,
-      "pr.submitted": 21n, "pr.itReviewed": 22n,
+      // Task 6: pr.itReviewed counts Finance's review groups (its old "past IT, waiting on Finance"), not READY orders
+      "pr.submitted": 21n, "pr.itReviewed": 2n,
       "stock.low": 31n, "stock.expiringLots": 32n, "stock.stocktakesOverdue": 33n,
-      // 2 × 1000.10 + 3 × 0.30 = ₱2,001.10
+      // ₱2,000.20 + ₱0.90 = ₱2,001.10
       "fin.waitingC": 200_110n, "fin.waitingCount": 2n,
       "fin.toConfirm.it": 5n, "fin.toConfirm.purchasing": 6n, "fin.bookC": 123_456_789n,
       "admin.activeUsers": 36n, "admin.disabled": 4n, "admin.deadDeliveries": 7n,

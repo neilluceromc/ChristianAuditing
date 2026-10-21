@@ -30,7 +30,7 @@ import { bookValueByCategory, capitalizedSince } from "@/server/modules/finance/
 import { adminHome, deliveriesByStatus, disabledAdmins, failingEndpoints } from "@/server/modules/admin/queries";
 import {
   claimedByYou, completedSpend, directChangeRows, financeQueue, financeWaitingRows, fleet, purchasingTodo, SPEND_TOP,
-  unitsValue, waitingDays, worklist,
+  waitingDays, worklist,
 } from "./queries";
 
 /** Spec §3.1: the trend chart's 12 points. */
@@ -280,13 +280,15 @@ async function purchaseFlowTrend(now: Date): Promise<TrendSeries> {
 }
 
 const PURCHASING_KEYS = [
-  "pr.submitted", "pr.itReviewed", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue",
+  // Task 6: pr.itReviewed counts Finance's review groups now, so the Ready to register tile no longer reads it.
+  "pr.submitted", "stock.low", "stock.expiringLots", "stock.stocktakesOverdue",
 ] as const satisfies readonly SnapshotKey[];
 
 /**
  * Spec §3.2, the Purchasing row. Linked values are read the way their pages count them:
- * - With IT / Ready to register are stateCounts() — the /purchases tab counts — linked to those tabs (the snapshot
- *   keys keep their old names, pr.submitted / pr.itReviewed, so the histories carry on);
+ * - With IT / Ready to register are stateCounts() — the /purchases tab counts — linked to those tabs (With IT's
+ *   snapshot key keeps its old name, pr.submitted, so the history carries on; Ready to register has no history since
+ *   Task 6 gave pr.itReviewed back its old meaning, Finance's queue);
  * - Below reorder and Lots expiring are stockHomeSignals(), the counts /stock?low=1 and the expiry report's Expiring
  *   tab (30-day window) list;
  * - Spend this month (Manila month, completed requests) and Stocktakes overdue are plain cards: no page lists exactly
@@ -316,7 +318,9 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
     ),
     historyTile(
       { key: "pr.itReviewed", label: "Ready to register", hint: "Past IT, waiting to be registered", upIs: "bad", href: purchaseTabHref("READY") },
-      states.READY ?? 0, history["pr.itReviewed"],
+      // Task 6: the pr.itReviewed snapshot now counts Finance's review groups (its old meaning, "past IT, waiting on
+      // Finance"), so this tile's READY count no longer has a history of its own: live value only.
+      states.READY ?? 0, [],
     ),
     monthToDateTile({ key: "spend.month", label: "Spend this month", upIs: "neutral" }, spend, now, {
       money: true, hint: (m) => `${plural(m.length, "purchase order", "purchase orders")} registered`,
@@ -366,8 +370,7 @@ const FINANCE_KEYS = [
 
 /**
  * Spec §3.2, the Finance row, with the builder-check rulings:
- * - Purchase orders waiting is the /purchases "Ready to register" tab's count (financeWaitingRows reads exactly that state;
- *   migration 38 interim until Task 6's group review);
+ * - Groups to review is the /finance/review queue's count (financeWaitingRows reads exactly reviewGroups, Task 6);
  * - To confirm sums the two classes' "To review" chips (hint "N IT · N Purchasing") and links to the IT view;
  * - Waiting on you (₱), Approved this month (a count, its ₱ in the hint), Capitalized this month and Book value are
  *   plain cards: no page shows those numbers (review ruling for Book value).
@@ -390,7 +393,7 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
   );
   const oldest = waiting[0];
   const toConfirm = toConfirmIt + toConfirmPurchasing;
-  const waitingHref = purchaseTabHref("READY");
+  const waitingHref = "/finance/review";
 
   const kpis: KpiTile[] = [
     moneyHistoryTile(
@@ -398,10 +401,10 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
         key: "fin.waitingC", label: "Waiting on you", upIs: "bad",
         hint: oldest ? `oldest ${plural(waitingDays(oldest, now), "day", "days")}` : "Nothing waiting",
       },
-      waiting.reduce((sum, r) => sum + unitsValue(r.lines), 0), history["fin.waitingC"],
+      waiting.reduce((sum, r) => sum + Number(r.total), 0), history["fin.waitingC"],
     ),
     historyTile(
-      { key: "fin.waitingCount", label: "Purchase orders waiting", hint: "Past IT, waiting to be registered", upIs: "bad", href: waitingHref },
+      { key: "fin.waitingCount", label: "Groups to review", hint: "Registered, waiting for your review", upIs: "bad", href: waitingHref },
       waiting.length, history["fin.waitingCount"],
     ),
     monthToDateTile({ key: "approved.month", label: "Approved this month", upIs: "neutral" }, approved, now, {

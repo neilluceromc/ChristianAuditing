@@ -70,6 +70,8 @@ export default async function FinanceAssetPage({
         depreciationNote: true,
         category: { select: { depreciationLifeMonths: true, depreciationSalvagePercent: true } },
         assignee: { select: { id: true, department: { select: { name: true } } } },
+        // Task 6: who registered its batch decides where its money goes back when it has no PO.
+        purchaseRecord: { select: { createdBy: { select: { role: true } } } },
       },
     }),
     state.tab === "notes" ? assetNotes(id) : Promise.resolve([]),
@@ -151,7 +153,11 @@ export default async function FinanceAssetPage({
       {(d.reg === "with-finance" || d.reg === "needs-correction") && (
         <div className="mb-4">
           {d.reg === "with-finance" ? (
-            <ReviewBox id={d.id} tag={d.tag} hasCost={hasCost} reply={d.resubmitNote} deptLabel={dept} approveDetail={approveText} />
+            <ReviewBox
+              id={d.id} tag={d.tag} cls={d.cls} refNo={d.purchase.pr?.refNo ?? null}
+              registeredByRole={extra?.purchaseRecord?.createdBy.role ?? null}
+              hasCost={hasCost} reply={d.resubmitNote} deptLabel={dept} approveDetail={approveText}
+            />
           ) : (
             <p className="text-[13px] text-fg-secondary">
               Sent back to {dept}

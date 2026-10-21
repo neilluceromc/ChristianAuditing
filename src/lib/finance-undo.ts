@@ -135,6 +135,86 @@ function replacedEarlier(diff: unknown): boolean {
 }
 
 /**
+ * Task 6: an asset returned as part of a PO send-back (`po` in its diff names the PO). It goes back to Finance when
+ * Purchasing corrects and saves the PO, so the one asset's return can't be undone on its own.
+ */
+function poSendBack(diff: unknown): string | null {
+  const po = asDiff(diff)?.po;
+  return has(po, "to") && typeof po.to === "string" ? po.to : null;
+}
+
+/*
+ * Task 6 (spec §5): a group action — Approve all with its hold-backs — writes one entry per asset, each carrying the
+ * registration (`group`) and the action's own id (`batch`) in its diff, so the whole action can be found and undone as
+ * one. These keys, and a PO send-back's `po`, say which action an entry belongs to, not what changed: the history
+ * tables leave them out (history.ts META_KEYS, finance-history.ts HIDDEN_FIELDS).
+ */
+const metaTo = (diff: unknown, key: string): string | null => {
+  const c = asDiff(diff)?.[key];
+  return has(c, "to") && typeof c.to === "string" ? c.to : null;
+};
+
+export interface GroupUndoAsset extends UndoAsset {
+  id: string;
+  tag: string;
+}
+
+export interface GroupUndoItem {
+  assetId: string;
+  tag: string;
+  kind: UndoKind;
+  /** The asset's entry from the group action. */
+  entry: UndoEntry;
+}
+
+export type GroupUndoCheck =
+  | { ok: true; batch: string; at: Date; minutesLeft: number; items: GroupUndoItem[] }
+  | { ok: false; reason: string };
+
+/**
+ * Whether `userId` can undo their latest group action on registration `recordId` now: all of it or none (spec §5,
+ * "one action"). Each asset of the action must pass `undoCheck` — same person, within 15 minutes, still its latest
+ * finance change — and the first that doesn't refuses the whole undo with its reason. `entries` holds the assets' own
+ * entries (entityType "asset", `entityId` the asset) and the registration's ("purchase-record").
+ */
+export function groupUndoCheck(
+  recordId: string,
+  assets: readonly GroupUndoAsset[],
+  entries: ReadonlyArray<UndoEntry & { entityId: string }>,
+  userId: string,
+  now: Date,
+): GroupUndoCheck {
+  const mine = entries.filter((e) =>
+    e.entityType === "asset" && e.actorId === userId && UNDOABLE_ACTIONS[e.action] !== undefined
+    && metaTo(e.diff, "group") === recordId && metaTo(e.diff, "batch") !== null);
+  let latest: (typeof mine)[number] | null = null;
+  for (const e of mine) {
+    if (!latest || e.createdAt.getTime() > latest.createdAt.getTime()
+      || (e.createdAt.getTime() === latest.createdAt.getTime() && e.id > latest.id)) latest = e;
+  }
+  if (!latest) return { ok: false, reason: "Can't undo: there is no recent group action of yours to undo." };
+  const batch = metaTo(latest.diff, "batch")!;
+  const record = entries.filter((e) => e.entityType === "purchase-record" && e.entityId === recordId);
+
+  const items: GroupUndoItem[] = [];
+  for (const e of mine.filter((x) => metaTo(x.diff, "batch") === batch)) {
+    const a = assets.find((x) => x.id === e.entityId);
+    if (!a) return { ok: false, reason: "Can't undo: an asset from it has left this registration." };
+    const own = entries.filter((x) => x.entityType === "asset" && x.entityId === a.id);
+    const check = undoCheck(a, [...own, ...record], userId, now);
+    const why = (r: string) => ({ ok: false as const, reason: `Can't undo: ${a.tag} — ${r.replace(/^Can't undo: /, "")}` });
+    if (!check.ok) return why(check.reason);
+    if (check.entry.id !== e.id) return why("its review has changed since.");
+    items.push({ assetId: a.id, tag: a.tag, kind: check.state.kind, entry: e });
+  }
+  const left = latest.createdAt.getTime() + UNDO_WINDOW_MS - now.getTime();
+  return {
+    ok: true, batch, at: latest.createdAt, items,
+    minutesLeft: Math.max(1, Math.min(UNDO_WINDOW_MS / 60_000, Math.ceil(left / 60_000))),
+  };
+}
+
+/**
  * Settings: the override before the change, or all null (the category policy) when there was none. Null when the
  * entry did not record the earlier values (a removal saved before this follow-up).
  */
@@ -186,6 +266,8 @@ export function undoCheck(asset: UndoAsset, entries: readonly UndoEntry[], userI
   if (left <= 0) return no(`the 15 minutes to undo it ended at ${manilaTime(new Date(ends))}`);
   if (!stateMatches(k, asset)) return no("the asset's review has changed since");
   if (k === "send-back" && replacedEarlier(latest.diff)) return no("this send-back replaced an earlier one");
+  const po = k === "send-back" ? poSendBack(latest.diff) : null;
+  if (po) return no(`it went back to Purchasing with ${po}, and comes back when Purchasing corrects it`);
   if (k === "settings" && settingsRestore(latest.diff) === null) return no("the earlier depreciation settings weren't recorded");
   return {
     ok: true,

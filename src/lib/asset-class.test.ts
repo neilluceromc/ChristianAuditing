@@ -285,9 +285,13 @@ describe("canAttachDocuments — ruling R14: a registrant may attach documents u
     expect(canAttachDocuments("it_staff", { cls: "IT", itVerifiedAt: null })).toBe(true);
     expect(canAttachDocuments("it_staff", { cls: "IT", itVerifiedAt: d })).toBe(true);
   });
-  it("finance_staff manages nothing and registers nothing — never attaches", () => {
-    expect(canAttachDocuments("finance_staff", { cls: "IT", itVerifiedAt: null })).toBe(false);
-    expect(canAttachDocuments("finance_staff", { cls: "PURCHASING", itVerifiedAt: null })).toBe(false);
+  it("finance_staff attaches on any asset it can see, so it can re-upload a receipt (Task 6, spec §2)", () => {
+    expect(canAttachDocuments("finance_staff", { cls: "IT", itVerifiedAt: null })).toBe(true);
+    expect(canAttachDocuments("finance_staff", { cls: "IT", itVerifiedAt: d })).toBe(true);
+    expect(canAttachDocuments("finance_staff", { cls: "PURCHASING", itVerifiedAt: null })).toBe(true);
+  });
+  it("a viewer never attaches", () => {
+    expect(canAttachDocuments("viewer", { cls: "IT", itVerifiedAt: d })).toBe(false);
   });
   it("purchasing_staff on its own PURCHASING class asset may always attach", () => {
     expect(canAttachDocuments("purchasing_staff", { cls: "PURCHASING", itVerifiedAt: null })).toBe(true);
