@@ -200,9 +200,11 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
     <div
       ref={rootRef}
       className="relative"
-      // Tab out of the panel (or the bell) closes it.
+      // Tabbing out of the panel (or the bell) closes it. A click on the panel's plain text blurs to nothing (no
+      // relatedTarget) and must not; a click outside is the mousedown listener's.
       onBlur={(e) => {
-        if (open && !rootRef.current?.contains(e.relatedTarget as Node | null)) setOpen(false);
+        const to = e.relatedTarget as Node | null;
+        if (open && to && !rootRef.current?.contains(to)) setOpen(false);
       }}
     >
       <button
