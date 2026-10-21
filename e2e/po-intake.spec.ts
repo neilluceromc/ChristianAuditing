@@ -377,7 +377,9 @@ test.describe("8 · a legacy PO with no SI number", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(LEGACY_REF);
     const approve = page.getByRole("button", { name: "Approve 1", exact: true });
     await expect(approve).toBeDisabled();
-    await expect(page.getByText("No SI number yet. Add it before approving.")).toBeVisible();
+    // why it can't be approved is part of the page: a status, never an alert that interrupts on every visit
+    await expect(page.getByRole("status").filter({ hasText: "No SI number yet. Add it before approving." })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "No SI number yet" })).toHaveCount(0);
 
     // the PO page says so too — as a status, not an alert that interrupts on every visit
     await page.goto(`/purchases/${legacy.id}`);

@@ -3,6 +3,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
+import { regWhere } from "@/lib/registration";
+import { kpiValue } from "@/components/home/overview/chart-math";
 
 const db = new PrismaClient();
 
@@ -204,12 +206,29 @@ test.describe("home — finance leads with money, not counts", () => {
     await page.goto("/");
 
     // Spec §3.2: Finance's first tile is the money waiting, a plain card (no page shows that total). Purchase orders
-    // (Task 6): it is what the registration groups waiting in To review add up to.
+    // (Task 6): it is what the registration groups waiting in To review add up to — every asset with Finance that is
+    // not on a sent-back PO (REVIEW_GROUP_WHERE in server/modules/finance/groups.ts, built on the same regWhere), and
+    // the oldest group's age counts from its registration (the purchase record), or the asset when it has none.
+    const waiting = await db.asset.findMany({
+      where: {
+        AND: [
+          regWhere("with-finance"),
+          { OR: [{ purchaseOrderId: null }, { purchaseOrder: { is: { state: { not: "SENT_BACK" } } } }] },
+        ],
+      },
+      select: { cost: true, createdAt: true, purchaseRecord: { select: { createdAt: true } } },
+    });
+    expect(waiting.length, "the seed has assets waiting for Finance").toBeGreaterThan(0);
+    const total = waiting.reduce((s, a) => s + (a.cost === null ? 0 : Number(a.cost)), 0);
+    const oldest = Math.min(...waiting.map((a) => (a.purchaseRecord?.createdAt ?? a.createdAt).getTime()));
+    const days = Math.max(0, Math.round((Date.now() - oldest) / 86_400_000));
+    const { shown, exact } = kpiValue({ value: Math.round(total * 100) / 100, money: true });
+
     const first = page.locator("[data-kpis] > [data-kpi]").first();
     await expect(first).toHaveAttribute("data-kpi", "fin.waitingC");
     await expect(first).toContainText("Waiting on you");
-    await expect(first.locator("[data-kpi-value]")).toHaveText(/^₱/);
-    await expect(first).toContainText(/oldest \d+ days?/);
+    await expect(first.locator("[data-kpi-value]")).toHaveText(shown + (exact ?? ""));
+    await expect(first).toContainText(`oldest ${days} ${days === 1 ? "day" : "days"}`);
     await expect(page.locator('a[data-kpi="fin.waitingC"]')).toHaveCount(0);
     // The count is the supporting tile beside it, linked to the queue it counts.
     const count = page.locator('a[data-kpi="fin.waitingCount"]');
