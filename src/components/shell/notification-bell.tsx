@@ -14,7 +14,7 @@ import { useOverlayLayer } from "@/components/ui/use-focus-trap";
 
 /**
  * Task 7 (spec §7): the team bell in the top bar, on every page. A real button named "Notifications, N unread"; its
- * panel (a non-modal dialog right after it in the DOM, so Tab walks into it) has the tabs Sent back · To check ·
+ * panel (a non-modal dialog right after it in the DOM; opening it moves focus to its selected tab) has the tabs Sent back · To check ·
  * Changed · All, the newest 8 of each, and "See all". Opening an item marks it read — for this person only — and goes
  * to it. The count is polled on every route change and every 60 s while the tab is visible; a polite live region says
  * "1 new notification" only when the count goes up. Admins are never rung: their panel points at the full page.
@@ -136,6 +136,15 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
 
   // Escape (top overlay layer only) closes and returns focus to the bell.
   useOverlayLayer(open, () => close(true));
+
+  // The panel is a dialog (aria-haspopup="dialog"), so opening it moves focus into it: onto the selected tab, or
+  // "See all" for an admin (who has no tabs). Only on the open itself — a tab change already focuses its own tab.
+  const seeAllRef = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    (admin ? seeAllRef.current : tabRefs.current[tab])?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, admin]);
 
   // A click outside closes without refocusing: focus follows the click.
   useEffect(() => {
@@ -302,6 +311,7 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
           )}
           <div className="border-t border-border px-4 py-2 text-right">
             <Link
+              ref={seeAllRef}
               href={admin ? "/notifications" : notificationsHref({ tab })}
               onClick={() => setOpen(false)}
               className="text-[12.5px] font-medium text-accent underline-offset-2 hover:underline"
