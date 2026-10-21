@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PO_STATE_LABEL, canRegisterLine, legacyPoState, lineProgress, poProgress, poRefNo, stateAfterResubmit, stateAfterSave,
+  PO_STATE_LABEL, canRegisterLine, legacyPoState, lineProgress, poProgress, poRefNo, poStateFor, stateAfterSave,
   poRefSearch, derivePoProgress,
 } from "./po-flow";
 
@@ -13,10 +13,23 @@ describe("stateAfterSave", () => {
   });
 });
 
-describe("stateAfterResubmit", () => {
-  it("IT's send-back returns to IT; Finance's goes straight to ready", () => {
-    expect(stateAfterResubmit("IT")).toBe("WITH_IT");
-    expect(stateAfterResubmit("FINANCE")).toBe("READY");
+describe("poStateFor (one rule for the remaining IT work)", () => {
+  const it_ = (remaining: number) => ({ cls: "IT" as const, remaining });
+  const chairs = (remaining: number) => ({ cls: "PURCHASING" as const, remaining });
+  it("WITH_IT while an IT or unclassified line has units left and no IT unit is registered", () => {
+    expect(poStateFor({ state: "WITH_IT", lines: [it_(5), chairs(4)], itRegistered: false })).toBe("WITH_IT");
+    expect(poStateFor({ state: "READY", lines: [it_(5)], itRegistered: false })).toBe("WITH_IT");
+    expect(poStateFor({ state: "WITH_IT", lines: [{ cls: null, remaining: 1 }], itRegistered: false })).toBe("WITH_IT");
+  });
+  it("READY once IT has registered a unit, or no IT work is left (closed short or done)", () => {
+    expect(poStateFor({ state: "WITH_IT", lines: [it_(4), chairs(4)], itRegistered: true })).toBe("READY");
+    expect(poStateFor({ state: "WITH_IT", lines: [it_(0), chairs(4)], itRegistered: false })).toBe("READY");
+    expect(poStateFor({ state: "WITH_IT", lines: [chairs(4)], itRegistered: false })).toBe("READY");
+    expect(poStateFor({ state: "WITH_IT", lines: [], itRegistered: false })).toBe("READY");
+  });
+  it("a cancelled or sent-back PO stays where it is", () => {
+    expect(poStateFor({ state: "CANCELLED", lines: [it_(5)], itRegistered: false })).toBe("CANCELLED");
+    expect(poStateFor({ state: "SENT_BACK", lines: [chairs(0)], itRegistered: true })).toBe("SENT_BACK");
   });
 });
 

@@ -563,6 +563,88 @@ describe("closeLineShort", () => {
   });
 });
 
+describe("final review I2: the PO's state follows the IT work left (poStateFor)", () => {
+  const chairsLine = (extra: Row = {}) => line({ description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500, ...extra });
+
+  it("closing the last IT units short on a mixed WITH_IT PO moves it to READY, with the state in the audit", async () => {
+    seedPo({ state: "WITH_IT" });
+    seedLine("ln1", { qty: 2 }); // laptops (IT), nothing registered
+    seedLine("ln2", { description: "office chairs", categoryId: "cat-ch", qty: 4 });
+    seedAsset("c1", { cls: "PURCHASING", purchaseOrderLineId: "ln2", tag: "BR-CH-1" }); // Purchasing registered a chair
+    expect((await closeLineShort({ lineId: "ln1", qty: 1, reason: "supplier cancelled 1 unit" })).ok).toBe(true);
+    expect(po().state).toBe("WITH_IT"); // one laptop still for IT
+    expect(audits("po.line-closed")[0].diff).not.toHaveProperty("state");
+
+    expect((await closeLineShort({ lineId: "ln1", qty: 1, reason: "supplier cancelled the last one" })).ok).toBe(true);
+    expect(po().state).toBe("READY");
+    expect(audits("po.line-closed")[1].diff).toMatchObject({ state: { from: "WITH_IT", to: "READY" } });
+  });
+
+  it("closing a chair line short leaves a WITH_IT PO with IT", async () => {
+    seedPo({ state: "WITH_IT" });
+    seedLine("ln1", { qty: 2 });
+    seedLine("ln2", { description: "office chairs", categoryId: "cat-ch", qty: 4 });
+    expect((await closeLineShort({ lineId: "ln2", qty: 4, reason: "chairs cancelled" })).ok).toBe(true);
+    expect(po().state).toBe("WITH_IT");
+  });
+
+  it("Finance's resubmit of a mixed PO whose IT lines are unregistered goes back to IT, and IT's bell rings", async () => {
+    const returned = new Date("2026-10-20T00:00:00Z");
+    seedPo({ state: "SENT_BACK", sentBackBy: "FINANCE", sentBackById: ANA.id, sentBackAt: returned, sentBackFields: ["invoiceRef"] });
+    seedLine("ln1", { qty: 2 });
+    seedLine("ln2", { description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500 });
+    seedAsset("c1", {
+      cls: "PURCHASING", purchaseOrderLineId: "ln2", tag: "BR-CH-1", cost: 4500,
+      financeReturnedAt: returned, financeReturnedById: ANA.id, financeReturnedTo: "PURCHASING", financeReturnFields: ["invoiceRef"],
+    });
+    const r = await savePurchaseOrder(order({
+      id: "po1", invoiceRef: "SI-0099", lines: [line({ id: "ln1", qty: 2 }), chairsLine({ id: "ln2" })], reply: "SI number corrected",
+    }));
+    expect(r).toMatchObject({ ok: true, data: { state: "WITH_IT" } });
+    expect(po().state).toBe("WITH_IT");
+    expect(audits("po.resubmit")[0].diff).toMatchObject({ state: { from: "SENT_BACK", to: "WITH_IT" } });
+    expect(t("notification")).toEqual([
+      expect.objectContaining({ team: "FINANCE", kind: "TO_CHECK" }),
+      expect.objectContaining({ team: "IT", kind: "TO_CHECK", title: "PO-0214 · 2 laptops from Purchasing to check" }),
+    ]);
+  });
+
+  it("Finance's resubmit stays READY once IT has registered one of its units", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "FINANCE", sentBackById: ANA.id, sentBackFields: ["invoiceRef"] });
+    seedLine("ln1", { qty: 2 });
+    seedAsset("a1", { cls: "IT" }); // 1 of 2 laptops: IT's check is done
+    const r = await savePurchaseOrder(order({ id: "po1", invoiceRef: "SI-0099", lines: [line({ id: "ln1", qty: 2 })], reply: "SI number corrected" }));
+    expect(r).toMatchObject({ ok: true, data: { state: "READY" } });
+    expect(t("notification").map((n) => n.team)).toEqual(["FINANCE"]);
+  });
+
+  it("a resubmit to Finance that adds an IT line goes to IT", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "FINANCE", sentBackById: ANA.id, sentBackFields: ["other"] });
+    seedLine("ln2", { description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500 });
+    seedAsset("c1", { cls: "PURCHASING", purchaseOrderLineId: "ln2", tag: "BR-CH-1", cost: 4500 });
+    const r = await savePurchaseOrder(order({
+      id: "po1", lines: [chairsLine({ id: "ln2" }), line({ description: "docking stations", qty: 3, unitPrice: 9000 })],
+      reply: "added the docks we forgot",
+    }));
+    expect(r).toMatchObject({ ok: true, data: { state: "WITH_IT" } });
+    expect(t("notification")).toEqual([
+      expect.objectContaining({ team: "FINANCE", kind: "TO_CHECK" }),
+      expect.objectContaining({ team: "IT", kind: "TO_CHECK", title: "PO-0214 · 3 docking stations from Purchasing to check" }),
+    ]);
+  });
+
+  it("an IT send-back corrected by dropping every IT line goes READY; IT hears there is nothing left to check", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "IT", sentBackById: IVAN.id, sentBackFields: ["other"] });
+    seedLine("ln1");
+    seedLine("ln2", { description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500 });
+    const r = await savePurchaseOrder(order({ id: "po1", lines: [chairsLine({ id: "ln2" })], reply: "laptops dropped from this order" }));
+    expect(r).toMatchObject({ ok: true, data: { state: "READY" } });
+    expect(t("notification")).toEqual([
+      expect.objectContaining({ team: "IT", kind: "CHANGED", title: "PO-0214 · corrected by Purchasing, nothing left for IT to check" }),
+    ]);
+  });
+});
+
 describe("cancelPurchaseOrder", () => {
   it("cancels when nothing is registered, under the PO's row lock", async () => {
     seedPo();

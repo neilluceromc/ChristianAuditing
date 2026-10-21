@@ -14,7 +14,7 @@ import { diffOf, type AuditDiff } from "@/lib/audit-diff";
 import { cleanReason } from "@/lib/reason";
 import { GROUP_ARCHIVED } from "@/lib/groups";
 import { canEditField, MONEY_FIELDS, poMoneyStage, reasonError, teamOfRole, type IntakeStage } from "@/lib/intake-rules";
-import { lineProgress, PO_WRITE_ROLES, poRefNo, stateAfterResubmit, stateAfterSave, type PoState } from "@/lib/po-flow";
+import { lineProgress, PO_WRITE_ROLES, poRefNo, poStateFor, stateAfterSave, type PoState } from "@/lib/po-flow";
 import { moneyForAsset } from "@/lib/po-money";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
 import { returnOne, undoOne } from "@/server/modules/finance/review-writes";
@@ -97,7 +97,7 @@ const optionalReason = z.string().overwrite(cleanReason).optional();
 
 /** What an asset from a PO carries of its money (moneyForAsset's fields), plus its review state. */
 const ASSET_SELECT = {
-  id: true, tag: true, purchaseOrderLineId: true, purchaseRecordId: true,
+  id: true, tag: true, cls: true, purchaseOrderLineId: true, purchaseRecordId: true,
   financeConfirmedAt: true, financeReturnedAt: true, financeReturnedTo: true,
   cost: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true,
 } as const;
@@ -114,7 +114,7 @@ class StaleAssetError extends Error {
 }
 
 type PoAsset = {
-  id: string; tag: string; purchaseOrderLineId: string | null; purchaseRecordId: string | null;
+  id: string; tag: string; cls: AssetClass; purchaseOrderLineId: string | null; purchaseRecordId: string | null;
   financeConfirmedAt: Date | null; financeReturnedAt: Date | null; financeReturnedTo: Team | null;
   cost: unknown; vendorId: string | null; invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null;
 };
@@ -242,8 +242,10 @@ const summarize = (lines: Array<{ qty: number; unitPrice: unknown }>) => ({
  * - **Editing:** only while the PO's money is with Purchasing or IT (`poMoneyStage`). A line that already has assets
  *   registered from it stays: it can't be removed or re-categorised, and its quantity can't drop below what is
  *   registered or closed short (IT's serials sit on those units).
- * - **SENT_BACK:** Purchasing's reply is required (5–300 characters). The PO goes back to whoever sent it
- *   (`stateAfterResubmit`), the send-back is cleared and that team's bell rings. Finance's returned assets are
+ * - **SENT_BACK:** Purchasing's reply is required (5–300 characters). The send-back is cleared and the sender's bell
+ *   rings. Where the PO goes is `poStateFor` over the saved lines, as for any edit: back to IT while an IT line has
+ *   units left and no IT unit is registered (IT's bell rings too when Finance sent it back), otherwise ready to
+ *   register — so a mixed PO Finance sent back keeps its unregistered laptops in IT's queue. Finance's returned assets are
  *   un-returned. Every asset from the PO is re-copied with the saved money (`moneyForAsset`), so a PO's assets
  *   always share one SI number, supplier and date.
  */
@@ -416,7 +418,19 @@ async function editPo(
       }
     }
 
-    const state: PoState = resubmitTo ? stateAfterResubmit(resubmitTo) : stateAfterSave(lineCls.map((cls) => ({ cls })));
+    // Where it goes: the shared rule over the saved lines (a send-back or an old draft is going forward again).
+    const state: PoState = poStateFor({
+      state: po.state === "SENT_BACK" ? "READY" : po.state,
+      lines: d.lines.map((l, i) => ({
+        cls: lineCls[i],
+        remaining: lineProgress({
+          qty: l.qty,
+          registered: l.id ? registeredOn.get(l.id) ?? 0 : 0,
+          closedShort: l.id ? known.get(l.id)!.closedShort : 0,
+        }).remaining,
+      })),
+      itRegistered: assets.some((a) => a.cls === "IT"),
+    });
     const diff: AuditDiff = {
       ...(state !== po.state ? { state: { from: po.state, to: state } } : {}),
       ...diffOf(po, head),
@@ -502,10 +516,22 @@ async function editPo(
       action: resubmitTo ? "po.resubmit" : "po.save", diff, reason: reply, source: "web",
     });
     if (resubmitTo) {
+      // IT sent it back but Purchasing's correction left no IT work on it: IT hears, with nothing to check.
+      const nothingForIt = resubmitTo === "IT" && state !== "WITH_IT";
       await notify(tx, {
-        team: resubmitTo, kind: "TO_CHECK", title: `${po.refNo} · corrected by Purchasing, to check again`, body: reply,
-        href: poHref(id), actorId: user.id, actorRole: user.role, entityType: ENTITY, entityId: id,
+        team: resubmitTo, kind: nothingForIt ? "CHANGED" : "TO_CHECK",
+        title: nothingForIt
+          ? `${po.refNo} · corrected by Purchasing, nothing left for IT to check`
+          : `${po.refNo} · corrected by Purchasing, to check again`,
+        body: reply, href: poHref(id), actorId: user.id, actorRole: user.role, entityType: ENTITY, entityId: id,
       });
+      if (state === "WITH_IT" && resubmitTo !== "IT") {
+        // Finance sent back a PO whose IT lines are still unregistered (or Purchasing added one): it is IT's again.
+        await notify(tx, {
+          team: "IT", kind: "TO_CHECK", title: `${po.refNo} · ${itSummary(d.lines, lineCls)} from Purchasing to check`,
+          href: poHref(id), actorId: user.id, actorRole: user.role, entityType: ENTITY, entityId: id,
+        });
+      }
     } else if (state === "WITH_IT" && po.state !== "WITH_IT") {
       await notify(tx, {
         team: "IT", kind: "TO_CHECK", title: `${po.refNo} · ${itSummary(d.lines, lineCls)} from Purchasing to check`,
@@ -891,7 +917,9 @@ const closeSchema = z.object({
 /**
  * Spec §4 (partial deliveries): the rest of a line will never arrive. Closing it short counts those units as done,
  * with a reason ("supplier cancelled 2 units"). Never more than what is still to register, re-read under the PO
- * row's lock so a registration landing at the same moment can't push the line past its quantity.
+ * row's lock so a registration landing at the same moment can't push the line past its quantity. Closing the last IT
+ * units of a WITH_IT PO short leaves IT nothing to check, so the PO moves on to READY (poStateFor) — otherwise a mixed
+ * PO would sit in IT's queue for good with nothing IT can register or send back.
  */
 export async function closeLineShort(input: unknown): Promise<ActionResult<{ refNo: string; remaining: number }>> {
   return asActionResult(() => closeImpl(input));
@@ -937,17 +965,32 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
     }
 
     const closedShort = line.closedShort + qty;
+    const state = po.state as PoState;
+    const next = state === "WITH_IT" ? await stateAfterClose(tx, id, lineId, closedShort) : state;
+
+    // ---- writes (every refusal is above this line; the PO's guarded move comes first, so a miss writes nothing) ----
+    if (next !== state) {
+      const moved = await tx.purchaseOrder.updateMany({ where: { id, state }, data: { state: next, updatedAt: new Date() } });
+      if (moved.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
+    }
     const hit = await tx.purchaseOrderLine.updateMany({
       where: { id: lineId, closedShort: line.closedShort },
       data: { closedShort, closedShortReason: reason },
     });
-    if (hit.count === 0) { failure = conflict("Someone else changed this line first — reload and try again."); return; }
+    if (hit.count === 0) {
+      if (next !== state) throw new Error(`${po.refNo}: line changed under the PO row lock`); // rolls the move back
+      failure = conflict("Someone else changed this line first — reload and try again.");
+      return;
+    }
     await tx.noteEntry.create({
       data: { orderId: id, authorId: user.id, kind: "PO_LINE_CLOSED", text: `${line.description}: ${qty} closed short — ${reason}` },
     });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name, entityType: ENTITY, entityId: id, action: "po.line-closed",
-      diff: { line: { from: null, to: line.description }, closedShort: { from: line.closedShort, to: closedShort } },
+      diff: {
+        ...(next !== state ? { state: { from: state, to: next } } : {}),
+        line: { from: null, to: line.description }, closedShort: { from: line.closedShort, to: closedShort },
+      },
       reason, source: "web",
     });
     // The last units closed short on an otherwise fully approved PO complete it: its approval webhooks, once.
@@ -958,6 +1001,31 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
   if (failure) return failure;
   revalidatePo(id);
   return ok(out!);
+}
+
+/** A WITH_IT PO's state once `lineId` has `closedShort` units closed: poStateFor over every line, read under the lock. */
+async function stateAfterClose(tx: Prisma.TransactionClient, id: string, lineId: string, closedShort: number): Promise<PoState> {
+  const lines = await tx.purchaseOrderLine.findMany({
+    where: { orderId: id }, select: { id: true, categoryId: true, qty: true, closedShort: true },
+  });
+  const catIds = [...new Set(lines.map((l) => l.categoryId).filter((x): x is string => !!x))];
+  const cats = await tx.assetCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, cls: true } });
+  const clsOf = new Map(cats.map((c) => [c.id, c.cls]));
+  const assets = await tx.asset.findMany({ where: { purchaseOrderId: id }, select: { cls: true, purchaseOrderLineId: true } });
+  const registeredOn = new Map<string, number>();
+  for (const a of assets) {
+    if (a.purchaseOrderLineId) registeredOn.set(a.purchaseOrderLineId, (registeredOn.get(a.purchaseOrderLineId) ?? 0) + 1);
+  }
+  return poStateFor({
+    state: "WITH_IT",
+    lines: lines.map((l) => ({
+      cls: l.categoryId ? clsOf.get(l.categoryId) ?? null : null,
+      remaining: lineProgress({
+        qty: l.qty, registered: registeredOn.get(l.id) ?? 0, closedShort: l.id === lineId ? closedShort : l.closedShort,
+      }).remaining,
+    })),
+    itRegistered: assets.some((a) => a.cls === "IT"),
+  });
 }
 
 // ---- cancel --------------------------------------------------------------------------------------------------------

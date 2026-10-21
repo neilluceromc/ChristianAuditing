@@ -1,5 +1,4 @@
 import type { AssetClass, Role } from "@prisma/client";
-import type { Team } from "./intake-rules";
 
 /**
  * Purchase orders (spec: three-team intake). Pure rules for where a PO sits and who may register its lines.
@@ -23,9 +22,24 @@ export function stateAfterSave(lines: { cls: AssetClass | null }[]): "WITH_IT" |
   return lines.some((l) => l.cls === null || l.cls === "IT") ? "WITH_IT" : "READY";
 }
 
-/** Purchasing replies to a send-back: IT's goes back to IT, Finance's straight to registering. */
-export function stateAfterResubmit(sentBackBy: Team): "WITH_IT" | "READY" {
-  return sentBackBy === "IT" ? "WITH_IT" : "READY";
+/**
+ * Where a live PO sits, from what is left on its lines — the one rule every action that changes the remaining IT
+ * work uses (register, a resubmit from either sender, close short, an edit). A cancelled or sent-back PO stays where
+ * it is. Otherwise it is WITH_IT while some IT line, or an old line with no class, still has units to register AND no
+ * IT unit has been registered from it yet (IT registering is IT's check, spec §4 way 1); in every other case READY.
+ *
+ * `remaining` is lineProgress's (quantity less registered and closed short). Callers that only ever move a PO out of
+ * IT's queue (register, close short) apply it from WITH_IT only, so an old completed order whose lines never carried
+ * the asset link isn't pulled back into IT's queue.
+ */
+export function poStateFor(p: {
+  state: PoState;
+  lines: Array<{ cls: AssetClass | null; remaining: number }>;
+  itRegistered: boolean;
+}): PoState {
+  if (p.state === "CANCELLED" || p.state === "SENT_BACK") return p.state;
+  const itLeft = p.lines.some((l) => l.cls !== "PURCHASING" && l.remaining > 0);
+  return itLeft && !p.itRegistered ? "WITH_IT" : "READY";
 }
 
 export function lineProgress(l: { qty: number; registered: number; closedShort: number }): { remaining: number; label: string } {

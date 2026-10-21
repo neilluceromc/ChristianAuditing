@@ -10,7 +10,7 @@ import { writeAudit } from "@/server/audit";
 import { notify } from "@/server/notifications/notify";
 import { lockPo } from "./po-lock";
 import { DEFAULT_STATUS } from "@/lib/asset-class";
-import { canRegisterLine, lineProgress, type PoState } from "@/lib/po-flow";
+import { canRegisterLine, lineProgress, poStateFor, type PoState } from "@/lib/po-flow";
 import { moneyForAsset } from "@/lib/po-money";
 import { identifierWhere } from "@/lib/inventory-list";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
@@ -200,25 +200,33 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
       if (Object.keys(errors).length) { failure = validationError(errors); return; }
 
       /*
-       * Controller ruling (Task 5 fix round 1): a WITH_IT PO leaves IT's queue for READY only when IT's part is done —
-       * (a) this submit registers at least one IT unit (IT registering is IT's check), or (b) after it, no line whose
-       * class is IT or still unknown (an old unit with no category) has units left. Purchasing registering the chairs
-       * of a mixed PO first leaves it WITH_IT, so IT still sees its laptops to check.
+       * Controller ruling (Task 5 fix round 1), now the shared poStateFor: a WITH_IT PO leaves IT's queue for READY
+       * only when IT's part is done — an IT unit is registered (by this submit or before it: IT registering is IT's
+       * check), or after it no line whose class is IT or still unknown (an old unit with no category) has units left.
+       * Purchasing registering the chairs of a mixed PO first leaves it WITH_IT, so IT still sees its laptops to check.
+       * Only from WITH_IT: a READY PO stays READY whatever is registered.
        */
-      function leavesIt(): boolean {
-        if (classes.has("IT")) return true;
-        const adding = new Map(d.lines.map((l) => [l.lineId, l.units.length]));
-        return allLines.every((line) => {
-          const cls = line.categoryId ? catById.get(line.categoryId)?.cls ?? null : null;
-          if (cls === "PURCHASING") return true;
-          const registered = (registeredOn.get(line.id) ?? 0) + (adding.get(line.id) ?? 0);
-          return lineProgress({ qty: line.qty, registered, closedShort: line.closedShort }).remaining === 0;
-        });
-      }
+      const adding = new Map(d.lines.map((l) => [l.lineId, l.units.length]));
+      const itBefore = state === "WITH_IT" && !classes.has("IT")
+        ? await tx.asset.count({ where: { purchaseOrderId: po.id, cls: "IT" } })
+        : 0;
+      const next: PoState = state === "WITH_IT"
+        ? poStateFor({
+            state,
+            lines: allLines.map((line) => ({
+              cls: line.categoryId ? catById.get(line.categoryId)?.cls ?? null : null,
+              remaining: lineProgress({
+                qty: line.qty,
+                registered: (registeredOn.get(line.id) ?? 0) + (adding.get(line.id) ?? 0),
+                closedShort: line.closedShort,
+              }).remaining,
+            })),
+            itRegistered: classes.has("IT") || itBefore > 0,
+          })
+        : state;
 
       // ---- writes (every refusal is above this line) ----
       const now = new Date();
-      const next: PoState = state === "WITH_IT" && leavesIt() ? "READY" : state;
       const hit = await tx.purchaseOrder.updateMany({ where: { id: po.id, state }, data: { state: next, updatedAt: now } });
       if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
 
