@@ -848,9 +848,12 @@
   .lw-hero {
     padding: 150px 16px 72px;
     align-items: flex-start;
-    --lw-glass: rgba(255, 255, 255, 0.46);
   }
-  [data-theme="dark"] .lw-hero { --lw-glass: rgba(28, 32, 40, 0.5); }
+  /* The card is firm glass in every state here (final review): over Cris's big blurred orb the artboard's thinner
+     glass (0.46 / 0.5) put the subtitle at 3.6:1 (light) and the labels at 4.2:1 (dark). login-cris.spec.ts case 13
+     measures the card's text against what is painted behind it at 375 px, light and dark. */
+  .lw-hero,
+  [data-theme="dark"] .lw-hero { --lw-glass: var(--lw-glass-firm); }
   .lw-left {
     position: absolute;
     left: 0;
@@ -885,7 +888,6 @@
     -webkit-backdrop-filter: blur(6px) saturate(1.3);
     backdrop-filter: blur(6px) saturate(1.3);
   }
-  .lw-focus .lw-card { background: var(--lw-glass-firm); }
   /* The bubble sits to her left, above the card, its tail pointing at her. */
   .lw-hero:not(.lw-focus):not(.lw-fact) .lw-bubble { opacity: 0; }
   .lw-bubble,

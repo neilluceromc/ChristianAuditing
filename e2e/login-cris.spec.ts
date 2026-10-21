@@ -7,6 +7,7 @@ import { submitSignIn } from "./fixtures/login";
  * The Cris login page, blob style (Task 10, the owner's "Cris Login Redesign"; behaviour from Phase 44's spec
  * docs/superpowers/specs/2026-10-19-login-cris-design.md §5, §6, §8):
  *   1. the one sign-in form lands on Home, and the signed-in sequence (if it shows) runs in order;
+ *  1b. held in flight for ~2 s, the sign-in shows the sequence (with the typed email) and still lands on Home;
  *   2. a `next` link still wins;
  *   3. a wrong password errors under Password with the email kept, and the card comes back;
  *   4. Sign up: reachable from the form; a duplicate email bounces to step 1 (fields kept); a new one signs in;
@@ -17,7 +18,9 @@ import { submitSignIn } from "./fixtures/login";
  *   9. axe on the form, the focused form and Sign up 1, light and dark;
  *  10. the client checks put their messages under the right field;
  *  11. Forgot password and Show/Hide;
- *  12. a 64-character email doesn't stretch the card or the page.
+ *  12. a 64-character email doesn't stretch the card or the page;
+ *  13. at 375 px the card's text is at least 4.5:1 against what is painted behind it (Cris's blurred orb), light and
+ *      dark — measured from a screenshot, since axe can't judge text over backdrop-blurred glass.
  * Quick sign-in behind the STAGING pill is e2e/quick-login.spec.ts (it depends on QUICK_LOGIN_EMAILS).
  *
  * The form's inputs are controlled and have no `required`, so every message is read through the field's accessible
@@ -78,6 +81,85 @@ async function seriousViolations(page: Page) {
     .map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`);
 }
 
+/**
+ * The card's text against what is actually painted behind it. axe can't judge text over a translucent, backdrop-
+ * blurred card (it reports "incomplete"), so this measures: it records every visible text run's colour and box, hides
+ * the text, screenshots the page, and for each run takes the worst contrast against any pixel inside its box.
+ * Returns the runs under 4.5:1 (with their worst ratio) and the lowest ratio seen.
+ */
+async function cardTextContrast(page: Page): Promise<{ failing: string[]; lowest: number }> {
+  const runs = await page.evaluate(() => {
+    const out: Array<{ text: string; color: string; x: number; y: number; w: number; h: number }> = [];
+    const card = document.querySelector("main.lw-card");
+    if (!card) throw new Error("no card");
+    const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const text = node.textContent?.trim();
+      const el = node.parentElement;
+      if (!text || !el) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility !== "visible" || Number(cs.opacity) === 0) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) {
+        // sr-only text is clipped to 1 px; a run off-screen can't be read either
+        if (r.width < 3 || r.height < 3 || r.bottom < 0 || r.top > window.innerHeight) continue;
+        out.push({ text: text.slice(0, 40), color: cs.color, x: r.x, y: r.y, w: r.width, h: r.height });
+      }
+    }
+    return out;
+  });
+  // Hide the text only (backgrounds, borders and the glass stay), then capture what sits behind it.
+  const style = await page.addStyleTag({
+    content: ".lw-card, .lw-card * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }",
+  });
+  await page.waitForTimeout(100);
+  const shot = (await page.screenshot({ animations: "disabled" })).toString("base64");
+  await style.evaluate((el) => (el as Element).remove());
+  return page.evaluate(
+    async ({ shot, runs }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${shot}`;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const scale = img.width / window.innerWidth;
+      const lum = (r: number, g: number, b: number) => {
+        const f = (c: number) => {
+          const s = c / 255;
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      const failing: string[] = [];
+      let lowest = Infinity;
+      for (const run of runs) {
+        const [r, g, b] = (run.color.match(/[\d.]+/g) ?? []).map(Number);
+        const lt = lum(r, g, b);
+        const x0 = Math.round(run.x * scale) + 1;
+        const y0 = Math.round(run.y * scale) + 1;
+        const w = Math.max(1, Math.round(run.w * scale) - 2);
+        const h = Math.max(1, Math.round(run.h * scale) - 2);
+        const data = ctx.getImageData(x0, y0, w, h).data;
+        let worst = Infinity;
+        for (let i = 0; i < data.length; i += 4) {
+          const lb = lum(data[i], data[i + 1], data[i + 2]);
+          const ratio = (Math.max(lt, lb) + 0.05) / (Math.min(lt, lb) + 0.05);
+          if (ratio < worst) worst = ratio;
+        }
+        lowest = Math.min(lowest, worst);
+        if (worst < 4.5) failing.push(`"${run.text}" ${run.color} at ${worst.toFixed(2)}:1`);
+      }
+      return { failing, lowest: Math.round(lowest * 100) / 100 };
+    },
+    { shot, runs },
+  );
+}
+
 test.describe("login page", () => {
   test("1. the sign-in form lands on Home; the signed-in sequence runs in order while the request is in flight", async ({ page }) => {
     await open(page, "/login");
@@ -103,6 +185,31 @@ test.describe("login page", () => {
     const seen = await page.evaluate(() => JSON.parse(sessionStorage.getItem("lwSeen") ?? "[]") as string[]);
     // It never holds the redirect, so how far it got depends on the server; whatever showed came in order.
     expect(seen, `statuses shown: ${JSON.stringify(seen)}`).toEqual(ENTER_LINES.slice(0, seen.length));
+  });
+
+  test("1b. a sign-in held in flight (~2 s) shows the signed-in sequence, then still lands on Home", async ({ page }) => {
+    await open(page, "/login");
+    // Hold the sign-in POST (the server action posts to /login) for 2 s, once; everything else goes straight through.
+    let held = 0;
+    await page.route(
+      (u) => u.pathname === "/login",
+      async (route) => {
+        if (route.request().method() === "POST" && held === 0) {
+          held++;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        await route.fallback();
+      },
+    );
+    await submitSignIn(page, IT);
+    // While the request is held: the card steps aside, Cris says the sequence's lines, and the who-line is the email.
+    await expect(hero(page)).toHaveClass(/lw-entering/, { timeout: 1500 });
+    await expect.poll(() => page.locator(".lw-le-status").textContent(), { timeout: 1500 }).toMatch(
+      new RegExp(`^(${ENTER_LINES.slice(0, 2).join("|")})$`),
+    );
+    await expect(page.locator(".lw-le-who")).toHaveText(IT);
+    await expect(page).toHaveURL((u) => u.pathname === "/", { timeout: 30_000 });
+    expect(held).toBe(1);
   });
 
   test("2. a next link still wins over Home", async ({ page }) => {
@@ -325,5 +432,29 @@ test.describe("login page", () => {
       .toBe(true);
     const widthAfter = (await card(page).boundingBox())!.width;
     expect(widthAfter).toBeCloseTo(widthBefore, 0);
+  });
+
+  test("13. at 375 px the card's text is at least 4.5:1 over Cris's blurred orb, light and dark", async ({ page, baseURL }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 375, height: 812 });
+    // Held still, so the orb and the blob are where the screenshot finds them.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    // Every state's problems in one run, so a failure lists them all.
+    const problems: string[] = [];
+    const lowest: string[] = [];
+    for (const theme of ["light", "dark"] as const) {
+      await page.context().addCookies([{ name: "br.theme", value: theme, url: baseURL! }]);
+      for (const [label, path] of [["Sign in, Cris behind the card", "/login"], ["Sign up 1, focused", "/signup"]] as const) {
+        await open(page, path);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        await page.mouse.move(0, 0);
+        await page.waitForTimeout(700);
+        const r = await cardTextContrast(page);
+        problems.push(...r.failing.map((f) => `${label} (${theme}): ${f}`));
+        lowest.push(`${label} (${theme}) ${r.lowest}:1`);
+      }
+    }
+    console.log(`card text contrast, lowest per state: ${lowest.join("; ")}`);
+    expect(problems).toEqual([]);
   });
 });
