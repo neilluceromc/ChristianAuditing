@@ -9,7 +9,7 @@ import {
   clearFilters, parseListState, serializeListState, toggleSort, toSearchParams, withFilter, withPer, withSearch,
 } from "@/lib/url-state";
 import {
-  INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
+  INVENTORY_LIST_CONFIG, parsePurchaseYear, purchaseYearChips, scannerRedirect, withPurchaseYearQS,
   type PurchaseYearValue,
 } from "@/lib/inventory-list";
 import {
@@ -87,11 +87,10 @@ export default async function InventoryPage({
   // ejecting the user from the view they clicked in. Same rule, same place.
   if (cls !== "IT" && state.filters.stage) state = withFilter(state, "stage", []);
 
-  // USB scanner contract: an exact tag match opens the record, not a list.
-  if (state.q) {
-    const hit = await exactTagMatch(state.q);
-    if (hit) redirect(`/inventory/${hit.id}`);
-  }
+  // USB scanner contract by URL (spec §7.2): `?q=<exact tag>&go=1` opens the record; `go` is stripped after use. A
+  // bare `?q=` only filters, since the search filters as you type. The search box's Enter asks `findExactTag` instead.
+  const scanTo = await scannerRedirect(sp, state.q, exactTagMatch);
+  if (scanTo) redirect(scanTo);
 
   // Task 9: the bulk drawer's assign mode (and, Phase 30, the row menu's Assign) needs a name to assign to. Loaded
   // only for a role that can mutate this class at all — the same condition

@@ -5,9 +5,10 @@ import { ENTITY_PAGE_SIZE, PER_PAGE_OPTIONS, pageOf } from "@/lib/paging";
 import { finWhere, regWhere, type FinFilter } from "@/lib/registration";
 import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
-  categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortFinanceRows,
+  categoryTiles, finTabs, inFin, lifeStage, matchesLife, monthCharge, sortRows,
   type CategoryTile, type FinanceSort, type LifeFilter, type LifeStage,
 } from "@/lib/finance-list";
+import { ASSET_SEARCH_HIT_SELECT, assetHitStartsWith, prefixFirst } from "@/lib/search-rank";
 import { depRows, type DepAssetRow } from "./depreciation-queries";
 
 export interface FinanceListParams {
@@ -78,13 +79,14 @@ type Computed = Omit<FinanceAssetsResult, "rows" | "total" | "page" | "pageCount
 
 /**
  * Phase 47 (spec §3): Finance's register of one class. ONE read of the class's assets (depRows) — plus, with a search,
- * one id-only read so the search stays SQL's — the category tiles computed once, and every other aggregate in one
- * in-memory pass:
+ * one narrow read (ids and the starts-with fields) so the search stays SQL's — the category tiles computed once, and
+ * every other aggregate in one in-memory pass:
  * - category tiles: the class (folded to whole rows; "other" means every category not on its own tile);
  * - status tiles: the class and category;
  * - money totals: the class, category and status (the totals footer's rule: capitalised rows' depreciation results);
  * - finance-state counts: those plus search and life (not the finance state itself);
- * - the rows and `shown`: every filter. Sorted (spec ruling: book value high first replaces To review first);
+ * - the rows and `shown`: every filter. Sorted (spec ruling: book value high first replaces To review first); while
+ *   searching, the rows that start with the search come first, each group in that sort (spec §7.2, 2026-10-21);
  *   `financeAssets` pages them by `per`, `financeExportRows` returns them all.
  */
 async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed> {
@@ -92,10 +94,14 @@ async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed
   const q = p.q.trim();
   const [classRows, hits] = await Promise.all([
     depRows({ cls: p.cls }, now),
-    q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: { id: true } }) : null,
+    q ? prisma.asset.findMany({ where: financeListWhere({ cls: p.cls, status: null, q }), select: ASSET_SEARCH_HIT_SELECT }) : null,
   ]);
   const rows: FinanceRow[] = classRows.map((r) => ({ ...r, lifeStage: lifeStage(r.result, r.reg, r.notCapitalised, r.costC, r.category) }));
   const found = hits ? new Set(hits.map((h) => h.id)) : null;
+  // spec §7.2: the hits whose tag, model, serial or holder START with the search rank first
+  const startsWith = hits
+    ? new Set(hits.filter((h) => assetHitStartsWith(q, h)).map((h) => h.id))
+    : null;
 
   const tileInput = rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.category, costC: r.result?.cost ?? null, bookC: r.result?.bookValue ?? null }));
   // categoryTiles validates the selection: All is lit for an unknown id, or for "other" when nothing folds.
@@ -144,7 +150,9 @@ async function computeFinance(p: FinanceListParams, now: Date): Promise<Computed
     shown.costedCount++; shown.costC += r.result.cost; shown.accC += r.result.accumulated; shown.bookC += r.result.bookValue;
   }
   return {
-    sorted: sortFinanceRows(matching, p.sort ?? "book"),
+    sorted: startsWith
+      ? prefixFirst(sortRows(matching, p.sort ?? "book"), (r) => startsWith.has(r.id))
+      : sortRows(matching, p.sort ?? "book"),
     category, categoryLabel, kpis, categoryTiles: tiles, statusTiles,
     finCounts: [...counts].map(([key, count]) => ({ key, count })),
     shown,

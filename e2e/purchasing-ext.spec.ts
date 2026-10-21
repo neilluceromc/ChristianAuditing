@@ -318,7 +318,7 @@ test.describe.serial("purchasing extensions", () => {
     });
 
     // The scanner contract redirects an exact tag match straight to the record.
-    await page.goto("/inventory?q=BR-LT-9001");
+    await page.goto("/inventory?q=BR-LT-9001&go=1");
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     await expect(page.getByText("Historical import")).toBeVisible();
 
@@ -334,7 +334,7 @@ test.describe.serial("purchasing extensions", () => {
     await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
     expect(await db.asset.count({ where: { tag: directTag } })).toBe(1);
 
-    await page.goto(`/inventory?q=${directTag}`);
+    await page.goto(`/inventory?q=${directTag}&go=1`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     await expect(page.getByText("Registered directly")).toBeVisible();
 
@@ -349,7 +349,7 @@ test.describe.serial("purchasing extensions", () => {
     await page.waitForURL(/\/inventory\/labels\?just=/, { timeout: 30_000 });
     expect(await db.asset.count({ where: { tag: fromPrTag } })).toBe(1);
 
-    await page.goto(`/inventory?q=${fromPrTag}`);
+    await page.goto(`/inventory?q=${fromPrTag}&go=1`);
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 20_000 });
     await expect(page.getByRole("link", { name: "From PR-0188" })).toBeVisible();
 

@@ -5,6 +5,7 @@ import {
   classifyClick,
   clickGuardTarget,
   isSamePageQueryNav,
+  liveSearchReplace,
   pushGuarded,
   replaceGuarded,
   requestedSince,
@@ -193,6 +194,47 @@ describe("watchSamePageNav", () => {
     h.run();
     expect(h.assign).toHaveBeenCalledOnce();
   });
+  it("a one-shot go=1 the server stripped counts as committed (Enter's scanner miss redirects back to the list)", () => {
+    // Task 6 review I1: the search had landed (q=Carlo), Enter sent q=Carlo&go=1, the page found no exact tag and
+    // redirected to q=Carlo, which is where the navigation started. That is a finished navigation, not a stuck one.
+    const h = harness("/inventory?q=Carlo");
+    watchSamePageNav(to("/inventory?q=Carlo&go=1"), { ...h.deps, history: "replace" });
+    h.request("/inventory?q=Carlo&go=1&_rsc=a1");
+    h.run();
+    expect(h.replace).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+  it("go=1 stripped elsewhere in the query still counts (params in any order)", () => {
+    const h = harness("/inventory?cls=PURCHASING&q=car");
+    watchSamePageNav(to("/inventory?q=car&go=1&cls=PURCHASING"), h.deps);
+    h.request("/inventory?q=car&go=1&cls=PURCHASING&_rsc=b");
+    h.run();
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+  it("without a one-shot param, landing back where it started is still stuck", () => {
+    const h = harness("/inventory?q=Carlo");
+    watchSamePageNav(to("/inventory?q=Carl"), h.deps);
+    h.request("/inventory?q=Carl&_rsc=c");
+    h.run();
+    expect(h.assign).toHaveBeenCalledOnce();
+  });
+  it("runs beforeFallback just before the ordinary load (the search box remembers its text and caret)", () => {
+    const h = harness("/inventory");
+    const order: string[] = [];
+    h.replace.mockImplementation(() => void order.push("load"));
+    watchSamePageNav(to("/inventory?q=Ca"), { ...h.deps, history: "replace", beforeFallback: () => void order.push("remember") });
+    h.request("/inventory?q=Ca&_rsc=d");
+    h.run();
+    expect(order).toEqual(["remember", "load"]);
+  });
+  it("does not run beforeFallback when nothing is loaded", () => {
+    const h = harness("/inventory");
+    const before = vi.fn();
+    watchSamePageNav(to("/inventory?q=Ca"), { ...h.deps, beforeFallback: before });
+    h.go("/inventory?q=Ca");
+    h.run();
+    expect(before).not.toHaveBeenCalled();
+  });
   it("falls back with location.replace for a replace navigation", () => {
     const h = harness("/equipment-by-client?tab=client");
     watchSamePageNav(to("/equipment-by-client?tab=client&group=g1"), { ...h.deps, history: "replace" });
@@ -200,6 +242,72 @@ describe("watchSamePageNav", () => {
     h.run();
     expect(h.assign).not.toHaveBeenCalled();
     expect(h.replace).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/equipment-by-client?tab=client&group=g1`);
+  });
+  it("with retry (live search), a stuck navigation is retried once as a soft navigation before any load", () => {
+    const h = harness("/inventory");
+    const retry = vi.fn();
+    const before = vi.fn();
+    watchSamePageNav(to("/inventory?q=mac"), { ...h.deps, history: "replace", retry, beforeFallback: before });
+    h.request("/inventory?q=mac&_rsc=r1");
+    h.run(); // first window: stuck
+    expect(retry).toHaveBeenCalledOnce();
+    expect(h.replace).not.toHaveBeenCalled();
+    expect(before).not.toHaveBeenCalled();
+    expect(h.pending()).toBe(1); // watching the retry for the same window
+    h.run(); // still stuck after the retry: now the ordinary load
+    expect(retry).toHaveBeenCalledOnce();
+    expect(before).toHaveBeenCalledOnce();
+    expect(h.replace).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?q=mac`);
+    expect(h.pending()).toBe(0);
+  });
+  it("with retry, a retry that commits needs no load", () => {
+    const h = harness("/inventory");
+    const retry = vi.fn(() => h.go("/inventory?q=mac"));
+    watchSamePageNav(to("/inventory?q=mac"), { ...h.deps, history: "replace", retry });
+    h.request("/inventory?q=mac&_rsc=r1");
+    h.run();
+    h.run();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(h.replace).not.toHaveBeenCalled();
+    expect(h.pending()).toBe(0);
+  });
+  it("with retry, nothing is retried when the first navigation committed or was never requested", () => {
+    const h = harness("/inventory");
+    const retry = vi.fn();
+    watchSamePageNav(to("/inventory?q=mac"), { ...h.deps, history: "replace", retry });
+    h.go("/inventory?q=mac");
+    h.run();
+    const g = harness("/inventory");
+    watchSamePageNav(to("/inventory?q=mac"), { ...g.deps, history: "replace", retry }); // no request recorded
+    g.run();
+    expect(retry).not.toHaveBeenCalled();
+    expect(h.pending() + g.pending()).toBe(0);
+    expect(h.replace).not.toHaveBeenCalled();
+    expect(g.replace).not.toHaveBeenCalled();
+  });
+  it("with retry, a keystroke (cancelStuckNavWatch), the cancel function or a newer watch stops the retry's check", () => {
+    for (const stop of ["cancelStuckNavWatch", "cancel", "newer"] as const) {
+      const h = harness("/inventory");
+      const retry = vi.fn();
+      const cancel = watchSamePageNav(to("/inventory?q=mac"), { ...h.deps, history: "replace", retry });
+      h.request("/inventory?q=mac&_rsc=r1");
+      h.run();
+      expect(retry).toHaveBeenCalledOnce();
+      if (stop === "cancelStuckNavWatch") cancelStuckNavWatch();
+      else if (stop === "cancel") cancel();
+      else watchSamePageNav(to("/inventory?q=macb"), { ...h.deps, history: "replace" }); // never requested: no load
+      if (stop !== "newer") expect(h.pending()).toBe(0);
+      h.run();
+      expect(h.replace).not.toHaveBeenCalled();
+    }
+  });
+  it("without retry (every other navigation), the first stuck check loads the page as before", () => {
+    const h = harness("/inventory");
+    watchSamePageNav(to("/inventory?status=SPARE"), h.deps);
+    h.request("/inventory?status=SPARE&_rsc=1");
+    h.run();
+    expect(h.assign).toHaveBeenCalledOnce();
+    expect(h.pending()).toBe(0);
   });
   it("is inactive outside production", () => {
     const h = harness("/inventory");
@@ -283,6 +391,44 @@ describe("pushGuarded / replaceGuarded", () => {
     w.run();
     expect(w.loc.assign).not.toHaveBeenCalled();
     expect(w.loc.replace).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/equipment-by-client?tab=client&group=g1`);
+  });
+  it("liveSearchReplace retries a stuck search once with router.replace, then loads it with location.replace", () => {
+    const w = fakeWindow("/inventory");
+    const router = { push: vi.fn(), replace: vi.fn(() => w.request("/inventory?q=mac&_rsc=9")) };
+    liveSearchReplace(router, "/inventory?q=mac");
+    expect(router.replace).toHaveBeenCalledOnce();
+    w.run();
+    expect(router.replace).toHaveBeenCalledTimes(2);
+    expect(router.replace).toHaveBeenLastCalledWith("/inventory?q=mac", undefined);
+    expect(w.loc.replace).not.toHaveBeenCalled();
+    w.run();
+    expect(w.loc.replace).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/inventory?q=mac`);
+    expect(w.loc.assign).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+  });
+  it("liveSearchReplace: a retry that commits is the end of it", () => {
+    const w = fakeWindow("/inventory");
+    let calls = 0;
+    const router = {
+      push: vi.fn(),
+      replace: vi.fn(() => {
+        w.request("/inventory?q=mac&_rsc=9");
+        if (++calls === 2) w.loc.search = "?q=mac"; // the retry commits
+      }),
+    };
+    liveSearchReplace(router, "/inventory?q=mac");
+    w.run();
+    w.run();
+    expect(router.replace).toHaveBeenCalledTimes(2);
+    expect(w.loc.replace).not.toHaveBeenCalled();
+  });
+  it("replaceGuarded (not a live search) keeps the single check and the direct load", () => {
+    const w = fakeWindow("/equipment-by-client?tab=client");
+    const router = { push: vi.fn(), replace: vi.fn(() => w.request("/equipment-by-client?tab=client&group=g1&_rsc=9")) };
+    replaceGuarded(router, "/equipment-by-client?tab=client&group=g1");
+    w.run();
+    expect(router.replace).toHaveBeenCalledOnce();
+    expect(w.loc.replace).toHaveBeenCalledOnce();
   });
   it("a navigation to another page cancels a pending watch, so a stuck filter can't drag the operator back", () => {
     const w = fakeWindow("/employees");

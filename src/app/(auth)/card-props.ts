@@ -5,7 +5,6 @@ import { signIn } from "@/server/auth";
 import { flagDomain } from "@/lib/auth-shared";
 import { parseQuickLoginEmails } from "@/lib/quick-login";
 import { ROLE_LABELS } from "@/lib/admin-users";
-import { ROLE_LANDING } from "@/lib/workspaces";
 import type { LoginExperienceProps } from "@/components/login/login-experience";
 
 async function microsoftSignIn() {
@@ -49,6 +48,6 @@ export async function loadCardProps({
             accounts: quickAccounts.map((a) => ({ email: a.email, label: ROLE_LABELS[a.role] })),
             refused: quick === "refused",
           },
-    viewerLanding: ROLE_LANDING.viewer,
+    viewerLanding: "/", // Home, like every sign-in (follow-up spec §7.1)
   };
 }

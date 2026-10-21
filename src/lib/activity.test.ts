@@ -267,6 +267,17 @@ describe("stock module audit sentences (M-3) — the fourteen actions no longer 
   });
 });
 
+describe("actionDot — the finance follow-up's undo and reopen", () => {
+  it("an undone approval or send-back, and an admin's reopen, put the asset back in review: in flight", () => {
+    expect(actionDot("finance.confirm.undone")).toBe("SUBMITTED");
+    expect(actionDot("asset.return.undone")).toBe("SUBMITTED");
+    expect(actionDot("finance.confirm.reopened")).toBe("SUBMITTED");
+  });
+  it("an undone settings change is an edit: neutral, like the change it takes back", () => {
+    expect(actionDot("depreciation.override.undone")).toBe("SPARE");
+  });
+});
+
 describe("actionDot — import actions get a deliberate, explicit colour", () => {
   it("import-create settles the same way a manual create does", () => {
     expect(actionDot("import-create")).toBe("DEPLOYED");
@@ -459,6 +470,20 @@ describe("Phase 35 registration sentences", () => {
       .toBe("L. Domingo approved BR-LT-0214 as not capitalised");
     expect(s("finance.reopened", { cost: { from: null, to: 500 } }))
       .toBe("L. Domingo added a cost to BR-LT-0214, so it went back to Finance");
+  });
+  it("finance follow-up (spec §3): the undos and the admin's reopen", () => {
+    expect(s("finance.confirm.undone", { review: { from: "Approved", to: "To review" } })).toBe("L. Domingo undid the approval of BR-LT-0214");
+    expect(s("asset.return.undone", null)).toBe("L. Domingo undid sending BR-LT-0214 back");
+    expect(s("depreciation.override.undone", null)).toBe("L. Domingo undid the depreciation settings change on BR-LT-0214");
+    expect(s("finance.confirm.reopened", null)).toBe("L. Domingo reopened BR-LT-0214's review");
+    expect(auditPhrase({ action: "finance.confirm.undone", diff: null })).toBe("undid the approval");
+    expect(auditPhrase({ action: "asset.return.undone", diff: null })).toBe("undid the send-back");
+    expect(auditPhrase({ action: "depreciation.override.undone", diff: null })).toBe("undid the depreciation settings change");
+    expect(auditPhrase({ action: "finance.confirm.reopened", diff: null })).toBe("reopened the review");
+    expect(actionLabel("finance.confirm.undone")).toBe("Approval undone");
+    expect(actionLabel("asset.return.undone")).toBe("Send-back undone");
+    expect(actionLabel("depreciation.override.undone")).toBe("Custom depreciation undone");
+    expect(actionLabel("finance.confirm.reopened")).toBe("Review reopened");
   });
 });
 

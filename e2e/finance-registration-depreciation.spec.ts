@@ -210,7 +210,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await dialog.getByLabel("Note for IT").fill("Invoice is for another PO");
       await expect(dialog).toContainText("2 ticked");
       await dialog.getByRole("button", { name: "Send back", exact: true }).click();
-      await expect(page.getByText(`${tag} sent back to IT`)).toBeVisible();
+      await expect(page.locator("[data-toast-id]").filter({ hasText: `Sent ${tag} back to IT` })).toBeVisible();
 
       await login(page, IT);
       await page.goto(`/inventory?q=${listQ(tag)}`);
@@ -270,7 +270,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await expect(review.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
       await waitForHydration(review.getByRole("button", { name: "Approve as not capitalised" }));
       await review.getByRole("button", { name: "Approve as not capitalised" }).click();
-      await expect(page.getByText(`${tag} approved as not capitalised`)).toBeVisible();
+      await expect(page.locator("[data-toast-id]").filter({ hasText: `Approved ${tag} as not capitalised` })).toBeVisible();
       await expect.poll(async () => (await db.asset.findUniqueOrThrow({ where: { id } })).financeNotCapitalised).toBe(true);
 
       await page.goto(`/finance/assets?fin=not-capitalised&q=${tag}`);
@@ -423,7 +423,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await dialog.getByLabel("Salvage (₱)").fill("5000");
       await dialog.getByLabel("Reason").fill("refurbished unit");
       await dialog.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(page.getByText(`Custom depreciation saved — ${tag}`)).toBeVisible();
+      await expect(page.locator("[data-toast-id]").filter({ hasText: `Saved ${tag}'s depreciation settings` })).toBeVisible();
 
       const customBook = expectedBook(55000, start, 24, null, 500_000);
       expect(customBook).not.toBe(categoryBook);
@@ -434,7 +434,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
       await menu.getByRole("menuitem", { name: "Depreciation for this asset…" }).click();
       dialog = page.getByRole("dialog", { name: `Depreciation for ${tag}` });
       await dialog.getByRole("button", { name: "Clear override" }).click();
-      await expect(page.getByText(`Custom depreciation cleared — ${tag}`)).toBeVisible();
+      await expect(page.locator("[data-toast-id]").filter({ hasText: `Cleared ${tag}'s depreciation settings` })).toBeVisible();
       await expect(row(page, tag)).toContainText(categoryBook);
       await expect(row(page, tag)).not.toContainText("custom");
 

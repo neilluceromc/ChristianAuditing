@@ -506,8 +506,8 @@ export function SignInCard({
               <>
                 {heading(firstWord(name) ? `You're in, ${firstWord(name)}` : "You're in")}
                 <p className="lw-lede">
-                  New accounts start as <strong className="lw-rolechip">Viewer</strong>. An admin assigns your role, and your role
-                  decides which workspace you land in.
+                  New accounts start as <strong className="lw-rolechip">Viewer</strong>. An admin assigns your role, which
+                  decides the workspaces you can open. You&apos;ll start on Home.
                 </p>
                 <a href={viewerLanding} className="lw-btn lw-btn-link">
                   Go to Cris

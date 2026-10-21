@@ -15,14 +15,14 @@ vi.mock("@/server/modules/employees/transfer-actions", () => ({ bulkTransferEmpl
 
 const row = (over: Partial<EmployeeListRow>): EmployeeListRow => ({
   id: "e1", name: "Ana Cruz", title: "Support Lead", employeeNo: "EMP-0042", department: "Finance",
-  departmentKind: "INTERNAL", employment: "ACTIVE", m365: "active", items: 3, missingRequired: 0, joined: "Mar 3, 2025",
+  departmentKind: "INTERNAL", employment: "ACTIVE", m365: "active", items: 3, missingRequired: 0, joined: "03 Mar 2025", joinedAt: new Date("2025-03-02T16:30:00Z"),
   ...over,
 });
 
 const state: ListState = { q: "", filters: {}, sort: [{ key: "name", dir: "asc" }], page: 1, per: 25 };
 
-const table = (rows: EmployeeListRow[], canMutate = true) =>
-  renderToStaticMarkup(<EmployeesTable rows={rows} state={state} sortHrefs={{}} canMutate={canMutate} />);
+const table = (rows: EmployeeListRow[], canMutate = true, st: ListState = state) =>
+  renderToStaticMarkup(<EmployeesTable rows={rows} state={st} sortHrefs={{}} canMutate={canMutate} />);
 
 /** The text of each header cell, in order. */
 const headers = (html: string) =>
@@ -107,6 +107,16 @@ describe("EmployeesTable", () => {
     expect(leavers).toMatch(/<input type="checkbox"[^>]*aria-label="Select all on this page"[^>]*disabled=""/);
   });
 
+  it("shows the join date under the name only on the joined sorts, in Manila time", () => {
+    // 2025-03-02T16:30Z is 3 Mar 00:30 in Manila
+    expect(table([row({})])).not.toContain("Joined 3 Mar 2025");
+    expect(table([row({})], true, { ...state, sort: [{ key: "employeeNo", dir: "asc" }] })).not.toContain("Joined 3 Mar 2025");
+    for (const dir of ["desc", "asc"] as const) {
+      const html = table([row({})], true, { ...state, sort: [{ key: "joinedAt", dir }] });
+      expect(html).toContain("Joined 3 Mar 2025");
+    }
+  });
+
   it("shows no bulk bar while nothing is ticked", () => {
     expect(table([row({})])).not.toContain("Bulk actions");
   });
@@ -121,6 +131,23 @@ describe("EmployeesToolbar", () => {
     expect(html).not.toContain("Employment");
     expect(html).not.toContain("Show leavers");
     expect(html).not.toContain("Policy gaps only");
+  });
+
+  it("has a Sort select with the five options, Name A–Z selected by default", () => {
+    const html = toolbar(state);
+    expect(html).toContain(">Sort</label>");
+    const opts = [...html.matchAll(/<option value="([^"]*)"([^>]*)>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], /selected/.test(m[2])]);
+    expect(opts).toEqual([
+      ["name", "Name A–Z", true], ["-name", "Name Z–A", false], ["-joinedAt", "Recently joined", false],
+      ["joinedAt", "Earliest joined", false], ["employeeNo", "Employee no.", false],
+    ]);
+    expect(toolbar({ ...state, sort: [{ key: "joinedAt", dir: "desc" }] })).toMatch(/<option value="-joinedAt" selected="">Recently joined/);
+  });
+
+  it("offers a disabled Column order option, selected, for a column-header sort, rather than claiming a wrong one", () => {
+    const html = toolbar({ ...state, sort: [{ key: "loadout", dir: "asc" }] });
+    expect(html).toMatch(/<option value="" disabled="" selected="">Column order<\/option>/);
+    expect(html).not.toMatch(/<option value="name" selected/);
   });
 
   it("prints the count with the number in bold, and the hidden leavers as a link that shows them", () => {

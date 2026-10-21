@@ -236,3 +236,31 @@ export function identifierWhere(
     serials: { cls, serial: { in: serials } },
   };
 }
+
+/**
+ * Spec §7.2 (2026-10-21): the USB scanner contract by URL. Since the search filters as you type, `?q=<exact tag>` on
+ * its own only filters; `?q=<tag>&go=1` opens the record (direct links and e2e). The search box's Enter does not use
+ * it: it asks the `findExactTag` action and pushes the record (`inventorySearchSubmit`). `stuck-nav.ts`'s
+ * ONE_SHOT_PARAMS names the same param, so a navigation the page answers by stripping it counts as committed.
+ */
+export const SCANNER_GO_PARAM = "go";
+
+/**
+ * Where the list page must redirect for the scanner contract, or null to render the list. Without `go=1`: null, and
+ * nothing is looked up (a typed or pasted exact tag only filters). With it: the record for an exact tag; otherwise the
+ * same list without `go` (stripped after use, so a reload or a shared link never opens a record on its own).
+ */
+export async function scannerRedirect(
+  sp: URLSearchParams,
+  q: string,
+  lookup: (q: string) => Promise<{ id: string } | null> | null,
+  path = "/inventory",
+): Promise<string | null> {
+  if (sp.get(SCANNER_GO_PARAM) !== "1") return null;
+  const hit = q ? await lookup(q) : null;
+  if (hit) return `${path}/${hit.id}`;
+  const rest = new URLSearchParams(sp);
+  rest.delete(SCANNER_GO_PARAM);
+  const qs = rest.toString();
+  return qs ? `${path}?${qs}` : path;
+}

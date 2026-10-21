@@ -29,7 +29,7 @@ export default async function UsersPage({
     <>
       <PageHeader title="Users & roles" />
       <div className="flex max-w-[860px] flex-col gap-3">
-        <Banner tone="neutral" title="Role decides which workspace someone lands in">
+        <Banner tone="neutral" title="Role decides which workspaces someone can open">
           Disabling an account keeps its history and blocks sign-in. The permanent admin cannot be
           demoted or disabled, so the system can never be locked out of itself.
         </Banner>

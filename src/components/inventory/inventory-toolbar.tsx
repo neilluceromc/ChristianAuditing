@@ -1,11 +1,10 @@
 "use client";
 
+import { useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
 import { cn } from "@/lib/cn";
-import { Input } from "@/components/ui/input";
-import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { LIST } from "@/components/patterns/list-styles";
 import { Menu, type MenuItem } from "@/components/ui/menu";
@@ -20,6 +19,9 @@ import { REPAIRS_SAVED_VIEW, isRepairStage, isRepairView } from "@/lib/repairs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 import { useListNavigation } from "@/components/patterns/list-navigation";
+import { SearchBox } from "@/components/patterns/search-box";
+import { inventorySearchSubmit } from "@/lib/inventory-search-submit";
+import { findExactTag } from "@/server/modules/inventory/scan-actions";
 import { MoreFilters } from "./more-filters";
 
 /** Phase 30 (spec §6.2): the view switches are pill toggles — links, so e2e and a middle-click reach them. */
@@ -140,7 +142,9 @@ export function InventoryToolbar({
   /** the Columns chooser, after More filters */
   children?: React.ReactNode;
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
+  // the newest search the box sent: an Enter lookup that comes back after a newer search is dropped
+  const searchSeq = useRef(0);
   const hrefFor = useInventoryHref(cls, defaultCls, purchaseYear);
   const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -193,36 +197,25 @@ export function InventoryToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="relative w-[300px]">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint">
-          <Icon name="search" size={14} />
-        </span>
-        <Input
-          // Keyed on the URL's q (the Phase 29 employees fix): a search change is a soft
-          // navigation, and an uncontrolled input ignores a new defaultValue once typed in.
-          key={state.q}
-          type="search"
-          data-page-search
-          aria-label="Search assets"
-          placeholder="Search tag, model, serial, holder · Enter"
-          defaultValue={state.q}
-          className="h-9 py-0 pl-8 pr-7 text-[13px]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") navigate(hrefFor(withSearch(state, e.currentTarget.value)));
-          }}
-        />
-        {state.q && (
-          <button
-            type="button"
-            aria-label="Clear search"
-            // Fitts / WCAG 2.5.8: a 24 × 24 px target, centred, inside the input's pr-7 gutter
-            className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-(--radius-ctl) text-fg-muted hover:bg-surface-subtle hover:text-fg"
-            onClick={() => navigate(hrefFor(withSearch(state, "")))}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      {/* The house search (spec §7.2: as you type). Enter is the USB scanner contract: an exact tag opens the record
+          (pushed, so Back returns here); typing or pasting a full tag just filters. See inventorySearchSubmit. */}
+      <SearchBox
+        value={state.q}
+        ariaLabel="Search assets"
+        placeholder="Search tag, model, serial, holder"
+        onSubmit={(q, how) => {
+          const seq = ++searchSeq.current;
+          void inventorySearchSubmit(q, how, {
+            listHref: hrefFor(withSearch(state, q)),
+            find: findExactTag,
+            push: navigate,
+            replace,
+            stillCurrent: () => seq === searchSeq.current,
+          });
+        }}
+        className="w-[300px]"
+        inputClassName="h-9 py-0 text-[13px]"
+      />
       <div className={LIST.tall}>{facetControl("category")}</div>
       <MoreFilters count={moreSet}>
         {moreFacets.map(facetControl)}

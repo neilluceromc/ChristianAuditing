@@ -207,7 +207,7 @@ test.describe.serial("approvals lifecycle — it@", () => {
     await page.goto("/approvals?tab=closed");
     await expect(page.getByRole("row", { name: /APR-2041/ })).toContainText("EXECUTED");
 
-    await page.goto("/inventory?q=BR-LT-0181");
+    await page.goto("/inventory?q=BR-LT-0181&go=1");
     // Scanner-contract redirect settles asynchronously — see the identical
     // comment in e2e/it-core.spec.ts's secrets test.
     await page.waitForURL(/\/inventory\/[^/?]+$/);

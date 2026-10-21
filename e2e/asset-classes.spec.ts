@@ -465,7 +465,7 @@ test.describe("Finance send-back and resubmit speak the class", () => {
     await dialog.getByLabel("Cost", { exact: true }).check();
     await dialog.getByLabel("Note for Purchasing").fill("e2e — wrong cost recorded");
     await dialog.getByRole("button", { name: "Send back", exact: true }).click();
-    await expect(page.getByText("BR-FN-0003 sent back to Purchasing")).toBeVisible();
+    await expect(page.locator("[data-toast-id]").filter({ hasText: "Sent BR-FN-0003 back to Purchasing" })).toBeVisible();
     await expect(page.getByText(/Sent back to Purchasing: Cost/)).toContainText("e2e — wrong cost recorded");
 
     // IT cannot resubmit — and, as of Phase 14's asymmetric visibility, cannot

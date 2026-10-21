@@ -1,14 +1,11 @@
 "use client";
 
-import { useId } from "react";
-import { Select } from "@/components/ui/select";
 import { useListNavigation } from "@/components/patterns/list-navigation";
 import { SearchBox } from "@/components/patterns/search-box";
-import { LIST } from "@/components/patterns/list-styles";
-import { cn } from "@/lib/cn";
+import { LabelledSelect } from "@/components/patterns/labelled-select";
 import { fmtMoneyExact } from "@/lib/format";
 import {
-  FINANCE_SORTS, LIFE_FILTERS, LIFE_LABEL, SORT_LABEL, financeListHref, parseLife, parseSort, withFinance,
+  LIFE_FILTERS, LIFE_LABEL, SORT_OPTIONS, financeListHref, parseLife, parseSort, withFinance,
   type FinanceListState,
 } from "@/lib/finance-list";
 
@@ -25,30 +22,6 @@ export function controlHref(state: FinanceListState, control: ToolbarControl, va
     case "life": return financeListHref(withFinance(state, { life: parseLife(value) }));
     case "sort": return financeListHref(withFinance(state, { sort: parseSort(value) }));
   }
-}
-
-function LabelledSelect({
-  label, value, onChange, children,
-}: {
-  label: string; value: string; onChange: (v: string) => void; children: React.ReactNode;
-}) {
-  const id = useId();
-  return (
-    <div className="flex items-center gap-1.5 text-[12.5px] text-fg-muted">
-      <label htmlFor={id} className="whitespace-nowrap">{label}</label>
-      <Select
-        // Uncontrolled and keyed on the URL's value: the pick stays shown while its navigation is in flight, and the
-        // select takes the URL's value again once the next view lands (or on Back).
-        key={value}
-        id={id}
-        defaultValue={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(LIST.control, "w-auto max-w-[220px] pl-2.5")}
-      >
-        {children}
-      </Select>
-    </div>
-  );
 }
 
 /**
@@ -68,7 +41,7 @@ export function FinanceToolbar({
   categoryLabel: string | null;
   shown: { count: number; bookC: number };
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
   const go = (control: ToolbarControl, value: string) => navigate(controlHref(state, control, value));
   const category = state.category ?? "";
   const folded = category !== "" && !tiles.some((t) => t.id === category);
@@ -79,7 +52,7 @@ export function FinanceToolbar({
         value={state.q}
         ariaLabel="Search assets"
         placeholder="Tag, model, serial or holder"
-        onSubmit={(q) => go("q", q)}
+        onSubmit={(q) => replace(controlHref(state, "q", q))}
         className="w-full max-w-[340px] flex-1 basis-[240px]"
         inputClassName="h-9 py-0 text-[13px]"
       />
@@ -97,8 +70,8 @@ export function FinanceToolbar({
         ))}
       </LabelledSelect>
       <LabelledSelect label="Sort" value={state.sort} onChange={(v) => go("sort", v)}>
-        {FINANCE_SORTS.map((s) => (
-          <option key={s} value={s}>{SORT_LABEL[s]}</option>
+        {SORT_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </LabelledSelect>
       <p aria-live="polite" className="ml-auto whitespace-nowrap text-[12.5px] tabular-nums text-fg-muted">

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSET_STATUSES, assigneeWhere, attentionFacetOption, buildAssetOrderBy, buildAssetWhere, identifierWhere, INVENTORY_LIST_CONFIG,
-  parsePurchaseYear, purchaseYearChips, withPurchaseYearQS,
+  parsePurchaseYear, purchaseYearChips, scannerRedirect, withPurchaseYearQS,
 } from "./inventory-list";
 import { parseListState } from "./url-state";
 import { STATUSES_BY_CLASS } from "./asset-class";
@@ -280,5 +280,26 @@ describe("buildAssetWhere attention facet (Phase 45 §2.1)", () => {
   it("is absent unless the value is 1", () => {
     expect(buildAssetWhere(parse("attention=0"), null, "IT", now).AND).toBeUndefined();
     expect(buildAssetWhere(parse(""), null, "IT", now).AND).toBeUndefined();
+  });
+});
+
+describe("the scanner contract by URL opens an exact tag only with go=1 (spec 7.2)", () => {
+  const hit = async (q: string) => (q === "BR-LT-0148" ? { id: "a148" } : null);
+  const sp = (qs: string) => new URLSearchParams(qs);
+
+  it("a typed or pasted exact tag (no go=1) only filters: no redirect, and the tag is not even looked up", async () => {
+    let looked = 0;
+    const lookup = async (q: string) => { looked++; return hit(q); };
+    expect(await scannerRedirect(sp("q=BR-LT-0148"), "BR-LT-0148", lookup)).toBeNull();
+    expect(await scannerRedirect(sp("q=BR-LT-0148&go=0"), "BR-LT-0148", lookup)).toBeNull();
+    expect(looked).toBe(0);
+  });
+  it("with go=1 an exact tag opens the record", async () => {
+    expect(await scannerRedirect(sp("q=BR-LT-0148&go=1"), "BR-LT-0148", hit)).toBe("/inventory/a148");
+  });
+  it("with go=1 and no exact tag, go is stripped and every other parameter kept", async () => {
+    expect(await scannerRedirect(sp("cls=PURCHASING&q=Carlo&go=1&purchaseYear=2024"), "Carlo", hit))
+      .toBe("/inventory?cls=PURCHASING&q=Carlo&purchaseYear=2024");
+    expect(await scannerRedirect(sp("go=1"), "", hit)).toBe("/inventory");
   });
 });

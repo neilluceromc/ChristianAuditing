@@ -12,8 +12,9 @@ import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
-import { TAG_SHAPE } from "@/lib/tag-key";
+import { exactTagKey } from "@/lib/tag-key";
 import { pageOf } from "@/lib/paging";
+import { ASSET_SEARCH_HIT_SELECT, assetHitStartsWith, assetStartsWith, prefixFirst, prefixFirstPage } from "@/lib/search-rank";
 import { pagedSnapshot } from "@/server/paged";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { PROVENANCES, PROVENANCE_LABEL, provenanceWhere } from "@/lib/provenance";
@@ -280,7 +281,11 @@ export async function listAssets(
   // buildAssetOrderBy already drops it in SQL, so the clicked column really orders the rows.
   const attentionSort = primarySortOf(state.sort, "attention");
   if (attentionSort) {
-    const ordered = await attentionOrdered(where, orderBy, attentionSort.dir, now);
+    const attentionOrder = await attentionOrdered(where, orderBy, attentionSort.dir, now);
+    // spec §7.2: while searching, the rows that start with the search come first, each group in the Attention order
+    const ordered = state.q
+      ? prefixFirst(attentionOrder, (r) => assetStartsWith(state.q, { ...r, holder: r.assignee }))
+      : attentionOrder;
     const pg = pageOf(ordered.length, state.page, state.per);
     return {
       rows: ordered.slice(pg.skip, pg.skip + pg.take),
@@ -291,18 +296,30 @@ export async function listAssets(
     };
   }
 
+  // Spec §7.2 (2026-10-21): while searching, the rows whose tag, model, serial or holder START with the search come
+  // first, then the ones that only contain it, each group in the chosen sort. The count becomes a narrow read of the
+  // matching rows' starts-with fields (the same rows it counted), and the page is cut across the two groups by
+  // `prefixFirstPage` — still SQL-ordered and SQL-paged, one read per group the page touches.
+  let prefixIds: string[] = [];
   const { rows: assets, total, page, pageCount } = await pagedSnapshot(
     state.per,
     state.page,
-    (tx) => tx.asset.count({ where }),
+    async (tx) => {
+      if (!state.q) return tx.asset.count({ where });
+      const hits = await tx.asset.findMany({ where, select: ASSET_SEARCH_HIT_SELECT });
+      prefixIds = hits.filter((h) => assetHitStartsWith(state.q, h)).map((h) => h.id);
+      return hits.length;
+    },
     (tx, pg) =>
-      tx.asset.findMany({
-        where,
-        orderBy,
-        skip: pg.skip,
-        take: pg.take,
-        include: LIST_INCLUDE,
-      }),
+      prefixFirstPage([prefixIds], pg.total, pg, (ids, w) =>
+        tx.asset.findMany({
+          where: ids ? { AND: [where, { id: ids }] } : where,
+          orderBy,
+          skip: w.skip,
+          take: w.take,
+          include: LIST_INCLUDE,
+        }),
+      ),
   );
   return {
     total,
@@ -496,9 +513,10 @@ export async function purchaseYearBuckets(
  * intended; do not "fix" it by adding `cls` here.
  */
 export function exactTagMatch(q: string) {
-  const tag = q.trim().toUpperCase();
-  if (!TAG_SHAPE.test(tag)) return null;
-  return prisma.asset.findUnique({ where: { tag }, select: { id: true } });
+  const tag = exactTagKey(q);
+  if (tag === null) return null;
+  // `cls` for the callers that check visibility themselves (`findExactTag`; Cris ANDs its own on)
+  return prisma.asset.findUnique({ where: { tag }, select: { id: true, cls: true } });
 }
 
 export const getAsset = cache((id: string) =>

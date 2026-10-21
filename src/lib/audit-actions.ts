@@ -23,6 +23,8 @@ export const AUDIT_ACTIONS = [
   "submit", "it-review", "it-reject", "request-info", "cancel", "complete", "supplier-set", "purchase.recorded",
   "finance.confirm", "finance.return", "finance.resubmit", "finance.reopened", "it.verify",
   "depreciation.policy", "depreciation.override", "depreciation.override.cleared",
+  // Finance follow-up (src/server/modules/finance/undo-actions.ts): written from UNDONE_ACTION, so listed here by hand
+  "finance.confirm.undone", "asset.return.undone", "depreciation.override.undone", "finance.confirm.reopened",
   // people
   "employee.transferred", "employee.setup", "offboarding.completed", "acknowledgement.recorded",
   "note.added", "note.edited", "note.deleted",

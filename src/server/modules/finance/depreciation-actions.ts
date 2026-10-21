@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -39,6 +40,13 @@ export async function setCategoryPolicy(input: unknown): Promise<ActionResult<{ 
   return ok({ affected });
 }
 
+const CHANGED = "Someone else just changed this asset's depreciation. Reload and try again.";
+
+/** The override columns as read: the guard that makes a concurrent change refuse instead of being overwritten. */
+function overrideGuard(a: { depreciationLifeMonths: number | null; depreciationSalvage: Prisma.Decimal | null; depreciationNote: string | null }) {
+  return { depreciationLifeMonths: a.depreciationLifeMonths, depreciationSalvage: a.depreciationSalvage, depreciationNote: a.depreciationNote };
+}
+
 /** Phase 35 (spec §5.5): life AND salvage (pesos) AND a reason, together. */
 export async function setAssetOverride(input: unknown): Promise<ActionResult<null>> {
   const user = await actionRole("admin", "finance_staff");
@@ -48,11 +56,17 @@ export async function setAssetOverride(input: unknown): Promise<ActionResult<nul
   const parsed = overrideSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  const asset = await prisma.asset.findUnique({ where: { id: d.assetId } });
-  if (!asset || asset.cost === null) return conflict("This asset has no cost, so it can't depreciate.");
-  if (d.salvage >= Number(asset.cost)) return validationError({ salvage: "Salvage must be less than the cost" });
-  await prisma.$transaction(async (tx) => {
-    await tx.asset.update({ where: { id: asset.id }, data: { depreciationLifeMonths: d.lifeMonths, depreciationSalvage: d.salvage, depreciationNote: d.note } });
+  // Read and write in one transaction, the write guarded on the override (and cost) just read: a change landing in
+  // between refuses rather than recording a stale "before", which the undo (finance-undo.ts) would restore.
+  const failure = await prisma.$transaction(async (tx): Promise<ActionResult<null> | null> => {
+    const asset = await tx.asset.findUnique({ where: { id: d.assetId } });
+    if (!asset || asset.cost === null) return conflict("This asset has no cost, so it can't depreciate.");
+    if (d.salvage >= Number(asset.cost)) return validationError({ salvage: "Salvage must be less than the cost" });
+    const hit = await tx.asset.updateMany({
+      where: { id: asset.id, ...overrideGuard(asset), cost: asset.cost },
+      data: { depreciationLifeMonths: d.lifeMonths, depreciationSalvage: d.salvage, depreciationNote: d.note },
+    });
+    if (hit.count === 0) return conflict(CHANGED);
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id, action: "depreciation.override",
       diff: {
@@ -61,7 +75,9 @@ export async function setAssetOverride(input: unknown): Promise<ActionResult<nul
         note: { from: asset.depreciationNote, to: d.note },
       },
     });
+    return null;
   });
+  if (failure) return failure;
   revalidatePath("/finance/assets");
   revalidatePath("/finance/depreciation");
   return ok(null);
@@ -74,12 +90,26 @@ export async function clearAssetOverride(input: unknown): Promise<ActionResult<n
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const id = typeof input === "object" && input && "assetId" in input ? String((input as { assetId: unknown }).assetId) : "";
   if (!id) return validationError({ assetId: "Missing asset" });
-  const asset = await prisma.asset.findUnique({ where: { id } });
-  if (!asset || asset.depreciationLifeMonths === null) return conflict("This asset has no custom depreciation to clear.");
-  await prisma.$transaction(async (tx) => {
-    await tx.asset.update({ where: { id }, data: { depreciationLifeMonths: null, depreciationSalvage: null, depreciationNote: null } });
-    await writeAudit(tx, { actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: id, action: "depreciation.override.cleared" });
+  const failure = await prisma.$transaction(async (tx): Promise<ActionResult<null> | null> => {
+    const asset = await tx.asset.findUnique({ where: { id } });
+    if (!asset || asset.depreciationLifeMonths === null) return conflict("This asset has no custom depreciation to clear.");
+    const hit = await tx.asset.updateMany({
+      where: { id, ...overrideGuard(asset) },
+      data: { depreciationLifeMonths: null, depreciationSalvage: null, depreciationNote: null },
+    });
+    if (hit.count === 0) return conflict(CHANGED);
+    // What was removed, so an undo (finance-undo.ts) can put it back exactly.
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: id, action: "depreciation.override.cleared",
+      diff: {
+        lifeMonths: { from: asset.depreciationLifeMonths, to: null },
+        salvage: { from: asset.depreciationSalvage === null ? null : Number(asset.depreciationSalvage), to: null },
+        note: { from: asset.depreciationNote, to: null },
+      },
+    });
+    return null;
   });
+  if (failure) return failure;
   revalidatePath("/finance/assets");
   revalidatePath("/finance/depreciation");
   return ok(null);

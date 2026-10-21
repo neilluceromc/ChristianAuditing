@@ -119,6 +119,11 @@ export function withFilter(state: ListState, facet: string, values: string[]): L
   return { ...state, filters, page: 1 };
 }
 
+/** Picking a sort starts over at page 1; search and filters stay. */
+export function withSort(state: ListState, sort: SortKey[]): ListState {
+  return { ...state, sort, page: 1 };
+}
+
 export function withSearch(state: ListState, q: string): ListState {
   return { ...state, q: q.trim(), page: 1 };
 }

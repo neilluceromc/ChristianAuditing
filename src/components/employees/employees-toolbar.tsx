@@ -1,19 +1,19 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Input } from "@/components/ui/input";
-import { Icon } from "@/components/ui/icon";
 import { FacetDropdown } from "@/components/patterns/facet-dropdown";
 import { NavLink, useListNavigation } from "@/components/patterns/list-navigation";
+import { SearchBox } from "@/components/patterns/search-box";
+import { LabelledSelect } from "@/components/patterns/labelled-select";
 import { LIST } from "@/components/patterns/list-styles";
-import { EMPLOYEES_LIST_CONFIG } from "@/lib/employees-list";
+import { EMPLOYEE_SORT_OPTIONS, EMPLOYEES_LIST_CONFIG, employeeSortValue, withEmployeeSort } from "@/lib/employees-list";
 import { TAB_FACETS } from "@/lib/employee-tabs";
 import { serializeListState, withFilter, withSearch, type ListState } from "@/lib/url-state";
 import type { EmployeeFacets } from "@/server/modules/employees/queries";
 
 /**
  * Phase 45 (spec §3.2): the Employees filter row, meant for a StickyToolbar — Search (flexible, up to 420 px) and
- * Works for, then on the right Clear filters (only while a search, Works for or tab is set), the people count with
+ * Works for and Sort, then on the right Clear filters (only while a search, Works for or tab is set), the people count with
  * the number in bold, and the leavers clause: "· N leavers hidden" (a link that shows them) or "· leavers shown ·
  * Hide". The Staff and Employment facets and the Show leavers / Policy gaps only pills are gone: the tabs and the
  * leavers link replace them, and their URL params (`kind`, `employment`, `leavers`, `gaps`) still filter.
@@ -31,7 +31,7 @@ export function EmployeesToolbar({
   gapsOnly: boolean;
   hiddenLeavers: number;
 }) {
-  const { navigate } = useListNavigation();
+  const { navigate, replace } = useListNavigation();
   const pathname = usePathname();
   // Phase 20 (spec §5): leavers hidden by default — an explicit employment facet always wins over the toggle
   // (buildEmployeeWhere's own rule), but the link only needs to know whether IT itself asked to see them.
@@ -55,39 +55,15 @@ export function EmployeesToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="relative w-full max-w-[420px] flex-1 basis-[280px]">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint">
-          <Icon name="search" size={14} />
-        </span>
-        <Input
-          // Phase 29 (final review I-2): the box is uncontrolled, and a search
-          // change is a SOFT navigation — this component keeps its instance, so
-          // React only rewrites `defaultValue`, which a dirtied input ignores
-          // and "Clear search" left the typed text sitting in an empty search.
-          // Keyed on the URL's q, the input remounts and takes the new default.
-          key={state.q}
-          type="search"
-          data-page-search
-          aria-label="Search employees"
-          placeholder="Search name, EMP number, title or client"
-          defaultValue={state.q}
-          className="h-9 py-0 pl-8 pr-7 text-[13px]"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") navigate(href(withSearch(state, e.currentTarget.value), gapsOnly));
-          }}
-        />
-        {state.q && (
-          <button
-            type="button"
-            aria-label="Clear search"
-            // Fitts / WCAG 2.5.8: a 24 × 24 px target, centred, inside the input's pr-7 gutter
-            className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-(--radius-ctl) text-fg-muted hover:bg-surface-subtle hover:text-fg"
-            onClick={() => navigate(href(withSearch(state, ""), gapsOnly))}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      {/* The house search (spec §7.2: as you type, starts-with first). */}
+      <SearchBox
+        value={state.q}
+        ariaLabel="Search employees"
+        placeholder="Search name, EMP number, title or client"
+        onSubmit={(q) => replace(href(withSearch(state, q), gapsOnly))}
+        className="w-full max-w-[420px] flex-1 basis-[280px]"
+        inputClassName="h-9 py-0 text-[13px]"
+      />
       <div className={LIST.tall}>
         <FacetDropdown
           label="Works for"
@@ -96,6 +72,18 @@ export function EmployeesToolbar({
           onApply={(values) => navigate(href(withFilter(state, "department", values), gapsOnly))}
         />
       </div>
+      {/* Spec §7.3: the sort options are the list's own URL sorts; a column-header sort the options don't name shows
+          "Column order" (disabled: it is a state, not a pick). */}
+      <LabelledSelect
+        label="Sort"
+        value={employeeSortValue(state.sort)}
+        onChange={(v) => navigate(href(withEmployeeSort(state, v), gapsOnly))}
+      >
+        {employeeSortValue(state.sort) === "" && <option value="" disabled>Column order</option>}
+        {EMPLOYEE_SORT_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </LabelledSelect>
       <div className="ml-auto flex items-center gap-3 whitespace-nowrap text-[12.5px] tabular-nums text-fg-muted">
         {filtered && (
           <NavLink href={href(cleared, false)} className="font-medium text-accent hover:underline">

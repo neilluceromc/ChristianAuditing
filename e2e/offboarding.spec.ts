@@ -382,7 +382,7 @@ test.describe("repairs — a saved view, not an enum", () => {
 
   test("the record warns when the quote is most of a new unit", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
-    await page.goto("/inventory?q=BR-LT-0090");
+    await page.goto("/inventory?q=BR-LT-0090&go=1");
     await expect(page).toHaveURL(/\/inventory\/[a-z0-9]+$/i, { timeout: 15_000 });
     await expect(page.getByText("Repairing costs too much of a new unit")).toBeVisible();
     await expect(page.getByText(/62% of the ₱55,000/)).toBeVisible();

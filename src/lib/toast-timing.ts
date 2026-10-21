@@ -1,13 +1,14 @@
 /**
  * Phase 40 (spec §5): how long a toast stays. Pure, so the rule and the pause-aware timer are tested without a DOM.
  *  - an error stays until the person dismisses it (null: no timer at all);
- *  - a success or neutral toast leaves after 4 s, 8 s when it carries a button (Undo) so the button can be reached;
+ *  - a success or neutral toast leaves after 4 s, 10 s when it carries a button (Undo, Open) so the button can be
+ *    reached (finance follow-up, spec §4: it was 8 s);
  *  - the countdown pauses while the toast is hovered or holds focus, and resumes with the time that was left.
  */
 export type ToastTone = "settled" | "fault" | "neutral";
 
 export const TOAST_MS = 4000;
-export const ACTION_TOAST_MS = 8000;
+export const ACTION_TOAST_MS = 10000;
 
 /** Milliseconds a toast stays on screen, or null when it stays until dismissed. */
 export function toastLifetime(tone: ToastTone, hasAction = false): number | null {

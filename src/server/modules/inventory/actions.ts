@@ -33,6 +33,7 @@ import { humanizeGuard, loanDueFor } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 import { rememberPicks } from "@/server/recent-picks";
 import { nextToReview } from "@/server/modules/finance/queries";
+import { toReviewCount } from "@/server/modules/finance/review-queue";
 import { serialRequired } from "@/lib/serial-rules";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
 import { approveSchema, resubmitSchema, sendBackSchema } from "@/lib/registration-input";
@@ -636,11 +637,12 @@ export async function requestStatusChange(input: unknown): Promise<ActionResult<
  * when.
  *
  * Phase 30 (spec §4.6): the result names the next record waiting on Finance
- * (`nextToReview`, read after the commit) so the dialog can move straight on.
+ * (`nextToReview`, read after the commit) so the dialog can move straight on, and how many of the class are still
+ * To review (`remaining`, finance follow-up spec §4) for the toast.
  */
 export async function confirmAssetDetails(
   input: unknown,
-): Promise<ActionResult<{ tag: string; next: { id: string; tag: string } | null }>> {
+): Promise<ActionResult<{ tag: string; next: { id: string; tag: string } | null; remaining: number }>> {
   const user = await actionRole("admin", "finance_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
@@ -650,12 +652,15 @@ export async function confirmAssetDetails(
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
 
   let out: { id: string; tag: string; cls: AssetClass } | null = null;
-  let failure: ActionResult<{ tag: string; next: { id: string; tag: string } | null }> | null = null;
+  let failure: ActionResult<{ tag: string; next: { id: string; tag: string } | null; remaining: number }> | null = null;
 
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id: parsed.data.id },
-      select: { id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, cost: true, financeReturnedAt: true },
+      select: {
+        id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, cost: true, financeReturnedAt: true,
+        financeNotCapitalised: true, financeResubmitNote: true,
+      },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
@@ -709,7 +714,14 @@ export async function confirmAssetDetails(
       entityType: "asset",
       entityId: asset.id,
       action: "finance.confirm",
-      diff: { financeConfirmed: { from: null, to: user.name }, ...(notCap ? { notCapitalised: { from: false, to: true } } : {}) },
+      // The earlier values an undo puts back (finance-undo.ts): the not-capitalised flag before and after when either
+      // side is true (no key means false both sides, so a plain approval shows no "No → No" chip), and IT's reply the
+      // approval cleared.
+      diff: {
+        financeConfirmed: { from: null, to: user.name },
+        ...(notCap || asset.financeNotCapitalised ? { notCapitalised: { from: asset.financeNotCapitalised, to: notCap } } : {}),
+        ...(asset.financeResubmitNote ? { resubmitNote: { from: asset.financeResubmitNote, to: null } } : {}),
+      },
     });
     out = { id: asset.id, tag: asset.tag, cls: asset.cls };
   });
@@ -720,7 +732,9 @@ export async function confirmAssetDetails(
   revalidatePath("/inventory");
   revalidatePath("/finance/assets");
   revalidatePath(`/finance/assets/${parsed.data.id}`);
-  return ok({ tag: done.tag, next: await nextToReview(done.id, done.cls) });
+  // Finance follow-up (spec §4): and how many are left, for "Next: BR-LT-0204 · 3 left to review"
+  const [next, remaining] = await Promise.all([nextToReview(done.id, done.cls), toReviewCount(done.cls)]);
+  return ok({ tag: done.tag, next, remaining });
 }
 
 /**
@@ -751,7 +765,9 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({
       where: { id },
-      select: { id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true },
+      select: {
+        id: true, tag: true, financeConfirmedAt: true, cls: true, itVerifiedAt: true, financeReturnedAt: true, financeResubmitNote: true,
+      },
     });
     if (!asset) {
       failure = validationError({ id: "Unknown asset" });
@@ -789,8 +805,12 @@ export async function returnAssetToIt(input: unknown): Promise<ActionResult<{ ta
       entityId: asset.id,
       action: "finance.return",
       // The checklist (as labels) and note go in the diff, and that is what makes the audit trail
-      // the history: the columns hold only the CURRENT ones.
-      diff: { financeReturn: { from: null, to: { fields: fieldLabels(fields), note: cleanNote } } },
+      // the history: the columns hold only the CURRENT ones. For the undo (finance-undo.ts): `from` says whether
+      // this replaced an earlier send-back (such an undo is refused), and `resubmitNote` is IT's reply it cleared.
+      diff: {
+        financeReturn: { from: asset.financeReturnedAt ? "returned" : null, to: { fields: fieldLabels(fields), note: cleanNote } },
+        ...(asset.financeResubmitNote ? { resubmitNote: { from: asset.financeResubmitNote, to: null } } : {}),
+      },
     });
     out = { tag: asset.tag };
   });

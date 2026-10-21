@@ -354,7 +354,7 @@ test.describe("inventory list", () => {
 
     const search = page.getByRole("searchbox", { name: "Search assets" });
     await waitForHydration(search);
-    await expect(search).toHaveAttribute("placeholder", "Search tag, model, serial, holder · Enter");
+    await expect(search).toHaveAttribute("placeholder", "Search tag, model, serial, holder");
     await search.fill("Carlo");
     await search.press("Enter");
     await expect(page).toHaveURL(/[?&]q=Carlo/);

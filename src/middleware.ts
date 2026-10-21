@@ -27,9 +27,9 @@ export default auth((req) => {
     return NextResponse.redirect(login);
   }
 
-  // Signed-in users don't see login/signup; /bootstrap 404s server-side on its own.
+  // Signed-in users don't see login/signup; /bootstrap 404s server-side on its own. They go to Home (spec §7.1).
   if (AUTH_PATHS.test(pathname) && !pathname.startsWith("/bootstrap")) {
-    return NextResponse.redirect(new URL(ROLE_LANDING[user.role], req.nextUrl));
+    return NextResponse.redirect(new URL("/", req.nextUrl));
   }
 
   if (!pathAllowedForRole(pathname, user.role)) {

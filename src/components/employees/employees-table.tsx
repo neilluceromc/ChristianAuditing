@@ -22,6 +22,8 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { cn } from "@/lib/cn";
 import { pushGuarded } from "@/lib/stuck-nav";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
+import { fmtDayMonthYear } from "@/lib/format";
+import { showsJoinedLine } from "@/lib/employees-list";
 import type { ListState } from "@/lib/url-state";
 import type { EmployeeListRow } from "@/server/modules/employees/queries";
 import { useListNavigation } from "@/components/patterns/list-navigation";
@@ -53,7 +55,7 @@ const selectable = (row: EmployeeListRow) => row.employment !== "OFFBOARDED";
  * only for screen readers (it names the row the way IT says it, and search still matches it). Dense: one line —
  * the name, then the title muted, the title truncating first.
  */
-function EmployeeCell({ row }: { row: EmployeeListRow }) {
+function EmployeeCell({ row, showJoined }: { row: EmployeeListRow; showJoined: boolean }) {
   return (
     <Link
       href={`/employees/${row.id}`}
@@ -69,6 +71,13 @@ function EmployeeCell({ row }: { row: EmployeeListRow }) {
         <span className={cn(LIST.sub, "mt-0.5 min-w-0 truncate dense:mt-0")}>
           <span className="sr-only"> · </span>
           {row.title}
+        </span>
+      )}
+      {/* Spec §7.3: only on the joined sorts, so the order can be checked at a glance ("Joined 3 Mar 2025", Manila time). */}
+      {showJoined && (
+        <span className={cn(LIST.sub, "mt-0.5 min-w-0 truncate tabular-nums dense:mt-0")}>
+          <span className="sr-only"> · </span>
+          Joined {fmtDayMonthYear(row.joinedAt)}
         </span>
       )}
     </Link>
@@ -153,6 +162,8 @@ export function EmployeesTable({
   }
   const head = (sortable: boolean, extra?: string) => cn(LIST.head, sortable ? LIST.thSort : LIST.th, "whitespace-nowrap", extra);
 
+  const showJoined = showsJoinedLine(state.sort);
+
   // Page order, so the export and the forms list people the way the operator sees them.
   const selectedIds = rows.filter((r) => selected.has(r.id)).map((r) => r.id);
   const ids = selectedIds.join(",");
@@ -222,7 +233,7 @@ export function EmployeesTable({
                   </Td>
                 )}
                 <Td className={LIST.td}>
-                  <EmployeeCell row={row} />
+                  <EmployeeCell row={row} showJoined={showJoined} />
                 </Td>
                 <Td className={LIST.td}>
                   <WorksForCell row={row} />

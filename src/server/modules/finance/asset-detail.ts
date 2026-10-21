@@ -22,6 +22,8 @@ export interface FinanceAssetDetail {
   reg: RegState; regFinanceLabel: string;
   returnSummary: { items: string[]; note: string | null }; resubmitNote: string | null;
   approvedBy: string | null; approvedAt: Date | null; notCapitalised: boolean;
+  /** When Finance last sent it back (`financeReturnedAt`): the Undo banner's rules read it (finance-undo.ts). */
+  returnedAt: Date | null;
   costC: number | null; result: DepResult | null; note: string | null; policyText: string; custom: boolean;
   lifeMonths: number | null; salvageC: number | null;
   startLabel: string | null; endLabel: string | null; monthsUsed: number | null;
@@ -117,7 +119,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
           {
             entityType: "asset", entityId: a.id,
             OR: [
-              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update"] } },
+              // asset.return.undone: the send-back's undo (finance follow-up); the other undos start with finance./depreciation.
+              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update", "asset.return.undone"] } },
               { action: { startsWith: "finance." } },
               { action: { startsWith: "depreciation." } },
               { action: { startsWith: "document." } },
@@ -159,6 +162,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
     reg, regFinanceLabel: a.financeNotCapitalised && reg === "registered" ? "Not capitalised" : REG_LABEL_FINANCE[reg],
     returnSummary: returnSummary(a), resubmitNote: a.financeResubmitNote,
     approvedBy: a.financeConfirmedBy?.name ?? null, approvedAt: a.financeConfirmedAt, notCapitalised: a.financeNotCapitalised,
+    returnedAt: a.financeReturnedAt,
     costC, result, note, policyText, custom: policy?.basis === "custom",
     lifeMonths: policy?.lifeMonths ?? null, salvageC: policy?.salvage ?? null,
     startLabel: startOk ? monthLabel(start) : null,

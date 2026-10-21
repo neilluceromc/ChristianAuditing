@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { pushGuarded } from "@/lib/stuck-nav";
+import { liveSearchReplace, pushGuarded } from "@/lib/stuck-nav";
 
 /**
  * Phase 30 (spec §6.2, Doherty): every list navigation the inventory page makes in code — a search,
@@ -17,6 +17,12 @@ interface ListNavigation {
   pending: boolean;
   /** `router.push(href)` inside the shared transition, with the stuck same-page navigation fallback (`pushGuarded`) */
   navigate: (href: string) => void;
+  /**
+   * The same, as `router.replace` (spec §7.2): the search box's live search, so typing never floods the history. A
+   * stuck one is retried once as a soft navigation before the page is loaded the ordinary way (`liveSearchReplace`,
+   * final review I1). Only the search boxes use it.
+   */
+  replace: (href: string) => void;
 }
 
 const ListNavigationContext = createContext<ListNavigation | null>(null);
@@ -28,19 +34,26 @@ export function ListNavigationProvider({ children }: { children: React.ReactNode
     (href: string) => startTransition(() => pushGuarded(router, href)),
     [router],
   );
-  const value = useMemo(() => ({ pending, navigate }), [pending, navigate]);
+  const replace = useCallback(
+    (href: string) => startTransition(() => liveSearchReplace(router, href)),
+    [router],
+  );
+  const value = useMemo(() => ({ pending, navigate, replace }), [pending, navigate, replace]);
   return <ListNavigationContext.Provider value={value}>{children}</ListNavigationContext.Provider>;
 }
 
 /**
  * The list's navigation, for any client component under `ListNavigationProvider`. Outside one it
- * falls back to a plain `router.push` with `pending` always false, so a component that uses it
+ * falls back to a plain `router.push` (`router.replace`) with `pending` always false, so a component that uses it
  * never breaks when rendered on its own.
  */
 export function useListNavigation(): ListNavigation {
   const ctx = useContext(ListNavigationContext);
   const router = useRouter();
-  const fallback = useMemo<ListNavigation>(() => ({ pending: false, navigate: (href) => pushGuarded(router, href) }), [router]);
+  const fallback = useMemo<ListNavigation>(
+    () => ({ pending: false, navigate: (href) => pushGuarded(router, href), replace: (href) => liveSearchReplace(router, href) }),
+    [router],
+  );
   return ctx ?? fallback;
 }
 
