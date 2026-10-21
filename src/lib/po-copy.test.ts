@@ -44,6 +44,11 @@ describe("the purchase-order wording sweep", () => {
     expect(hits).toEqual([]);
   });
 
+  it("Purchasing activity's empty state names what happens to a PO now (no drafts or submissions)", () => {
+    const page = readFileSync(path.join(ROOT, "src/app/(app)/purchases/activity/page.tsx"), "utf8");
+    expect(page).not.toMatch(/Drafts|submissions/);
+  });
+
   it("the login scene draws the same PO number its caption names", () => {
     const world = readFileSync(path.join(ROOT, "src/components/login/world.ts"), "utf8");
     expect(world).not.toMatch(/PR-\d{4}/);
