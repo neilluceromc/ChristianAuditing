@@ -28,6 +28,8 @@ export const AUDIT_ACTIONS = [
   // Purchase orders (src/server/modules/purchases/po-actions.ts): save, resubmit, send back, the PO-level fix (one
   // asset.money.fixed per asset it reached), cancel and close a line short; register from a PO (po-register.ts)
   "po.save", "po.resubmit", "po.send-back", "po.fix", "po.cancel", "po.line-closed", "asset.money.fixed", "po.register",
+  // Task 6 fix round 1: the sender takes a PO's send-back back within 15 minutes (po-actions.ts undoPoSendBack)
+  "po.send-back.undone",
   // people
   "employee.transferred", "employee.setup", "offboarding.completed", "acknowledgement.recorded",
   "note.added", "note.edited", "note.deleted",

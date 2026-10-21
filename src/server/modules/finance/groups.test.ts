@@ -11,6 +11,8 @@ const h = vi.hoisted(() => ({
   rows: [] as unknown[],
   wheres: [] as unknown[],
   groups: [] as Array<{ purchaseRecordId: string | null; _count: { _all: number } }>,
+  record: null as unknown,
+  recordArgs: null as null | { select: { assets: { select: Record<string, unknown> } } },
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -18,11 +20,15 @@ vi.mock("@/server/db/client", () => ({
     asset: {
       findMany: async (args: { where: unknown }) => { h.wheres.push(args.where); return h.rows; },
       groupBy: async (args: { where: unknown }) => { h.wheres.push(args.where); return h.groups; },
+      count: async () => 0,
+    },
+    purchaseRecord: {
+      findUnique: async (args: { select: { assets: { select: Record<string, unknown> } } }) => { h.recordArgs = args; return h.record; },
     },
   },
 }));
 
-import { groupAssets, reviewGroupCount, reviewGroups, REVIEW_GROUP_WHERE, type GroupAssetRow } from "./groups";
+import { groupAssets, groupDetail, reviewGroupCount, reviewGroups, REVIEW_GROUP_WHERE, type GroupAssetRow } from "./groups";
 
 const D = (n: number) => new Prisma.Decimal(n);
 const REG = new Date("2026-10-20T01:00:00Z");
@@ -114,5 +120,40 @@ describe("reviewGroups / reviewGroupCount", () => {
     ];
     expect(await reviewGroupCount()).toBe(6);
     expect(h.wheres[0]).toEqual(REVIEW_GROUP_WHERE);
+  });
+});
+
+describe("fix round 1", () => {
+  it("REVIEW_GROUP_WHERE keeps assets with no PO: the sent-back exclusion has an explicit null branch", () => {
+    // A NOT on the nullable relation can render as NOT (fk IN subselect), which drops every row whose fk is NULL — all
+    // direct and legacy groups would vanish whenever any PO is sent back.
+    const and = REVIEW_GROUP_WHERE.AND as Prisma.AssetWhereInput[];
+    expect(and).toContainEqual({ OR: [{ purchaseOrderId: null }, { purchaseOrder: { is: { state: { not: "SENT_BACK" } } } }] });
+    expect(JSON.stringify(REVIEW_GROUP_WHERE)).not.toMatch(/"NOT":\{"purchaseOrder"/);
+  });
+
+  it("groupDetail gives each asset its own money, and says when a direct group's assets differ from what was registered", async () => {
+    const asset = (id: string, extra: Record<string, unknown> = {}) => ({
+      id, tag: `BR-LT-${id}`, serial: null, brand: null, model: "Latitude", cls: "IT", cost: D(50000), itVerifiedAt: REG,
+      financeConfirmedAt: null, financeReturnedAt: null, financeReturnedTo: null, financeNotCapitalised: false,
+      financeReturnFields: [], financeReturnReason: null, financeResubmitNote: null, documents: [],
+      vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: REG,
+      ...extra,
+    });
+    h.record = {
+      id: "rec9", cls: "IT", createdAt: REG, fees: null, vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: REG,
+      vendor: { name: "Octagon" }, createdBy: { name: "Ivan Tan", role: "it_staff" }, purchaseOrder: null,
+      assets: [asset("0501"), asset("0502", { invoiceRef: "SI-0021", vendorId: "v2", purchasedAt: EARLY })],
+    };
+    const g = await groupDetail("rec9");
+    expect(h.recordArgs!.select.assets.select).toMatchObject({ vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true });
+    expect(g!.assets.map((a) => a.money)).toEqual([
+      { vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: REG },
+      { vendorId: "v2", invoiceRef: "SI-0021", receiptRef: null, purchasedAt: EARLY },
+    ]);
+    expect(g!.moneyVaries).toBe(true);
+
+    h.record = { ...(h.record as object), assets: [asset("0501")] };
+    expect((await groupDetail("rec9"))!.moneyVaries).toBe(false);
   });
 });

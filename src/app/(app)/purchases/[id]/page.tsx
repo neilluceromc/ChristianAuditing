@@ -25,6 +25,8 @@ import { NoteThread } from "@/components/purchases/note-thread";
 import { PoActionsBar } from "@/components/purchases/po-actions-bar";
 import { CloseShortButton } from "@/components/purchases/close-short-dialog";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
+import { PoSendBackUndoBanner } from "@/components/finance/po-undo-banner";
+import { poSendBackUndoBanner } from "@/server/modules/purchases/po-undo";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -50,6 +52,10 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
   // A legacy bounce (an old Finance request-info or IT reject) still reads off the thread; the PO's own send-back is below.
   const bounce = po.sentBack ? null : bounceBack(po.state, po.notes);
   const missingSi = !po.invoiceRef && po.state !== "CANCELLED";
+  // Task 6 fix round 1: for 15 minutes, the person who sent it back can take the send-back back (the server re-checks).
+  const sendBackUndo = po.state === "SENT_BACK" && ["it_staff", "finance_staff", "admin"].includes(user.role)
+    ? await poSendBackUndoBanner(prisma, po.id, user.id, new Date())
+    : null;
 
   // The Fix dialog's supplier list: live suppliers, plus this order's own even if it has since been archived.
   const vendors = controls.fix
@@ -91,6 +97,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         {" "}· for {po.department?.name ?? "no department"}
         {po.reviewedBy ? ` · IT-reviewed by ${po.reviewedBy}` : ""}
       </p>
+
+      {sendBackUndo && <PoSendBackUndoBanner poId={po.id} state={sendBackUndo} />}
 
       <div className="flex flex-col gap-4">
         {po.sentBack && po.sentBack.by && (

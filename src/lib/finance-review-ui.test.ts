@@ -5,7 +5,7 @@ import type { UndoAsset, UndoEntry } from "./finance-undo";
 import {
   approveDetail, approveToast, canReopenReview, minutesLeftAt, reopenReasonError, runFinanceUndo, sendBackToast, settingsToast,
   startUndoCountdown,
-  groupApproveToast, groupNotCapIssue, runGroupUndo,
+  groupApproveToast, groupNotCapIssue, poSendBackToast, runGroupUndo, runPoSendBackUndo,
   undoBanner, type ReviewToastDeps,
 } from "./finance-review-ui";
 
@@ -256,5 +256,28 @@ describe("group review (Task 6, spec §5)", () => {
     });
     expect(no).toBe(false);
     expect(toast).toHaveBeenLastCalledWith("Can't undo: BR-LT-0205 — the 15 minutes to undo it ended at 10:57.", "fault");
+  });
+});
+
+describe("a PO's send-back (Task 6 fix round 1)", () => {
+  it("poSendBackToast: 'PO-0214 sent back to Purchasing', with Undo", () => {
+    const undo = vi.fn();
+    const t = poSendBackToast({ id: "po1", refNo: "PO-0214" }, undo);
+    expect(t.message).toBe("PO-0214 sent back to Purchasing");
+    expect(t.actions?.map((a) => a.label)).toEqual(["Undo"]);
+    t.actions![0].onAction();
+    expect(undo).toHaveBeenCalledWith("po1");
+  });
+
+  it("runPoSendBackUndo: done → a toast and a refresh; refused → the server's reason", async () => {
+    const toast = vi.fn();
+    const refresh = vi.fn();
+    expect(await runPoSendBackUndo("po1", { call: async () => ({ ok: true, data: { refNo: "PO-0214", undone: 2 } }), toast, refresh })).toBe(true);
+    expect(toast).toHaveBeenCalledWith("Undid sending PO-0214 back · 2 assets back to To review", "settled");
+    expect(refresh).toHaveBeenCalled();
+    expect(await runPoSendBackUndo("po1", {
+      call: async () => ({ ok: false, kind: "conflict", message: "Can't undo: PO-0214 is no longer with Purchasing." }), toast, refresh,
+    })).toBe(false);
+    expect(toast).toHaveBeenLastCalledWith("Can't undo: PO-0214 is no longer with Purchasing.", "fault");
   });
 });

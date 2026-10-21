@@ -18,6 +18,8 @@ import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
 import { FixMoneyButton } from "@/components/finance/fix-money-dialog";
 import { GroupDocsUpload, GroupReview, SendBackPoButton, type GroupReviewAsset } from "@/components/finance/group-review";
+import { PoSendBackUndoBanner } from "@/components/finance/po-undo-banner";
+import { poSendBackUndoBanner } from "@/server/modules/purchases/po-undo";
 
 export async function generateMetadata({ params }: { params: Promise<{ recordId: string }> }): Promise<Metadata> {
   const { recordId } = await params;
@@ -55,6 +57,8 @@ export default async function GroupReviewPage({
   const now = new Date();
   const [g, undo] = await Promise.all([groupDetail(recordId), groupUndoBanner(recordId, user.id, now)]);
   if (!g) notFound();
+  // Task 6 fix round 1: the PO's send-back, for the person who sent it, for 15 minutes.
+  const sendBackUndo = g.po?.state === "SENT_BACK" ? await poSendBackUndoBanner(prisma, g.po.id, user.id, now) : null;
 
   const vendors = await prisma.vendor.findMany({
     where: { OR: [{ archivedAt: null }, { id: g.money.vendorId ?? "" }] },
@@ -74,9 +78,10 @@ export default async function GroupReviewPage({
   const assets: GroupReviewAsset[] = g.assets.map((a) => ({
     id: a.id, tag: a.tag, serial: a.serial, brand: a.brand, model: a.model, cls: a.cls, cost: a.cost, reg: a.reg,
     regLabel: a.regLabel, returnLine: returnLine(a), resubmitNote: a.resubmitNote,
+    // A direct group's money is each asset's own (fix round 1): one fixed since registration keeps its new values.
     money: g.po ? null : {
-      id: a.id, tag: a.tag, cost: a.cost, vendorId: g.money.vendorId, invoiceRef: g.money.invoiceRef,
-      receiptRef: g.money.receiptRef, purchasedAt: day(g.money.purchasedAt),
+      id: a.id, tag: a.tag, cost: a.cost, vendorId: a.money.vendorId, invoiceRef: a.money.invoiceRef,
+      receiptRef: a.money.receiptRef, purchasedAt: day(a.money.purchasedAt),
     },
   }));
 
@@ -90,11 +95,12 @@ export default async function GroupReviewPage({
         title={title}
         breadcrumb={[{ label: "To review", href: "/finance/review" }, { label: title }]}
       />
+      {sendBackUndo && g.po && <PoSendBackUndoBanner poId={g.po.id} state={sendBackUndo} />}
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="flex flex-col gap-4">
           <Card>
-            <CardHeader title="Money details" />
+            <CardHeader title={g.po ? "Money details" : "Money details · as registered"} />
             {g.po && (controls?.fix || controls?.sendBack) && (
               // Spec §5: a PO group's money is the PO's — fixed there (it flows to every asset from it) or sent back.
               <div className="flex flex-wrap gap-2 border-b border-border-faint px-4 py-3">
@@ -114,7 +120,14 @@ export default async function GroupReviewPage({
                 {controls.sendBack && <SendBackPoButton id={g.po.id} refNo={g.refNo!} />}
               </div>
             )}
-            <CardBody>
+            <CardBody className="flex flex-col gap-2">
+              {g.moneyVaries && (
+                <p className="text-xs text-fg-muted">
+                  {g.po
+                    ? `Some assets' money differs from ${g.refNo}'s — fix it on ${g.refNo} to bring them back in line.`
+                    : "Some assets were fixed since registration: each row's Fix money shows that asset's own values."}
+                </p>
+              )}
               <DescriptionList
                 items={[
                   {

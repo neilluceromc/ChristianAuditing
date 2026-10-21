@@ -46,3 +46,36 @@ export function UndoBanner({ assetId, tag, state }: { assetId: string; tag: stri
     </div>
   );
 }
+
+/**
+ * Task 6: the same banner for an action on more than one asset — a group's Approve all, a PO's send-back — whose
+ * Undo the caller wires. `msLeft` and `endsAt` come from the server; the countdown runs on this device's clock.
+ */
+export function TimedUndoBanner({
+  state, onUndo,
+}: { state: { label: string; msLeft: number; endsAt: number }; onUndo: () => Promise<boolean> }) {
+  const [left, setLeft] = useState(Math.max(1, Math.ceil(state.msLeft / 60_000)));
+  const [pending, setPending] = useState(false);
+  useEffect(() => startUndoCountdown(Date.now() + state.msLeft, setLeft), [state.msLeft, state.endsAt]);
+  if (left <= 0) return null;
+  async function undo() {
+    setPending(true);
+    try {
+      await onUndo();
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <div
+      data-undo-banner=""
+      className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-(--radius-card) border px-4 py-2.5 text-[13px] text-fg"
+      style={{ background: "var(--st-neutral-bg)", borderColor: "var(--st-neutral-border)", borderLeft: "3px solid var(--st-neutral-dot)" }}
+    >
+      <span>{state.label}</span>{" "}
+      <span aria-hidden="true">·</span>{" "}
+      <Button size="sm" loading={pending} onClick={undo}>Undo</Button>{" "}
+      <span className="text-fg-muted">({left} min left)</span>
+    </div>
+  );
+}

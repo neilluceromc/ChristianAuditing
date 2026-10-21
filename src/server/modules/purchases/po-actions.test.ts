@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { reasonError } from "@/lib/intake-rules";
 
 /*
@@ -105,7 +105,7 @@ vi.mock("@/server/db/client", () => {
 });
 
 import {
-  cancelPurchaseOrder, closeLineShort, fixPurchaseOrder, savePurchaseOrder, sendBackPurchaseOrder,
+  addComment, cancelPurchaseOrder, closeLineShort, fixPurchaseOrder, savePurchaseOrder, sendBackPurchaseOrder, undoPoSendBack,
 } from "./po-actions";
 
 const PAT = { id: "u-pat", name: "Pat Lim", role: "purchasing_staff" };
@@ -579,5 +579,107 @@ describe("cancelPurchaseOrder", () => {
     seedLine("ln1");
     seedAsset("a1");
     await expectNothingWritten(() => cancelPurchaseOrder({ id: "po1", reason: "supplier out of stock" }));
+  });
+});
+
+describe("undoPoSendBack (Task 6 fix round 1: the send-back, undone as one action)", () => {
+  const T0 = new Date("2026-10-21T02:42:00Z"); // 10:42 Manila
+  const at = (min: number) => vi.setSystemTime(new Date(T0.getTime() + min * 60_000));
+  const PO_KEYS = ["state", "sentBackAt", "sentBackById", "sentBackBy", "sentBackFields", "sentBackNote"] as const;
+  const poState = () => Object.fromEntries(PO_KEYS.map((k) => [k, po()[k]]));
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** PO-0214, READY, with a1 and a2 registered (a2 carries IT's earlier reply); Ana (Finance) sends it back. */
+  async function sentBackByFinance() {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 2 });
+    seedAsset("a1");
+    seedAsset("a2", { financeResubmitNote: "serial fixed" });
+    const before = { po: poState(), assets: structuredClone(t("asset")) };
+    h.user = ANA;
+    expect((await sendBackPurchaseOrder({ id: "po1", fields: ["cost"], note: "price is per box" })).ok).toBe(true);
+    return before;
+  }
+
+  it("within 15 minutes: the PO's state and every asset it returned come back, each with its undone entry", async () => {
+    const before = await sentBackByFinance();
+    // the PO's entry and each asset's carry one id, so the undo finds exactly what this send-back returned
+    const batch = (audits("po.send-back")[0].diff as { batch: { to: string } }).batch.to;
+    expect(audits("finance.return").every((a) => (a.diff as { batch: { to: string } }).batch.to === batch)).toBe(true);
+    at(5);
+    expect(await undoPoSendBack({ id: "po1" })).toEqual({ ok: true, data: { refNo: "PO-0214", undone: 2 } });
+    expect(poState()).toEqual(before.po);
+    expect(t("asset")).toEqual(before.assets);
+    expect(audits("asset.return.undone").map((a) => a.entityId)).toEqual(["a1", "a2"]);
+    expect(audits("po.send-back.undone")).toEqual([expect.objectContaining({
+      entityType: "purchase-order", entityId: "po1", actorId: ANA.id, source: "web",
+      diff: { state: { from: "SENT_BACK", to: "READY" }, sentBack: { from: { team: "FINANCE", fields: ["unit price"], note: "price is per box" }, to: null } },
+    })]);
+    expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_SENT_BACK", "COMMENT"]);
+  });
+
+  it("IT's send-back goes back to With IT; a comment since doesn't block it", async () => {
+    seedPo({ state: "WITH_IT" });
+    seedLine("ln1");
+    h.user = IVAN;
+    await sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "SI is unreadable" });
+    h.user = PAT;
+    await addComment({ id: "po1", text: "Looking into it" });
+    h.user = IVAN;
+    at(3);
+    expect(await undoPoSendBack({ id: "po1" })).toEqual({ ok: true, data: { refNo: "PO-0214", undone: 0 } });
+    expect(po()).toMatchObject({ state: "WITH_IT", sentBackBy: null, sentBackFields: [], sentBackNote: null });
+  });
+
+  it("refused for someone else", async () => {
+    await sentBackByFinance();
+    h.user = ADA;
+    const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
+    expect(r).toMatchObject({ kind: "conflict", message: "Can't undo: only Ana Cruz can undo this." });
+  });
+
+  it("refused after 15 minutes", async () => {
+    await sentBackByFinance();
+    at(15);
+    const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
+    expect(r).toMatchObject({ message: "Can't undo: the 15 minutes to undo it ended at 10:57." });
+  });
+
+  it("refused after Purchasing resubmitted it", async () => {
+    await sentBackByFinance();
+    at(1);
+    h.user = PAT;
+    expect((await savePurchaseOrder(order({ id: "po1", lines: [line({ id: "ln1", qty: 2, unitPrice: 25000 })], reply: "price per unit now" }))).ok).toBe(true);
+    h.user = ANA;
+    const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
+    expect(r).toMatchObject({ message: "Can't undo: PO-0214 is no longer with Purchasing." });
+  });
+
+  it("refused after Purchasing edited it while it was sent back", async () => {
+    await sentBackByFinance();
+    at(1);
+    h.user = PAT;
+    expect((await fixPurchaseOrder({ id: "po1", patch: { receiptRef: "OR-0099" } })).ok).toBe(true);
+    h.user = ANA;
+    const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
+    expect(r).toMatchObject({ message: "Can't undo: Pat Lim changed PO-0214 since, at 10:43." });
+  });
+
+  it("all or nothing: one returned asset changed since refuses the whole undo", async () => {
+    await sentBackByFinance();
+    at(2);
+    t("auditEntry").push({
+      id: "aud-later", actorId: ADA.id, actorLabel: ADA.name, entityType: "asset", entityId: "a2",
+      action: "asset.money.fixed", diff: { cost: { from: 50000, to: 49000 } }, createdAt: new Date(),
+    });
+    const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
+    expect(r).toMatchObject({ message: "Can't undo: BR-LT-a2's review has changed since." });
   });
 });

@@ -34,7 +34,7 @@ export const ACTION_LABELS: Record<string, string> = {
   // Purchase orders (spec §3–§6)
   "po.save": "Saved the purchase order", "po.resubmit": "Corrected and sent back on", "po.send-back": "Sent back to Purchasing",
   "po.fix": "Fixed the money details", "po.cancel": "Cancelled the purchase order", "po.line-closed": "Closed a line short",
-  "po.register": "Registered from the purchase order",
+  "po.register": "Registered from the purchase order", "po.send-back.undone": "Send-back undone",
   "asset.money.fixed": "Fixed the money details",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
@@ -247,6 +247,9 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
         : `${actor}undid the depreciation settings change on ${entry.entityLabel}`;
     case "finance.confirm.reopened":
       return omitEntity ? `${actor}reopened the review` : `${actor}reopened ${entry.entityLabel}'s review`;
+    // Task 6 fix round 1: the sender took a PO's send-back back
+    case "po.send-back.undone":
+      return omitEntity ? `${actor}undid the send-back to Purchasing` : `${actor}undid sending ${entry.entityLabel} back to Purchasing`;
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw

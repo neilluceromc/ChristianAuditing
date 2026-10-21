@@ -185,3 +185,12 @@ describe("what an undo restores, from the original entry's diff", () => {
     expect(settingsRestore(null)).toBeNull();
   });
 });
+
+describe("a return that came with a PO's send-back (Task 6 fix round 1)", () => {
+  it("can't be undone on its own: the undo points at the PO's", () => {
+    const fromPo = sendBack({ diff: { financeReturn: { from: null, to: { fields: ["Cost"], note: null } }, po: { from: null, to: "PO-0214" } } });
+    expect(undoCheck(SENT_BACK, [fromPo], ANA.id, after(2))).toEqual({
+      ok: false, reason: "Can't undo: it went back to Purchasing with PO-0214 — undo the send-back on PO-0214 instead.",
+    });
+  });
+});

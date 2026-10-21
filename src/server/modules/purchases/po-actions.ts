@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma, type AssetClass, type Role, type Team } from "@prisma/client";
@@ -16,8 +17,9 @@ import { canEditField, MONEY_FIELDS, poMoneyStage, reasonError, teamOfRole, type
 import { lineProgress, PO_WRITE_ROLES, poRefNo, stateAfterResubmit, stateAfterSave, type PoState } from "@/lib/po-flow";
 import { moneyForAsset } from "@/lib/po-money";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
-import { returnOne } from "@/server/modules/finance/review-writes";
+import { returnOne, undoOne } from "@/server/modules/finance/review-writes";
 import { emitIfPoFullyApproved } from "./po-complete";
+import { readPoSendBackUndo } from "./po-undo";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -596,6 +598,8 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
     }
 
     const now = new Date();
+    // One id for the whole send-back, on the PO's entry and each asset's: its undo finds exactly what it returned.
+    const batch = { from: null, to: randomUUID() };
     const hit = await tx.purchaseOrder.updateMany({
       where: { id, state: po.state },
       data: {
@@ -612,7 +616,7 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
       // with the PO's correction rather than by a per-asset undo (finance-undo.ts).
       const labels = fields.map((f) => fieldLabels([f])[0] ?? capitalise(FIELD_WORDS[f] ?? f));
       for (const a of assets.filter((x) => x.financeConfirmedAt === null && x.financeReturnedAt === null)) {
-        const hit = await returnOne(tx, a, user, { team: "PURCHASING", fields, note, labels }, { po: { from: null, to: po.refNo } });
+        const hit = await returnOne(tx, a, user, { team: "PURCHASING", fields, note, labels }, { po: { from: null, to: po.refNo }, batch });
         if (!hit) throw new StaleAssetError(a.tag);
       }
       touchedAssets = true;
@@ -627,6 +631,7 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
       diff: {
         state: { from: po.state, to: "SENT_BACK" },
         sentBack: { from: null, to: { team, fields: fields.map((f) => FIELD_WORDS[f] ?? f), note } },
+        batch,
       },
       reason: note, source: "web",
     });
@@ -639,6 +644,77 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
 
   if (failure) return failure;
   revalidatePo(id, touchedAssets);
+  return ok(out!);
+}
+
+// ---- undo a send-back ----------------------------------------------------------------------------------------------
+
+const undoSendBackSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * Task 6 fix round 1 (spec §5: Undo covers the new send-backs, one action each). The person who sent the PO back —
+ * IT, Finance or an admin — takes it back within 15 minutes, while nothing was done to the PO since and each asset it
+ * returned still has that return as its latest finance change (poSendBackUndoCheck, read under the PO row's lock).
+ * All or nothing: the PO goes back to the state it had (recorded in the po.send-back entry), its send-back is
+ * cleared, and every asset the send-back returned is un-returned with its own asset.return.undone entry; one
+ * po.send-back.undone entry on the PO, and a line in its thread. Purchasing's Sent back tab clears with the state.
+ */
+export async function undoPoSendBack(input: unknown): Promise<ActionResult<{ refNo: string; undone: number }>> {
+  return asActionResult(() => undoSendBackImpl(input));
+}
+
+async function undoSendBackImpl(input: unknown): Promise<ActionResult<{ refNo: string; undone: number }>> {
+  const parsed = undoSendBackSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { id } = parsed.data;
+
+  const user = await actionRole("it_staff", "finance_staff", "admin");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  type Out = { refNo: string; undone: number };
+  let out: Out | null = null;
+  let failure: ActionResult<Out> | null = null;
+
+  await prisma.$transaction(async (tx) => {
+    await lockPo(tx, id);
+    const read = await readPoSendBackUndo(tx, id, user.id, new Date());
+    if (!read) { failure = conflict("That purchase order no longer exists."); return; }
+    const { po, assets, check } = read;
+    if (!check.ok) { failure = conflict(check.reason); return; }
+    const previous = check.previousState as PoState;
+
+    // ---- writes (every refusal is above this line; a miss below rolls everything back) ----
+    const now = new Date();
+    const hit = await tx.purchaseOrder.updateMany({
+      where: { id, state: "SENT_BACK", sentBackById: user.id },
+      data: {
+        state: previous, sentBackAt: null, sentBackById: null, sentBackBy: null, sentBackFields: [], sentBackNote: null,
+        updatedAt: now,
+      },
+    });
+    if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
+    for (const item of check.items) {
+      const a = assets.find((x) => x.id === item.assetId)!;
+      if (!(await undoOne(tx, a, "send-back", item.entry.diff, user, { po: { from: null, to: po.refNo } }))) {
+        throw new StaleAssetError(a.tag);
+      }
+    }
+    const sentBack = (check.entry.diff as Record<string, { to?: unknown }> | null)?.sentBack?.to ?? null;
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name, entityType: ENTITY, entityId: id, action: "po.send-back.undone",
+      diff: { state: { from: "SENT_BACK", to: previous }, sentBack: { from: sentBack, to: null } },
+      source: "web",
+    });
+    // The thread is append-only: the send-back stays in it, and so does this.
+    await tx.noteEntry.create({ data: { orderId: id, authorId: user.id, kind: "COMMENT", text: "Undid the send-back to Purchasing." } });
+    out = { refNo: po.refNo, undone: check.items.length };
+  });
+
+  if (failure) return failure;
+  revalidatePo(id, true);
+  revalidatePath("/finance/review");
   return ok(out!);
 }
 

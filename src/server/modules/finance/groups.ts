@@ -33,9 +33,16 @@ export interface ReviewGroup {
   team: ReviewTeam;
 }
 
-/** The assets waiting for Finance — the same set as /finance/assets' To review (regWhere) — minus a sent-back PO's. */
+/**
+ * The assets waiting for Finance — the same set as /finance/assets' To review (regWhere) — minus a sent-back PO's.
+ * The null branch is explicit (fix round 1): a NOT on the nullable relation can render as NOT (fk IN subselect), which
+ * also drops every asset with no PO, so every direct and legacy group would vanish while any PO is sent back.
+ */
 export const REVIEW_GROUP_WHERE: Prisma.AssetWhereInput = {
-  AND: [regWhere("with-finance"), { NOT: { purchaseOrder: { is: { state: "SENT_BACK" } } } }],
+  AND: [
+    regWhere("with-finance"),
+    { OR: [{ purchaseOrderId: null }, { purchaseOrder: { is: { state: { not: "SENT_BACK" } } } }] },
+  ],
 };
 
 const GROUP_ROW_SELECT = {
@@ -137,6 +144,8 @@ export interface GroupAsset {
   returnFields: string[];
   returnNote: string | null;
   resubmitNote: string | null;
+  /** The asset's own money (fix round 1): what its Fix money dialog starts from and compares against. */
+  money: { vendorId: string | null; invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null };
 }
 
 export interface GroupDoc {
@@ -169,6 +178,8 @@ export interface GroupDetail {
     supplier: string | null; vendorId: string | null; invoiceRef: string | null; receiptRef: string | null;
     purchasedAt: Date | null; fees: number | null;
   };
+  /** Some asset's money differs from `money` (a direct group's assets fixed one by one since it was registered). */
+  moneyVaries: boolean;
   docs: GroupDoc[];
   assets: GroupAsset[];
   totals: { count: number; withFinance: number; approved: number; cost: number; fees: number; total: number };
@@ -206,6 +217,7 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
           id: true, tag: true, serial: true, brand: true, model: true, cls: true, cost: true, itVerifiedAt: true,
           financeConfirmedAt: true, financeReturnedAt: true, financeReturnedTo: true, financeNotCapitalised: true,
           financeReturnFields: true, financeReturnReason: true, financeResubmitNote: true,
+          vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true,
           documents: {
             orderBy: { createdAt: "desc" },
             select: { id: true, kind: true, fileName: true, checksum: true, createdAt: true, uploadedBy: { select: { name: true } } },
@@ -231,6 +243,7 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
       notCapitalised: a.financeNotCapitalised,
       returnedTo: a.financeReturnedAt ? (a.financeReturnedTo === "IT" || a.financeReturnedTo === "PURCHASING" ? a.financeReturnedTo : classTeam(a.cls)) : null,
       returnFields: a.financeReturnFields, returnNote: a.financeReturnReason, resubmitNote: a.financeResubmitNote,
+      money: { vendorId: a.vendorId, invoiceRef: a.invoiceRef, receiptRef: a.receiptRef, purchasedAt: a.purchasedAt },
     };
   });
 
@@ -261,6 +274,11 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
     }
   }
 
+  const shown = po ?? record;
+  const sameDay = (x: Date | null, y: Date | null) => (x?.toISOString().slice(0, 10) ?? null) === (y?.toISOString().slice(0, 10) ?? null);
+  const moneyVaries = assets.some((a) =>
+    a.money.vendorId !== shown.vendorId || (a.money.invoiceRef ?? null) !== (shown.invoiceRef ?? null)
+    || (a.money.receiptRef ?? null) !== (shown.receiptRef ?? null) || !sameDay(a.money.purchasedAt, shown.purchasedAt));
   const cost = assets.reduce((s, a) => s + (a.cost ?? 0), 0);
   const fees = num(po ? po.fees : record.fees) ?? 0;
   return {
@@ -280,6 +298,7 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
     money: po
       ? { supplier: po.vendor?.name ?? null, vendorId: po.vendorId, invoiceRef: po.invoiceRef, receiptRef: po.receiptRef, purchasedAt: po.purchasedAt, fees: num(po.fees) }
       : { supplier: record.vendor?.name ?? null, vendorId: record.vendorId, invoiceRef: record.invoiceRef, receiptRef: record.receiptRef, purchasedAt: record.purchasedAt, fees: num(record.fees) },
+    moneyVaries,
     docs,
     assets,
     totals: {

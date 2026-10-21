@@ -25,7 +25,7 @@ import { fmtMoneyExact } from "@/lib/format";
 import { isMoneyKey } from "@/lib/intake-rules";
 import { fieldLabels, REGISTRATION_FIELDS, REG_FIELD_GROUPS, type RegFieldKey, type RegState } from "@/lib/registration";
 import {
-  groupApproveToast, groupNotCapIssue, reopenReasonError, runGroupUndo, startUndoCountdown,
+  groupApproveToast, groupNotCapIssue, reopenReasonError, runGroupUndo,
 } from "@/lib/finance-review-ui";
 import { REOPEN_REASON_MAX, REOPEN_REASON_MIN } from "@/lib/finance-undo";
 import { approveGroup } from "@/server/modules/finance/group-actions";
@@ -33,6 +33,7 @@ import { reopenGroup, undoGroupAction } from "@/server/modules/finance/undo-acti
 import { FixMoneyButton, type AssetMoney } from "./fix-money-dialog";
 import { suggestedTeam } from "./send-back-dialog";
 import { useFinanceRunner } from "./use-finance-runner";
+import { TimedUndoBanner } from "./undo-banner";
 
 type Team = "IT" | "PURCHASING";
 const TEAM_LABEL: Record<Team, string> = { IT: "IT", PURCHASING: "Purchasing" };
@@ -116,7 +117,7 @@ export function GroupReview({
 
   return (
     <div className="flex flex-col gap-4">
-      {undo && <GroupUndoBanner state={undo} onUndo={() => runGroupUndo(recordId, { call: undoGroupAction, toast: (m, tone) => toast(m, tone), refresh: () => router.refresh() })} />}
+      {undo && <TimedUndoBanner state={undo} onUndo={() => runGroupUndo(recordId, { call: undoGroupAction, toast: (m, tone) => toast(m, tone), refresh: () => router.refresh() })} />}
 
       <Card>
         <CardHeader
@@ -314,31 +315,6 @@ function HoldBackDialog({
         </FormField>
       </div>
     </Dialog>
-  );
-}
-
-/** For 15 minutes after an Approve all, its author sees "You approved 3 and held back 1 at 10:42 · Undo". */
-function GroupUndoBanner({ state, onUndo }: { state: { label: string; msLeft: number; endsAt: number }; onUndo: () => Promise<boolean> }) {
-  const [left, setLeft] = useState(Math.max(1, Math.ceil(state.msLeft / 60_000)));
-  const [pending, setPending] = useState(false);
-  useEffect(() => startUndoCountdown(Date.now() + state.msLeft, setLeft), [state.msLeft, state.endsAt]);
-  if (left <= 0) return null;
-  return (
-    <div
-      data-undo-banner=""
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-(--radius-card) border px-4 py-2.5 text-[13px] text-fg"
-      style={{ background: "var(--st-neutral-bg)", borderColor: "var(--st-neutral-border)", borderLeft: "3px solid var(--st-neutral-dot)" }}
-    >
-      <span>{state.label}</span>{" "}
-      <span aria-hidden="true">·</span>{" "}
-      <Button
-        size="sm" loading={pending}
-        onClick={async () => { setPending(true); try { await onUndo(); } finally { setPending(false); } }}
-      >
-        Undo
-      </Button>{" "}
-      <span className="text-fg-muted">({left} min left)</span>
-    </div>
   );
 }
 

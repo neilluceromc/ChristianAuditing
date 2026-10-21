@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useToast } from "@/components/ui/toast";
+import { poSendBackToast, runPoSendBackUndo } from "@/lib/finance-review-ui";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { useFinanceRunner } from "@/components/finance/use-finance-runner";
 import { PO_REASON_HINT, PO_SEND_BACK_FIELDS, PO_SEND_BACK_GROUPS, type PoSendBackKey } from "@/lib/po-send-back";
-import { sendBackPurchaseOrder } from "@/server/modules/purchases/po-actions";
+import { sendBackPurchaseOrder, undoPoSendBack } from "@/server/modules/purchases/po-actions";
 
 /**
  * Spec §4 way 1 / §5: IT (or Finance) ticks what is wrong with a PO's money details and adds a note; the PO goes
@@ -22,6 +25,8 @@ export function SendBackPoDialog({
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } = useFinanceRunner(["note"]);
   const [ticked, setTicked] = useState<Set<PoSendBackKey>>(new Set());
   const [note, setNote] = useState("");
+  const router = useRouter();
+  const toast = useToast();
 
   useEffect(() => {
     if (!open) return;
@@ -44,7 +49,10 @@ export function SendBackPoDialog({
     const fields = PO_SEND_BACK_FIELDS.filter((f) => ticked.has(f.key)).map((f) => f.key);
     run(
       () => sendBackPurchaseOrder({ id, fields, ...(note.trim() ? { note } : {}) }),
-      () => `${refNo} sent back to Purchasing`,
+      // Task 6 fix round 1: the send-back can be taken back for 15 minutes (undoPoSendBack), from the toast too
+      () => poSendBackToast({ id, refNo }, (poId) => void runPoSendBackUndo(poId, {
+        call: undoPoSendBack, toast: (m, tone) => toast(m, tone), refresh: () => router.refresh(),
+      })),
       { onOk: onClose },
     );
   }
