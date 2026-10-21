@@ -25,6 +25,12 @@ beforeEach(() => {
 });
 
 describe("findExactTag", () => {
+  it("is exactTagMatch plus the class check: one lookup rule (final review M4)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./scan-actions.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/await exactTagMatch\(q\)/);
+    expect(source).not.toMatch(/prisma\./); // no lookup of its own
+  });
   it("finds an exact tag, trimmed and upper-cased, by the unique tag (never an ILIKE)", async () => {
     expect(await findExactTag("  br-lt-0148 ")).toEqual({ id: "a148" });
     expect(h.findUnique).toHaveBeenCalledWith({ where: { tag: "BR-LT-0148" }, select: { id: true, cls: true } });

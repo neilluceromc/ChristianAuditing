@@ -93,3 +93,14 @@ export function tagKey(raw: unknown): string {
  */
 export const TAG_SHAPE = /^[A-Z0-9][A-Z0-9._-]{0,19}$/;
 export const TAG_RULE = "Tags are 1–20 letters, digits, - _ or ., no spaces";
+
+/**
+ * The search jump's tag (spec §7.2): the text as a tag key (`tagKey`: trimmed, upper-cased) when it fits
+ * `TAG_SHAPE`, else null. ONE rule for both sides: the server's exact-tag lookup (`exactTagMatch`, and through it the
+ * search box's `findExactTag`) and the box itself, which skips the lookup for text that can't be a tag (final review
+ * M4, M5).
+ */
+export function exactTagKey(q: string): string | null {
+  const tag = tagKey(q);
+  return TAG_SHAPE.test(tag) ? tag : null;
+}

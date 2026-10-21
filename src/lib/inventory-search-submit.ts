@@ -1,3 +1,5 @@
+import { exactTagKey } from "./tag-key";
+
 /**
  * Task 6 review I1 / I3 (spec §7.2): what Inventory's search box does with a search.
  * - Typing or pasting (debounced) filters the list with `replace`, so typing never floods the history. A full tag
@@ -21,7 +23,9 @@ export async function inventorySearchSubmit(
   },
 ): Promise<void> {
   const text = q.trim();
-  if (!how.enter || !text) {
+  // Final review M5: text that can't be a tag (fails TAG_SHAPE, e.g. "mac book") is just the search, with no
+  // server round-trip first.
+  if (!how.enter || !text || exactTagKey(text) === null) {
     deps.replace(deps.listHref);
     return;
   }

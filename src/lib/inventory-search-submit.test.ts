@@ -42,6 +42,19 @@ describe("inventorySearchSubmit", () => {
     expect(d.replace).toHaveBeenCalledExactlyOnceWith("/inventory?q=BR-LT-0148");
     expect(d.replace.mock.calls[0][0]).not.toContain("go=");
   });
+  it("Enter on text that can't be a tag (fails TAG_SHAPE) is just the search: no server round-trip (final review M5)", async () => {
+    for (const q of ["Carlo Reyes", "mac/book", "-LT", "X".repeat(21), "Ñ"]) {
+      const d = deps({ id: "a148" });
+      await inventorySearchSubmit(q, { enter: true }, d);
+      expect(d.find).not.toHaveBeenCalled();
+      expect(d.push).not.toHaveBeenCalled();
+      expect(d.replace).toHaveBeenCalledExactlyOnceWith("/inventory?q=BR-LT-0148");
+    }
+    // tag-shaped text, any case and padding, is still looked up
+    const d = deps(null);
+    await inventorySearchSubmit("  br-lt-0148 ", { enter: true }, d);
+    expect(d.find).toHaveBeenCalledOnce();
+  });
   it("Enter on an empty box just clears, with nothing looked up", async () => {
     const d = deps({ id: "x" });
     await inventorySearchSubmit("  ", { enter: true }, d);

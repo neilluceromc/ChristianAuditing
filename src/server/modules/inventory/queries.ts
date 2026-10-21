@@ -12,7 +12,7 @@ import { TILE_SPECS } from "@/lib/inventory-tiles";
 import {
   REPAIR_STAGE_CASE_SQL, REPAIR_STAGE_LABEL, downDays, isRepairStage, repairStage, type RepairStage,
 } from "@/lib/repairs";
-import { TAG_SHAPE } from "@/lib/tag-key";
+import { exactTagKey } from "@/lib/tag-key";
 import { pageOf } from "@/lib/paging";
 import { ASSET_SEARCH_HIT_SELECT, assetHitStartsWith, assetStartsWith, prefixFirst, prefixFirstPage } from "@/lib/search-rank";
 import { pagedSnapshot } from "@/server/paged";
@@ -513,9 +513,10 @@ export async function purchaseYearBuckets(
  * intended; do not "fix" it by adding `cls` here.
  */
 export function exactTagMatch(q: string) {
-  const tag = q.trim().toUpperCase();
-  if (!TAG_SHAPE.test(tag)) return null;
-  return prisma.asset.findUnique({ where: { tag }, select: { id: true } });
+  const tag = exactTagKey(q);
+  if (tag === null) return null;
+  // `cls` for the callers that check visibility themselves (`findExactTag`; Cris ANDs its own on)
+  return prisma.asset.findUnique({ where: { tag }, select: { id: true, cls: true } });
 }
 
 export const getAsset = cache((id: string) =>
