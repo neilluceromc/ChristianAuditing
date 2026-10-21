@@ -46,9 +46,10 @@ export async function entityLabels(
     byType.has("approval")
       ? prisma.approval.findMany({ where: { id: { in: [...byType.get("approval")!] } }, select: { id: true, refNo: true } })
       : [],
-    byType.has("purchase-request")
-      ? prisma.purchaseRequest.findMany({
-          where: { id: { in: [...byType.get("purchase-request")!] } },
+    // Migration 38: "purchase-order" rows and the old "purchase-request" rows name the same table.
+    byType.has("purchase-order") || byType.has("purchase-request")
+      ? prisma.purchaseOrder.findMany({
+          where: { id: { in: [...(byType.get("purchase-order") ?? []), ...(byType.get("purchase-request") ?? [])] } },
           select: { id: true, refNo: true },
         })
       : [],
@@ -113,7 +114,10 @@ export async function entityLabels(
   for (const a of assets) map.set(`asset:${a.id}`, { label: a.tag, href: `/inventory/${a.id}` });
   for (const e of employees) map.set(`employee:${e.id}`, { label: e.name, href: `/employees/${e.id}` });
   for (const a of approvals) map.set(`approval:${a.id}`, { label: a.refNo, href: `/approvals/${a.id}` });
-  for (const p of purchases) map.set(`purchase-request:${p.id}`, { label: p.refNo, href: `/purchases/${p.id}` });
+  for (const p of purchases) {
+    map.set(`purchase-order:${p.id}`, { label: p.refNo, href: `/purchases/${p.id}` });
+    map.set(`purchase-request:${p.id}`, { label: p.refNo, href: `/purchases/${p.id}` });
+  }
   // A deleted policy has no row to resolve — it correctly keeps the truncated-id
   // fallback below; auditSentence's "delete" case reads the name from the diff instead.
   for (const p of policies) map.set(`equipment-policy:${p.id}`, { label: p.name, href: "/admin/equipment-policies" });
@@ -250,7 +254,7 @@ export async function listActivity(
     (tx, pg) => tx.auditEntry.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: pg.skip, take: pg.take }),
   );
   const labels = await entityLabels(entries);
-  const DOMAIN: Record<string, string> = { "purchase-request": "PURCHASE", asset: "ASSET" };
+  const DOMAIN: Record<string, string> = { "purchase-order": "PURCHASE", "purchase-request": "PURCHASE", asset: "ASSET" };
   const withEntityChip = feed === "inventory" || feed === "employees";
   const items: ActivityItem[] = entries.map((e) => {
     const entity = labels.get(`${e.entityType}:${e.entityId}`)!;

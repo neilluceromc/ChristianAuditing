@@ -450,7 +450,7 @@ export function monthLabels(now: Date, months: number): string[] {
 }
 
 const REQUEST_TONE: Record<string, MakeUpTone> = {
-  DRAFT: "neutral", SUBMITTED: "chart-1", IT_REVIEWED: "chart-2", COMPLETED: "chart-3", CANCELLED: "bad",
+  SENT_BACK: "neutral", WITH_IT: "chart-1", READY: "chart-2", CANCELLED: "bad",
 };
 
 /** Purchasing's make-up: requests by state in tab order, each linking to its /purchases tab (whose count it is). */

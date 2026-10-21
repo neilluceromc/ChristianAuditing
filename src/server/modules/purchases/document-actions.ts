@@ -24,8 +24,8 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
   const checked = validateUpload(formData.get("file"));
   if (!checked.ok) return validationError({ file: checked.error });
 
-  const request = await prisma.purchaseRequest.findUnique({ where: { id: requestId } });
-  if (!request) return conflict("That request no longer exists.");
+  const request = await prisma.purchaseOrder.findUnique({ where: { id: requestId } });
+  if (!request) return conflict("That purchase order no longer exists.");
 
   let stored: Awaited<ReturnType<typeof storeUpload>>;
   try {
@@ -37,7 +37,7 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
   const doc = await prisma.$transaction(async (tx) => {
     const created = await tx.requestDocument.create({
       data: {
-        requestId, kind,
+        orderId: requestId, kind,
         fileName: stored.fileName,
         path: stored.relPath, checksum: stored.checksum,
         uploadedById: user.id,
@@ -45,7 +45,7 @@ export async function uploadRequestDocument(formData: FormData): Promise<ActionR
     });
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
-      entityType: "purchase-request", entityId: requestId,
+      entityType: "purchase-order", entityId: requestId,
       action: "document.uploaded",
       diff: { document: { from: null, to: created.fileName } },
     });

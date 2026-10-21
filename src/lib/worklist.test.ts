@@ -16,10 +16,11 @@ describe("WORK_SECTIONS", () => {
     expect(WORK_SECTIONS.map((s) => s.id)).toEqual(["triage", "repairs", "check", "purchases", "hires", "loans", "missing", "queue"]);
   });
   it("the default loan is 30 days", () => expect(DEFAULT_LOAN_DAYS).toBe(30));
-  it("Phase 40 §6: Purchase reviews links to the requests waiting for IT", () => {
+  it("Phase 40 §6: Purchase reviews links to the purchase orders waiting for IT (migration 38: WITH_IT)", () => {
     const s = WORK_SECTIONS.find((x) => x.id === "purchases");
     expect(s?.title).toBe("Purchase reviews");
-    expect(s?.href).toBe("/purchases?state=SUBMITTED");
+    expect(s?.href).toBe("/purchases?state=WITH_IT");
+    expect(SEE_ALL_HREF.purchases).toBe("/purchases?state=WITH_IT");
     expect(WORK_SECTIONS.filter((x) => x.href).map((x) => x.id)).toEqual(["purchases"]);
   });
 });
@@ -55,9 +56,9 @@ describe("purchaseReviewRow (Phase 40 §6)", () => {
     expect(at("2026-10-15T12:24:00+08:00").meta).toBe("HR · from Pia Santos · waiting 1 d");
     expect(at("2026-10-15T12:24:00+08:00").ageDays).toBe(1);
     expect(dwellLine({
-      state: "SUBMITTED", updatedAt: base.updatedAt, submittedAt: new Date("2026-10-15T12:24:00+08:00"),
-      reviewedAt: null, completedAt: null, cancelledAt: null, bounced: false,
-    }, NOW)).toBe("awaiting IT · 1 d");
+      state: "WITH_IT", updatedAt: base.updatedAt, submittedAt: new Date("2026-10-15T12:24:00+08:00"),
+      cancelledAt: null, bounced: false,
+    }, NOW)).toBe("with IT · 1 d");
   });
   it("groups newest first, even within the same day", () => {
     const older = purchaseReviewRow({ ...base, id: "old", submittedAt: new Date("2026-10-15T08:00:00+08:00") }, NOW);
@@ -273,7 +274,7 @@ describe("capLine / SEE_ALL_HREF / summaryChips / pastSlaCount", () => {
       triage: "/inventory?sort=attention", check: "/inventory?sort=attention",
       repairs: "/inventory?status=DEFECTIVE", loans: "/inventory?status=TEMPORARY&sort=attention",
       missing: "/inventory?status=MISSING", hires: "/employees?gaps=1", queue: "/approvals",
-      purchases: "/purchases?state=SUBMITTED",
+      purchases: "/purchases?state=WITH_IT",
     });
   });
   it("chips count each non-empty section; past SLA counts rank-0 queue rows", () => {

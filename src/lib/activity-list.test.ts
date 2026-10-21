@@ -12,10 +12,11 @@ describe("the activity feeds' list rules (spec §3.4)", () => {
   it("keeps each feed's base predicate", () => {
     expect(feedWhere("inventory", NO_HIDDEN_REFS)).toEqual({ entityType: "asset" });
     expect(feedWhere("employees", NO_HIDDEN_REFS)).toEqual({ entityType: "employee" });
-    expect(feedWhere("purchases", NO_HIDDEN_REFS)).toEqual({ entityType: "purchase-request" });
+    // Migration 38: purchase-order rows and the old purchase-request rows read alike.
+    expect(feedWhere("purchases", NO_HIDDEN_REFS)).toEqual({ entityType: { in: ["purchase-order", "purchase-request"] } });
     const finance = feedWhere("finance", NO_HIDDEN_REFS);
     expect(finance.OR).toHaveLength(2);
-    expect(finance.OR?.[0]).toEqual({ entityType: "purchase-request" });
+    expect(finance.OR?.[0]).toEqual({ entityType: { in: ["purchase-order", "purchase-request"] } });
     expect(finance.OR?.[1]).toMatchObject({ entityType: "asset", diff: { path: ["cost"] } });
   });
   it("hides the assets a role cannot see, in the inventory feed and finance's asset branch", () => {

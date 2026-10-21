@@ -17,7 +17,7 @@ import { deliveryTabWhere, parseDeliveryTab } from "@/lib/webhooks";
 import { localDateISO } from "@/lib/format";
 import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
 import { financeViewWhere } from "@/server/modules/finance/queries";
-import { purchaseReviewCount, worklistCount } from "./queries";
+import { worklistCount } from "./queries";
 
 /**
  * The view each list count stands for (spec §4.3: the count equals the page's row count for that URL). Asserted
@@ -29,9 +29,10 @@ export const NAV_COUNT_HREF = {
   itDefective: "/inventory?status=DEFECTIVE&sort=defectiveSince",
   itMissing: "/inventory?status=MISSING",
   leaving: "/employees?employment=OFFBOARDING",
-  prDraft: "/purchases?state=DRAFT",
-  prSubmitted: "/purchases?state=SUBMITTED",
-  prItReviewed: "/purchases?state=IT_REVIEWED",
+  // Migration 38: the purchase-order tabs (prDraft → poSentBack, prSubmitted → poWithIt, prItReviewed → poReady).
+  poSentBack: "/purchases?state=SENT_BACK",
+  poWithIt: "/purchases?state=WITH_IT",
+  poReady: "/purchases?state=READY",
   // Phase 46 spec §4.3
   stockLow: "/stock?low=1",
   suppliersRenewing: "/purchases/suppliers?renewing=30",
@@ -103,8 +104,8 @@ const employees = (key: "leaving") => () =>
 
 // /purchases: parsePurchaseState(state) → purchaseWhere(state, q = "", no department, no supplier); listPurchases
 // counts that where.
-const purchases = (key: "prDraft" | "prSubmitted" | "prItReviewed") => () =>
-  prisma.purchaseRequest.count({ where: purchaseWhere(parsePurchaseState(paramsOf(key).get("state")), "") });
+const purchases = (key: "poSentBack" | "poWithIt" | "poReady") => () =>
+  prisma.purchaseOrder.count({ where: purchaseWhere(parsePurchaseState(paramsOf(key).get("state")), "") });
 
 // Phase 46 spec §4.3: each new count reads its view's URL the way the page does.
 
@@ -136,16 +137,15 @@ const deadDeliveries = () =>
 const flagsUnavailable = () =>
   Promise.resolve(filterFlags(FLAG_SPECS, parseFlagsState(paramsOf("flagsUnavailable").get("state"))).length);
 
-// Spec §5.3 / Phase 40 §6: the Worklist and Purchase reviews counts are admin's and IT's only, as before.
+// Spec §5.3 / Phase 40 §6: the Worklist count is admin's and IT's only, as before.
 const reviewer = (user: User) => user.role === "admin" || user.role === "it_staff";
 
 const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<number>> = {
   worklist: (user) => (reviewer(user) ? worklistCount(user.id, user.role) : Promise.resolve(0)),
-  purchaseReviews: (user) => (reviewer(user) ? purchaseReviewCount() : Promise.resolve(0)),
   leaving: employees("leaving"),
-  prDraft: purchases("prDraft"),
-  prSubmitted: purchases("prSubmitted"),
-  prItReviewed: purchases("prItReviewed"),
+  poSentBack: purchases("poSentBack"),
+  poWithIt: purchases("poWithIt"),
+  poReady: purchases("poReady"),
   stockLow,
   stocktakesOverdue,
   suppliersRenewing,

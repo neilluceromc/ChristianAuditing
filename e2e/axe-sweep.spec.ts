@@ -292,7 +292,7 @@ test.describe("axe sweep", () => {
     // route additionally requires `state === "DRAFT"` and
     // `requestedById === user.id || role === "admin"`, so this is the one
     // seeded record purchasing_staff (not just admin) can actually reach.
-    const draftPr = await db.purchaseRequest.findUniqueOrThrow({ where: { refNo: "PR-0201" } });
+    const draftPr = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0201" } });
     await scanRoute(page, `/purchases/${draftPr.id}/edit`);
   });
 
@@ -332,7 +332,7 @@ test.describe("axe sweep", () => {
     const asset = await db.asset.findUniqueOrThrow({ where: { tag: "BR-LT-0148" } });
     const employee = await db.employee.findUniqueOrThrow({ where: { employeeNo: "EMP-0090" } });
     const approval = await db.approval.findFirstOrThrow({ orderBy: { refNo: "asc" } });
-    const pr = await db.purchaseRequest.findFirstOrThrow({ orderBy: { refNo: "asc" } });
+    const pr = await db.purchaseOrder.findFirstOrThrow({ orderBy: { refNo: "asc" } });
 
     for (const path of [
       `/inventory/${asset.id}`, `/inventory/${asset.id}/history`, `/inventory/${asset.id}/timeline`,
@@ -405,12 +405,12 @@ test.describe("axe sweep", () => {
 
     // A purchase request with 8 messages (over the page's 5), with the Conversation panel open. NoteEntry is
     // append-only and Restrict-linked, so the request stays behind; the next reseed truncates it.
-    const request = await db.purchaseRequest.create({
-      data: { refNo: `PR-7${tag}`, state: "DRAFT", requestedById: purchasing.id, departmentId: dept.id },
+    const request = await db.purchaseOrder.create({
+      data: { refNo: `PO-7${tag}`, state: "SENT_BACK", requestedById: purchasing.id, departmentId: dept.id },
     });
     await db.noteEntry.createMany({
       data: Array.from({ length: 8 }, (_, i) => ({
-        requestId: request.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: "COMMENT" as const,
+        orderId: request.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: "COMMENT" as const,
         text: `Axe message ${i} ${tag}`, createdAt: new Date(stamp - (8 - i) * 3_600_000),
       })),
     });

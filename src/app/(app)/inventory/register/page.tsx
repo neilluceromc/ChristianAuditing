@@ -52,10 +52,12 @@ export default async function RegisterAssetsPage({
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
-    prisma.purchaseRequest.findMany({
-      where: { state: "COMPLETED" },
+    // Migration 38 (receiving.ts): any purchase order that isn't cancelled may be linked. Task 5 replaces this
+    // picker with the PO line.
+    prisma.purchaseOrder.findMany({
+      where: { state: { not: "CANCELLED" } },
       select: { id: true, refNo: true, vendorId: true, completedAt: true, updatedAt: true, vendor: { select: { name: true } } },
-      orderBy: [{ completedAt: "desc" }, { refNo: "desc" }],
+      orderBy: [{ updatedAt: "desc" }, { refNo: "desc" }],
     }),
     recentPeopleOptions(user.id),
     recentPicks(user.id, "vendor"),

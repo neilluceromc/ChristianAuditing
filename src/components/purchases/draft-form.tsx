@@ -14,7 +14,6 @@ import { GroupSelectOptions } from "@/components/ui/group-select-options";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { useToast } from "@/components/ui/toast";
 import { createDraft, saveDraft } from "@/server/modules/purchases/draft-actions";
-import { submitRequest } from "@/server/modules/purchases/actions";
 import type { PolicyLoadout } from "@/server/modules/purchases/queries";
 import type { PickerGroup } from "@/lib/groups";
 import type { ActionResult } from "@/server/action-result";
@@ -196,12 +195,9 @@ export function DraftForm({
       }
       lastSaved.current = JSON.stringify({ payload, departmentId });
       setDraft({ id: saved.data.id, refNo: saved.data.refNo });
-      const res = await submitRequest({ id: saved.data.id });
-      if (!res.ok) {
-        handleFailure(res);
-        return;
-      }
-      toast(`${res.data.refNo} submitted for IT review`, "settled");
+      // Migration 38: there is no separate submit any more — the save itself puts the order with IT
+      // (stateAfterSave). Task 4 replaces this form.
+      toast(`${saved.data.refNo} saved`, "settled");
       router.push(`/purchases/${saved.data.id}`);
     });
   }

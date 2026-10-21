@@ -61,7 +61,7 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     adminHome(),
   ]);
 
-  const waitingPesos = waiting.reduce((sum, r) => sum + unitsValue(r.units), 0);
+  const waitingPesos = waiting.reduce((sum, r) => sum + unitsValue(r.lines), 0);
   const values: Record<SnapshotKey, number> = {
     "it.spare": tiles["in-stock"] ?? 0,
     "it.deployed": tiles["deployed"] ?? 0,
@@ -74,8 +74,9 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     "approvals.pastSla.it": pastIt,
     "approvals.pastSla.purchasing": pastPurchasing,
     "approvals.pastSla.none": pastNone,
-    "pr.submitted": prStates.SUBMITTED ?? 0,
-    "pr.itReviewed": prStates.IT_REVIEWED ?? 0,
+    // Migration 38: the keys keep their names so the histories carry on; they now count WITH_IT and READY orders.
+    "pr.submitted": prStates.WITH_IT ?? 0,
+    "pr.itReviewed": prStates.READY ?? 0,
     "stock.low": stock.low,
     "stock.expiringLots": stock.expiringLots,
     "stock.stocktakesOverdue": stock.stocktakesOverdue,

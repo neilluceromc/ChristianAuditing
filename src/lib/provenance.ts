@@ -9,16 +9,17 @@ export const PROVENANCE_LABEL: Record<Provenance, string> = {
   HISTORICAL: "Historical import",
 };
 
-export function provenanceOf(a: { purchaseRequestId: string | null; importedAt: Date | null }): Provenance {
-  if (a.purchaseRequestId) return "PURCHASE_REQUEST";
+/** Migration 38: the column is the PO link now (`purchaseOrderId`); the "PURCHASE_REQUEST" value stays as the URL key. */
+export function provenanceOf(a: { purchaseOrderId: string | null; importedAt: Date | null }): Provenance {
+  if (a.purchaseOrderId) return "PURCHASE_REQUEST";
   return a.importedAt ? "HISTORICAL" : "DIRECT";
 }
 
 export function provenanceWhere(p: Provenance): Prisma.AssetWhereInput {
   switch (p) {
-    case "PURCHASE_REQUEST": return { purchaseRequestId: { not: null } };
-    case "DIRECT": return { purchaseRequestId: null, importedAt: null };
-    case "HISTORICAL": return { purchaseRequestId: null, importedAt: { not: null } };
+    case "PURCHASE_REQUEST": return { purchaseOrderId: { not: null } };
+    case "DIRECT": return { purchaseOrderId: null, importedAt: null };
+    case "HISTORICAL": return { purchaseOrderId: null, importedAt: { not: null } };
   }
 }
 

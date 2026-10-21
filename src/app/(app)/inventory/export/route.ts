@@ -50,7 +50,7 @@ export async function GET(req: Request) {
   const fetched = await prisma.asset.findMany({
     where,
     orderBy: ids ? { tag: "asc" } : orderBy,
-    // provenanceOf() below needs purchaseRequestId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
+    // provenanceOf() below needs purchaseOrderId + importedAt — an include keeps every scalar; do not narrow to select without adding them.
     include: { category: true, type: true, assignee: true, vendor: true },
   });
   // Phase 31: the Attention sort (primary key only, as on the list) is derived, so the sheet takes

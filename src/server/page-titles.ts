@@ -28,7 +28,7 @@ export const employeeNameFor = cache(async (id: string): Promise<string | null> 
 
 export const purchaseRefFor = cache(async (id: string): Promise<string | null> => {
   await requireUser();
-  const row = await prisma.purchaseRequest.findUnique({ where: { id }, select: { refNo: true } });
+  const row = await prisma.purchaseOrder.findUnique({ where: { id }, select: { refNo: true } });
   return row?.refNo ?? null;
 });
 

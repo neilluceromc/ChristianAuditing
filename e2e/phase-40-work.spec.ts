@@ -56,9 +56,9 @@ async function waitForHydration(target: Locator) {
 test.describe.serial("phase 40 — work and approvals", () => {
   test("1. a SUBMITTED request is a Purchase review on the worklist; the group opens the list; the nav item counts them", async ({ page }) => {
     test.setTimeout(90_000);
-    const pr = await db.purchaseRequest.findUniqueOrThrow({ where: { refNo: "PR-0198" } });
-    expect(pr.state).toBe("SUBMITTED");
-    const waiting = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
+    const pr = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0198" } });
+    expect(pr.state).toBe("WITH_IT");
+    const waiting = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
 
     await login(page, IT);
     await page.goto("/inventory/work");

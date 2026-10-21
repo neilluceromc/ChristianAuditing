@@ -78,8 +78,8 @@ export interface ScaleData {
   employeeNotes: Prisma.EmployeeNoteCreateManyInput[];
   policies: Prisma.EquipmentPolicyCreateManyInput[];
   policySlots: Prisma.PolicySlotCreateManyInput[];
-  purchaseRequests: Prisma.PurchaseRequestCreateManyInput[];
-  purchaseUnits: Prisma.PurchaseUnitCreateManyInput[];
+  purchaseOrders: Prisma.PurchaseOrderCreateManyInput[];
+  purchaseOrderLines: Prisma.PurchaseOrderLineCreateManyInput[];
   noteEntries: Prisma.NoteEntryCreateManyInput[];
   assets: Prisma.AssetCreateManyInput[];
   approvals: ApprovalRow[];

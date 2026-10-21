@@ -48,7 +48,7 @@ vi.mock("@/server/modules/inventory/queries", () => ({
   inventoryTileCounts: async () => ({ "in-stock": 11, deployed: 12, "on-loan": 99, "in-repair": 13, missing: 14, attention: 15 }),
 }));
 vi.mock("@/server/modules/purchases/queries", () => ({
-  stateCounts: async () => ({ ALL: 50, DRAFT: 1, SUBMITTED: 21, IT_REVIEWED: 22, COMPLETED: 3, CANCELLED: 3 }),
+  stateCounts: async () => ({ ALL: 50, SENT_BACK: 1, WITH_IT: 21, READY: 22, CANCELLED: 3 }),
 }));
 vi.mock("@/server/modules/stock/queries", () => ({
   stockHomeSignals: async (today: string) => {
@@ -67,8 +67,8 @@ vi.mock("@/server/modules/admin/queries", () => ({
 vi.mock("@/server/modules/home/queries", async (orig) => ({
   ...(await orig<object>()),
   financeWaitingRows: async () => [
-    { units: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }] },
-    { units: [{ qty: 3, unitPrice: "0.30" }] },
+    { lines: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }] },
+    { lines: [{ qty: 3, unitPrice: "0.30" }] },
   ],
 }));
 

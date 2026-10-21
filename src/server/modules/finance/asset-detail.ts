@@ -61,7 +61,7 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       category: true,
       assignee: { select: { name: true } },
       vendor: { select: { name: true } },
-      purchaseRequest: {
+      purchaseOrder: {
         select: { id: true, refNo: true, requestedBy: { select: { name: true } } },
       },
       purchaseRecord: { select: { id: true, fees: true, quantity: true } },
@@ -178,8 +178,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
       baseC: costC !== null && policy ? costC - policy.salvage : null,
     },
     purchase: {
-      pr: a.purchaseRequest ? { id: a.purchaseRequest.id, refNo: a.purchaseRequest.refNo } : null,
-      requestedBy: a.purchaseRequest?.requestedBy.name ?? null,
+      pr: a.purchaseOrder ? { id: a.purchaseOrder.id, refNo: a.purchaseOrder.refNo } : null,
+      requestedBy: a.purchaseOrder?.requestedBy.name ?? null,
       supplier: a.vendor?.name ?? null,
       invoiceRef: a.invoiceRef, receiptRef: a.receiptRef, purchasedAt: a.purchasedAt,
       warrantyUntil: a.warrantyUntil, coveredBy: a.warrantyCoveredBy,

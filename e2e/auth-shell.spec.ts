@@ -157,7 +157,7 @@ test.describe("shell", () => {
   test("approvals badge shows the seeded urgent count", async ({ page }) => {
     // Phase 42 (spec §4.3): IT's Approvals badge is the 3 seeded open approvals (one past SLA) plus the purchase
     // reviews waiting for IT (the seed's PR-0198), so waiting reviews stay visible while Approvals is closed.
-    const reviews = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
+    const reviews = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
     await login(page, "it@thebackroomop.com");
     const badge = page.getByLabel(/open approval/);
     await expect(badge).toHaveText(String(3 + reviews));

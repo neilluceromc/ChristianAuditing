@@ -26,8 +26,8 @@ const HIRE_WINDOW_DAYS = 30;
 /** Phase 17: per-source read caps, named once so `take` and the saturation check can't drift apart. */
 const CAP = { small: 10, large: 50 };
 
-/** Phase 40 §6 (spec ruling 5): IT reviews SUBMITTED requests only; an IT_REVIEWED one has left IT's hands. */
-const PURCHASE_REVIEW_WHERE = { state: "SUBMITTED" } as const satisfies Prisma.PurchaseRequestWhereInput;
+/** Phase 40 §6, migration 38: IT's purchase-order queue is the orders WITH_IT. */
+const PURCHASE_REVIEW_WHERE = { state: "WITH_IT" } as const satisfies Prisma.PurchaseOrderWhereInput;
 
 /**
  * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each
@@ -122,8 +122,8 @@ export async function worklist(
       take: CAP.large,
       select: { id: true, tag: true, model: true, loanDueAt: true, assignee: { select: { name: true } } },
     }),
-    // Phase 40 §6: purchase requests waiting for IT's review, newest first.
-    prisma.purchaseRequest.findMany({
+    // Phase 40 §6: purchase orders waiting for IT's check, newest first.
+    prisma.purchaseOrder.findMany({
       where: PURCHASE_REVIEW_WHERE,
       orderBy: [{ submittedAt: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }, { id: "desc" }],
       take: CAP.large,
@@ -131,8 +131,8 @@ export async function worklist(
         id: true, refNo: true, submittedAt: true, updatedAt: true,
         requestedBy: { select: { name: true } },
         department: { select: { name: true } },
-        units: { select: { description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 },
-        _count: { select: { units: true } },
+        lines: { select: { description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 },
+        _count: { select: { lines: true } },
       },
     }),
   ]);
@@ -273,7 +273,7 @@ export async function worklist(
     rows.push(purchaseReviewRow({
       id: r.id, refNo: r.refNo, submittedAt: r.submittedAt, updatedAt: r.updatedAt,
       requestedBy: r.requestedBy.name, department: r.department?.name ?? null,
-      firstLine: r.units[0]?.description ?? null, lines: r._count.units,
+      firstLine: r.lines[0]?.description ?? null, lines: r._count.lines,
     }, now));
   }
 
@@ -375,19 +375,10 @@ export async function worklistCount(userId: string, role: Role, now: Date = new 
     prisma.approval.count({ where: { AND: [{ state: "EXECUTION_FAILED" }, { id: { notIn: hiddenIds("queue") } }, scope] } }),
     prisma.employee.count({ where: { employment: "OFFBOARDING", id: { notIn: hiddenIds("queue") } } }),
     hireWorkRows(now),
-    prisma.purchaseRequest.count({ where: { ...PURCHASE_REVIEW_WHERE, id: { notIn: hiddenIds("purchases") } } }),
+    prisma.purchaseOrder.count({ where: { ...PURCHASE_REVIEW_WHERE, id: { notIn: hiddenIds("purchases") } } }),
   ]);
   const hireCount = hires.rows.filter((r) => !hidden.has(r.key)).length;
   return triage + repairs + check + loans + missing + orphaned + breached + failed + leavers + hireCount + reviews;
-}
-
-/**
- * The IT nav's "Purchase reviews" badge (spec §6): every request waiting for
- * IT's review — the count of the list the item opens, so it matches its
- * "Awaiting IT" tab; a row hidden on the worklist is still waiting.
- */
-export async function purchaseReviewCount(): Promise<number> {
-  return prisma.purchaseRequest.count({ where: PURCHASE_REVIEW_WHERE });
 }
 
 export interface ClaimRow {
@@ -537,20 +528,22 @@ export interface SpendRow {
 
 /**
  * Completed requests since `since`, each with its value — the one read behind "Spend this month" (Purchasing),
- * "Approved this month" (Finance) and both spend breakdowns, so they can never disagree.
+ * "Approved this month" (Finance) and both spend breakdowns, so they can never disagree. Migration 38: the old
+ * COMPLETED requests are READY orders that keep their completedAt; nothing new writes completedAt (Task 6 owns the
+ * purchase-order "approved" moment).
  */
 export async function completedSpend(since: Date): Promise<SpendRow[]> {
-  const rows = await prisma.purchaseRequest.findMany({
-    where: { state: "COMPLETED", completedAt: { gte: since } },
+  const rows = await prisma.purchaseOrder.findMany({
+    where: { state: "READY", completedAt: { gte: since } },
     select: {
       completedAt: true,
-      units: { select: { qty: true, unitPrice: true } },
+      lines: { select: { qty: true, unitPrice: true } },
       vendor: { select: { name: true } },
       department: { select: { name: true } },
     },
   });
   return rows.map((r) => ({
-    at: r.completedAt!, amount: unitsValue(r.units), supplier: r.vendor?.name ?? null, department: r.department?.name ?? null,
+    at: r.completedAt!, amount: unitsValue(r.lines), supplier: r.vendor?.name ?? null, department: r.department?.name ?? null,
   }));
 }
 
@@ -558,17 +551,17 @@ export async function completedSpend(since: Date): Promise<SpendRow[]> {
 export const SPEND_TOP = 7;
 
 /**
- * Purchasing's to-do (Home and the Overview's Needs you): the viewer's drafts and submitted requests, oldest touched
- * first, each with the one action that moves it — and whether it came back to them.
+ * Purchasing's to-do (Home and the Overview's Needs you): the viewer's orders with Purchasing (SENT_BACK) or with IT,
+ * oldest touched first, each with the one action that moves it — and whether it came back to them.
  */
 export async function purchasingTodo(userId: string, now: Date = new Date()): Promise<TodoRow[]> {
-  const mine = await prisma.purchaseRequest.findMany({
-    where: { requestedById: userId, state: { in: ["DRAFT", "SUBMITTED"] } },
+  const mine = await prisma.purchaseOrder.findMany({
+    where: { requestedById: userId, state: { in: ["SENT_BACK", "WITH_IT"] } },
     orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     take: 8,
     select: {
       id: true, refNo: true, state: true, updatedAt: true,
-      units: { select: { qty: true, unitPrice: true } },
+      lines: { select: { qty: true, unitPrice: true } },
       notes: {
         where: { kind: { not: "COMMENT" } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -579,31 +572,35 @@ export async function purchasingTodo(userId: string, now: Date = new Date()): Pr
   });
   return mine.map((r) => {
     const last = r.notes[0];
-    const bounced = (r.state === "DRAFT" && last?.kind === "IT_REJECT") || (r.state === "SUBMITTED" && last?.kind === "REQUEST_INFO");
+    // A legacy never-sent draft is SENT_BACK with no send-back note; an IT rejection or a PO send-back came back.
+    const bounced = r.state === "SENT_BACK"
+      ? last?.kind === "IT_REJECT" || last?.kind === "PO_SENT_BACK"
+      : last?.kind === "REQUEST_INFO";
     return {
       id: r.id,
       refNo: r.refNo,
-      what: bounced ? `came back from ${last?.author.name ?? "review"}` : r.state === "DRAFT" ? "still a draft" : "waiting on IT",
-      meta: `${fmtMoney(unitsValue(r.units))} · ${daysSince(r.updatedAt, now)} d`,
+      what: bounced ? `came back from ${last?.author.name ?? "review"}` : r.state === "SENT_BACK" ? "with you" : "waiting on IT",
+      meta: `${fmtMoney(unitsValue(r.lines))} · ${daysSince(r.updatedAt, now)} d`,
       href: `/purchases/${r.id}`,
-      action: bounced ? "Fix and resubmit" : r.state === "DRAFT" ? "Submit" : "Open",
+      action: bounced ? "Fix and resubmit" : "Open",
       bounced,
     };
   });
 }
 
 /**
- * The requests waiting on Finance (IT_REVIEWED), oldest review first: Finance Home's headline and queue, and the
- * snapshot's `fin.waitingC` / `fin.waitingCount` (Phase 46), so the two can never disagree.
+ * The orders past IT and not yet registered (READY), oldest first: Finance Home's headline and queue, and the
+ * snapshot's `fin.waitingC` / `fin.waitingCount` (Phase 46), so the two can never disagree. Migration 38 interim:
+ * the old IT_REVIEWED queue maps to READY (the nav's prItReviewed → poReady); Finance's own group review is Task 6.
  */
 export function financeWaitingRows() {
-  return prisma.purchaseRequest.findMany({
-    where: { state: "IT_REVIEWED" },
+  return prisma.purchaseOrder.findMany({
+    where: { state: "READY" },
     orderBy: [{ reviewedAt: "asc" }, { id: "asc" }],
     select: {
       id: true, refNo: true, reviewedAt: true, updatedAt: true,
       requestedBy: { select: { name: true } },
-      units: { select: { qty: true, unitPrice: true } },
+      lines: { select: { qty: true, unitPrice: true } },
     },
   });
 }
@@ -621,7 +618,7 @@ export function financeQueue(rows: FinanceWaitingRow[], now: Date, take = 8): To
     id: r.id,
     refNo: r.refNo,
     what: `from ${r.requestedBy.name}`,
-    meta: `${fmtMoney(unitsValue(r.units))} · waiting ${waitingDays(r, now)} d`,
+    meta: `${fmtMoney(unitsValue(r.lines))} · waiting ${waitingDays(r, now)} d`,
     href: `/purchases/${r.id}`,
     action: "Review",
   }));

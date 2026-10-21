@@ -168,7 +168,7 @@ test.describe.serial("approvals lifecycle — it@", () => {
     // Phase 42 (spec §4.3): IT's Approvals link badge is the open approvals plus the purchase reviews waiting for
     // IT (the seed's PR-0198). While Approvals is the current link its badge steps aside and its Open view
     // carries the open count alone.
-    const reviews = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
+    const reviews = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
     const nav = 'nav[aria-label="Workspace"]';
     // Phase 46 (spec §4.2): the link sits in a row with its "{Link} views" toggle (li > div > a), so the top-level
     // link is "not inside a view list" rather than a direct child of its li.

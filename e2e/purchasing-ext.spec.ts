@@ -121,7 +121,7 @@ async function openPurchase(page: Page) {
   await expect(header).toHaveAttribute("aria-expanded", "true");
 }
 
-const reqByRef = (refNo: string) => db.purchaseRequest.findUniqueOrThrow({ where: { refNo } });
+const reqByRef = (refNo: string) => db.purchaseOrder.findUniqueOrThrow({ where: { refNo } });
 const vendorByName = (name: string) => db.vendor.findUniqueOrThrow({ where: { name } });
 const deptByName = (name: string) => db.department.findUniqueOrThrow({ where: { name } });
 
@@ -132,7 +132,7 @@ let newReqRef: string;
 test.describe.serial("purchasing extensions", () => {
   test("1. a draft cannot autosave without a department; choosing one saves it, and the badge/list reflect it", async ({ page }) => {
     test.setTimeout(90_000); // first hit of /purchases/new and /purchases/[id] in this file
-    const before = await db.purchaseRequest.count();
+    const before = await db.purchaseOrder.count();
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
 
@@ -148,7 +148,7 @@ test.describe.serial("purchasing extensions", () => {
     // count is unchanged (draft-form.tsx:30,136-150 debounce; the guard at
     // :132 refuses to call createDraft at all while departmentId === "").
     await page.waitForTimeout(3_000);
-    expect(await db.purchaseRequest.count()).toBe(before);
+    expect(await db.purchaseOrder.count()).toBe(before);
 
     await page.getByLabel("Requesting department").selectOption({ label: "HR" });
     await expect(page.getByText(/DRAFT · SAVED \d{2}:\d{2}/)).toBeVisible({ timeout: 10_000 });

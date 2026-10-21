@@ -47,6 +47,7 @@ async function main() {
     TRUNCATE "AuditEntry", "NoteEntry", "Job", "WebhookDelivery", "WebhookEndpoint",
       "RateEvent", "UserPreference", "Approval", "Reservation", "AssetSecret",
       "AssetDocument", "PurchaseUnit", "PurchaseRequest", "PurchaseRecord", "Asset", "PolicySlot",
+      "NotificationRead", "Notification",
       "EquipmentPolicy", "EmployeeTransfer", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User",
       "StocktakeLine", "Stocktake", "StockMovement", "StockLotDocument", "StockAllocation", "StockLot",
@@ -255,27 +256,32 @@ async function main() {
 
   // Phase 18 spec §2.6: anything bought more than two years ago reads as a historical import.
   await prisma.asset.updateMany({
-    where: { purchasedAt: { lt: day(-730) }, purchaseRequestId: null },
+    where: { purchasedAt: { lt: day(-730) }, purchaseOrderId: null },
     data: { importedAt: new Date() },
   });
 
   const asset = (tag: string) => prisma.asset.findUniqueOrThrow({ where: { tag } });
 
-  // Purchase requests — one per state; the SUBMITTED one is a bounce-back with a note thread.
-  await prisma.purchaseRequest.create({
+  // Purchase orders (migration 38). The five old requests keep their numbers (PR- → PO-) and land in the states the
+  // migration maps them to (legacyPoState: DRAFT → SENT_BACK, SUBMITTED/IT_REVIEWED → WITH_IT, COMPLETED → READY),
+  // now with an SI number, a purchase date and a category on every line. Two more show the new flow: one IT sent
+  // back to Purchasing, and one non-IT order ready to register.
+  await prisma.purchaseOrder.create({
     data: {
-      refNo: "PR-0201", state: "DRAFT", requestedById: purchasing.id, departmentId: depts["IT"].id,
-      units: { create: [{ description: "Laptop for new analyst", specs: "16GB RAM min", qty: 1, unitPrice: 62_000 }] },
+      refNo: "PO-0201", state: "SENT_BACK", requestedById: purchasing.id, departmentId: depts["IT"].id,
+      invoiceRef: "SI-30201", purchasedAt: day(-1),
+      lines: { create: [{ description: "Laptop for new analyst", specs: "16GB RAM min", categoryId: cats["Laptop"].id, qty: 1, unitPrice: 62_000 }] },
     },
   });
-  await prisma.purchaseRequest.create({
+  await prisma.purchaseOrder.create({
     data: {
-      refNo: "PR-0198", state: "SUBMITTED", requestedById: purchasing.id, departmentId: depts["HR"].id,
+      refNo: "PO-0198", state: "WITH_IT", requestedById: purchasing.id, departmentId: depts["HR"].id,
+      invoiceRef: "SI-30198", purchasedAt: day(-5),
       submittedAt: day(-4), reviewedAt: day(-2), reviewedById: itStaff.id,
-      units: {
+      lines: {
         create: [
-          { description: "27-inch monitors", qty: 4, unitPrice: 12_000, state: "PENDING" },
-          { description: "USB-C docks", qty: 4, unitPrice: 11_000, state: "PENDING", itSlotNotes: "Confirm wattage for T14" },
+          { description: "27-inch monitors", categoryId: cats["Monitor"].id, qty: 4, unitPrice: 12_000, state: "PENDING" },
+          { description: "USB-C docks", categoryId: cats["Other"].id, qty: 4, unitPrice: 11_000, state: "PENDING", itSlotNotes: "Confirm wattage for T14" },
         ],
       },
       notes: {
@@ -287,35 +293,64 @@ async function main() {
       },
     },
   });
-  await prisma.purchaseRequest.create({
+  await prisma.purchaseOrder.create({
     data: {
-      refNo: "PR-0195", state: "IT_REVIEWED", requestedById: purchasing.id, departmentId: depts["Sales"].id,
+      refNo: "PO-0195", state: "WITH_IT", requestedById: purchasing.id, departmentId: depts["Sales"].id,
+      invoiceRef: "SI-30195", purchasedAt: day(-7),
       submittedAt: day(-6), reviewedAt: day(-3), reviewedById: itStaff.id,
-      units: { create: [{ description: "Wireless headsets", qty: 6, unitPrice: 7_500, state: "APPROVED" }] },
+      lines: { create: [{ description: "Wireless headsets", categoryId: cats["Headset"].id, qty: 6, unitPrice: 7_500, state: "APPROVED" }] },
       notes: { create: [{ authorId: purchasing.id, kind: "SUBMIT", text: "Replacement cycle for Sales.", createdAt: day(-6) }] },
     },
   });
-  const pr0188 = await prisma.purchaseRequest.create({
+  const po0188 = await prisma.purchaseOrder.create({
     data: {
-      refNo: "PR-0188", state: "COMPLETED", requestedById: purchasing.id, departmentId: depts["IT"].id, vendorId: vendors[0].id,
+      refNo: "PO-0188", state: "READY", requestedById: purchasing.id, departmentId: depts["IT"].id, vendorId: vendors[0].id,
+      invoiceRef: "SI-30188", receiptRef: "OR-30188", purchasedAt: day(-42),
       submittedAt: day(-40), reviewedAt: day(-35), reviewedById: itStaff.id, completedAt: day(-30),
-      units: { create: [{ description: "Dell Latitude 5420", qty: 2, unitPrice: 55_000, state: "APPROVED" }] },
+      lines: { create: [{ description: "Dell Latitude 5420", categoryId: cats["Laptop"].id, qty: 2, unitPrice: 55_000, state: "APPROVED" }] },
     },
-    include: { units: true },
+    include: { lines: true },
   });
-  // Final-review fix wave (M-5): register one seeded asset against PR-0188's
-  // own unit so the "From PR-0188" badge (spec §6) has seed data, not only
-  // e2e-created rows. BR-LT-0148 is one of PR-0188's two Dell Latitude 5420s.
+  // Final-review fix wave (M-5): register one seeded asset against PO-0188's
+  // own line so the "From PO-0188" badge (spec §6) has seed data, not only
+  // e2e-created rows. BR-LT-0148 is one of PO-0188's two Dell Latitude 5420s;
+  // migration 38: it carries both links, the order and the line.
   await prisma.asset.update({
     where: { tag: "BR-LT-0148" },
-    data: { purchaseRequestId: pr0188.id, purchaseUnitId: pr0188.units[0].id },
+    data: { purchaseOrderId: po0188.id, purchaseOrderLineId: po0188.lines[0].id },
   });
   // Phase 18: deliberately untagged — the e2e "none" filter case needs one pre-phase row
-  await prisma.purchaseRequest.create({
+  await prisma.purchaseOrder.create({
     data: {
-      refNo: "PR-0183", state: "CANCELLED", requestedById: purchasing.id,
-      submittedAt: day(-50), cancelledAt: day(-48), cancelReason: "Duplicate of PR-0184",
-      units: { create: [{ description: "Spare chargers", qty: 10, unitPrice: 1_800, state: "CANCELLED" }] },
+      refNo: "PO-0183", state: "CANCELLED", requestedById: purchasing.id,
+      invoiceRef: "SI-30183", purchasedAt: day(-51),
+      submittedAt: day(-50), cancelledAt: day(-48), cancelReason: "Duplicate of PO-0184",
+      lines: { create: [{ description: "Spare chargers", categoryId: cats["Other"].id, qty: 10, unitPrice: 1_800, state: "CANCELLED" }] },
+    },
+  });
+  // Migration 38's new flow: IT sent this one back to Purchasing over the price.
+  await prisma.purchaseOrder.create({
+    data: {
+      refNo: "PO-0202", state: "SENT_BACK", requestedById: purchasing.id, departmentId: depts["IT"].id, vendorId: vendors[0].id,
+      invoiceRef: "SI-30202", purchasedAt: day(-3),
+      sentBackAt: day(-1), sentBackById: itStaff.id, sentBackBy: "IT", sentBackFields: ["cost"],
+      sentBackNote: "Price is per box, not per unit",
+      lines: { create: [{ description: "USB-C cables, 2 m", categoryId: cats["Other"].id, qty: 10, unitPrice: 4_500 }] },
+      notes: {
+        create: [
+          { authorId: purchasing.id, kind: "PO_SAVED", text: "Cables for the new desks.", createdAt: day(-2) },
+          { authorId: itStaff.id, kind: "PO_SENT_BACK", text: "Price is per box, not per unit", createdAt: day(-1) },
+        ],
+      },
+    },
+  });
+  // …and a non-IT order with nothing registered yet: it skips IT and is ready for Purchasing to register.
+  await prisma.purchaseOrder.create({
+    data: {
+      refNo: "PO-0203", state: "READY", requestedById: purchasing.id, departmentId: depts["HR"].id, vendorId: vendors[3].id,
+      invoiceRef: "SI-30203", purchasedAt: day(-2),
+      lines: { create: [{ description: "Office chairs", categoryId: cats["Furniture"].id, qty: 4, unitPrice: 8_500 }] },
+      notes: { create: [{ authorId: purchasing.id, kind: "PO_SAVED", text: "Chairs for the HR room.", createdAt: day(-2) }] },
     },
   });
 
@@ -514,7 +549,7 @@ async function main() {
         attempts: 5,
         lastError: "500 Internal Server Error",
       },
-      // PR-0188 is this seed's one COMPLETED request — purchase_request.completed
+      // PO-0188 (PR-0188 before migration 38) is this seed's one old COMPLETED request — purchase_request.completed
       // only ever fires from COMPLETED (purchases/actions.ts's `complete`
       // branch), and unlike the two approval.executed rows above, there's no
       // structural reason to cite anything else here: offHook is subscribed
@@ -588,7 +623,7 @@ async function main() {
   // Advance the ref-number sequences past the seeded values so the first
   // allocated refNo continues the range instead of restarting at 0001.
   await prisma.$executeRawUnsafe(
-    `SELECT setval('purchase_request_ref_seq', 201), setval('approval_ref_seq', 2041)`,
+    `SELECT setval('purchase_request_ref_seq', 203), setval('approval_ref_seq', 2041)`,
   );
 
   // ── Phase 19: stock control ───────────────────────────────────────────

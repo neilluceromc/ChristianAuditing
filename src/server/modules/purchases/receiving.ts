@@ -57,9 +57,8 @@ const registerSchema = z.object({
   // Accepted and ignored: a batch always lands in the class's default status. It exists so the
   // Register form can send one shape at any quantity.
   requestedStatus: z.string().optional(),
-  // OPTIONAL metadata, never a gate (C-5). If a request is named it must be
-  // COMPLETED, because linking an asset to a request still in flight would
-  // claim a provenance that is not settled.
+  // OPTIONAL metadata, never a gate (C-5): the purchase order this came from. It must exist and not be
+  // cancelled (migration 38). Task 5 replaces it with the PO line.
   requestId: z.string().optional(),
 });
 
@@ -147,14 +146,15 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
     }
   }
 
-  // OPTIONAL metadata, never a gate (C-5) — but a named request must exist and be COMPLETED.
+  // OPTIONAL metadata, never a gate (C-5) — but a named order must exist and not be cancelled (migration 38;
+  // Task 5 replaces requestId with the PO line).
   if (d.requestId) {
-    const req = await prisma.purchaseRequest.findUnique({
+    const po = await prisma.purchaseOrder.findUnique({
       where: { id: d.requestId },
       select: { refNo: true, state: true },
     });
-    if (!req) errors.requestId = "Unknown request";
-    else if (req.state !== "COMPLETED") errors.requestId = `${req.refNo} is ${req.state.toLowerCase()} — only a completed request can be linked.`;
+    if (!po) errors.requestId = "Unknown purchase order";
+    else if (po.state === "CANCELLED") errors.requestId = `${po.refNo} is cancelled — a cancelled purchase order can't be linked.`;
   }
 
   if (Object.keys(errors).length || !category) return validationError(errors);
@@ -174,6 +174,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           cls: category.cls, vendorId: d.vendorId || null, purchasedAt: toDate(d.purchasedAt),
           invoiceRef: d.invoiceRef || null, receiptRef: d.receiptRef || null,
           unitCost: d.cost || null, fees: d.fees || null, quantity: d.tags.length, createdById: user.id,
+          purchaseOrderId: d.requestId || null,
         },
       });
       let created = 0;
@@ -207,7 +208,7 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             warrantyCoveredBy: d.warrantyCoveredBy || null,
             warrantyContact: d.warrantyContact || null,
             purchaseRecordId: record.id,
-            purchaseRequestId: d.requestId || null,
+            purchaseOrderId: d.requestId || null,
             itVerifiedAt: selfChecked ? new Date() : null,
             itVerifiedById: selfChecked ? user.id : null,
           },

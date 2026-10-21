@@ -15,6 +15,9 @@ export const PO_STATE_LABEL: Record<PoState, string> = {
   CANCELLED: "Cancelled",
 };
 
+/** Who may create and edit a PO (Purchasing writes it; admin is every party). Replaces the old DRAFT_ROLES. */
+export const PO_WRITE_ROLES: Role[] = ["purchasing_staff", "admin"];
+
 /** Saving a PO: any IT line, or a legacy line with no class, needs IT's look first. */
 export function stateAfterSave(lines: { cls: AssetClass | null }[]): "WITH_IT" | "READY" {
   return lines.some((l) => l.cls === null || l.cls === "IT") ? "WITH_IT" : "READY";

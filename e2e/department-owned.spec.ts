@@ -403,7 +403,7 @@ test.describe("Purchasing Home", () => {
     const expectedApprovals = await db.approval.count({
       where: { state: { in: ["PENDING", "CLAIMED"] }, OR: [{ assetId: null }, { asset: { cls: "PURCHASING" } }] },
     });
-    const expectedAwaitingIt = await db.purchaseRequest.count({ where: { state: "SUBMITTED" } });
+    const expectedAwaitingIt = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
     await login(page, P);
     await page.goto("/");
     // Phase 46 (spec §3.2): the Purchasing Overview has no approvals tile (its six are requests and stock); the

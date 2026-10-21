@@ -4,7 +4,7 @@ import { purchaseRefFor } from "@/server/page-titles";
 import { notFound, redirect } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
-import { DRAFT_ROLES } from "@/lib/purchase-flow";
+import { PO_WRITE_ROLES } from "@/lib/po-flow";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { DraftForm, type UnitDraft } from "@/components/purchases/draft-form";
@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function EditPurchasePage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireRole(...DRAFT_ROLES);
+  const user = await requireRole(...PO_WRITE_ROLES);
   const { id } = await params;
   const [request, loadouts, departments] = await Promise.all([
     getPurchase(id),
@@ -23,9 +23,9 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     prisma.department.findMany({ select: { id: true, name: true, kind: true, archivedAt: true }, orderBy: { name: "asc" } }),
   ]);
   if (!request) notFound();
-  // only a draft is editable, and only by its requester (or an admin) — the
-  // server action enforces both; this keeps the dead end off the screen
-  if (request.state !== "DRAFT") redirect(`/purchases/${id}`);
+  // only an order with Purchasing or IT is editable here, and only by its requester (or an admin) —
+  // the server action enforces both; this keeps the dead end off the screen
+  if (request.state !== "SENT_BACK" && request.state !== "WITH_IT") redirect(`/purchases/${id}`);
   if (request.requestedById !== user.id && user.role !== "admin") redirect(`/purchases/${id}`);
 
   const units: UnitDraft[] = request.units.map((u) => ({

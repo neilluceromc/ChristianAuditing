@@ -262,9 +262,10 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   // Spec §8, a category with types needs one picked (Phase 36).
   else if (category && (await typeRequired(d.categoryId, d.typeId))) errors.typeId = TYPE_REQUIRED;
   if (d.requestId) {
-    const req = await prisma.purchaseRequest.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });
-    if (!req) errors.requestId = "Unknown request";
-    else if (req.state !== "COMPLETED") errors.requestId = `${req.refNo} is ${req.state.toLowerCase()} — only a completed request can be linked.`;
+    // Migration 38 (as receiving.ts): the named order must exist and not be cancelled.
+    const po = await prisma.purchaseOrder.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });
+    if (!po) errors.requestId = "Unknown purchase order";
+    else if (po.state === "CANCELLED") errors.requestId = `${po.refNo} is cancelled — a cancelled purchase order can't be linked.`;
   }
   const tagTaken = await prisma.asset.findUnique({ where: { tag: d.tag }, select: { id: true } });
   if (tagTaken) errors.tag = `${d.tag} is already registered`;
@@ -320,7 +321,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           warrantyCoveredBy: d.warrantyCoveredBy || null,
           warrantyContact: d.warrantyContact || null,
           purchaseRecordId: record.id,
-          purchaseRequestId: d.requestId || null,
+          purchaseOrderId: d.requestId || null,
           itVerifiedAt: selfChecked ? new Date() : null,
           itVerifiedById: selfChecked ? user.id : null,
         },

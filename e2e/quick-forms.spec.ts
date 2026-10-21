@@ -355,7 +355,7 @@ test.describe.serial("quick forms", () => {
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /purchases/new in this file
-    const draftsBefore = await db.purchaseRequest.count();
+    const draftsBefore = await db.purchaseOrder.count();
 
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
@@ -378,7 +378,7 @@ test.describe.serial("quick forms", () => {
     await expect(page.getByLabel("Line 3 description")).toHaveCount(0);
 
     // No department was ever chosen, so autosave never fired: no draft row.
-    expect(await db.purchaseRequest.count()).toBe(draftsBefore);
+    expect(await db.purchaseOrder.count()).toBe(draftsBefore);
   });
 
   test("6. the new-employee form starts with no department chosen and Next names what is missing", async ({

@@ -48,8 +48,8 @@ describe("buildAssetWhere", () => {
     const w = buildAssetWhere({ q: "", page: 1, per: 25, sort: [], filters: { provenance: ["DIRECT", "HISTORICAL"], status: ["SPARE"] } });
     expect(w.status).toEqual({ in: ["SPARE"] });
     expect(w.AND).toEqual([{ OR: [
-      { purchaseRequestId: null, importedAt: null },
-      { purchaseRequestId: null, importedAt: { not: null } },
+      { purchaseOrderId: null, importedAt: null },
+      { purchaseOrderId: null, importedAt: { not: null } },
     ] }]);
   });
   it("ignores an unknown provenance value", () => {

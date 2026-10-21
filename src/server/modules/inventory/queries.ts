@@ -527,7 +527,7 @@ export const getAsset = cache((id: string) =>
       type: true,
       assignee: true,
       vendor: true,
-      purchaseRequest: { select: { id: true, refNo: true } },
+      purchaseOrder: { select: { id: true, refNo: true } },
       financeReturnedBy: { select: { name: true } },
       financeConfirmedBy: { select: { name: true } },
       approvals: {

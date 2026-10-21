@@ -1,4 +1,4 @@
-import type { NoteKind, PurchaseRequestState } from "@prisma/client";
+import type { NoteKind, PurchaseOrderState } from "@prisma/client";
 
 /**
  * The bounce-back is the design problem (README 1j). Everything the banner and
@@ -22,13 +22,21 @@ export const NOTE_CHIP: Record<NoteKind, string> = {
   CANCEL: "CANCELLED",
   COMPLETE: "COMPLETED",
   RECEIVE: "RECEIVED",
+  // Migration 38: the purchase-order thread. The kinds above stay so history still renders.
+  PO_SAVED: "SAVED",
+  PO_SENT_BACK: "SENT BACK",
+  PO_RESUBMITTED: "RESUBMITTED",
+  PO_FIXED: "FIXED",
+  PO_REGISTERED: "REGISTERED",
+  PO_LINE_CLOSED: "CLOSED SHORT",
+  PO_CANCELLED: "CANCELLED",
 };
 
 export interface BounceBack {
   by: string;
   at: Date;
   reason: string;
-  /** who sent it back — finance bounced IT_REVIEWED, IT rejected SUBMITTED */
+  /** who sent it back — legacy: Finance asked for more info (now WITH_IT), IT rejected (now SENT_BACK) */
   from: "finance" | "it";
   /** the honest transition line: nothing was cleared */
   transition: string;
@@ -42,19 +50,23 @@ function lastFlowNote(notes: ThreadNote[]): ThreadNote | null {
   return null;
 }
 
-export function bounceBack(state: PurchaseRequestState, notes: ThreadNote[]): BounceBack | null {
+/**
+ * Migration 38 mapped the old states (SUBMITTED → WITH_IT, DRAFT → SENT_BACK), so a legacy bounce still reads
+ * off the same notes. The purchase-order send-back (PO_SENT_BACK) is Task 4's to render.
+ */
+export function bounceBack(state: PurchaseOrderState, notes: ThreadNote[]): BounceBack | null {
   const last = lastFlowNote(notes);
   if (!last) return null;
-  if (state === "SUBMITTED" && last.kind === "REQUEST_INFO") {
+  if (state === "WITH_IT" && last.kind === "REQUEST_INFO") {
     return {
       by: last.author, at: last.at, reason: last.text, from: "finance",
-      transition: "IT_REVIEWED → SUBMITTED · nothing was cleared",
+      transition: "Back with IT · nothing was cleared",
     };
   }
-  if (state === "DRAFT" && last.kind === "IT_REJECT") {
+  if (state === "SENT_BACK" && last.kind === "IT_REJECT") {
     return {
       by: last.author, at: last.at, reason: last.text, from: "it",
-      transition: "SUBMITTED → DRAFT · nothing was cleared",
+      transition: "Sent back to Purchasing · nothing was cleared",
     };
   }
   return null;
@@ -67,7 +79,7 @@ export function unitAnchor(reason: string): { anchor: string; label: string } {
   return { anchor: `#unit-${m[1]}`, label: `Jump to unit ${m[1].padStart(2, "0")}` };
 }
 
-/** Every arrival at SUBMITTED: one per submit, one per finance bounce-back. */
+/** Every arrival with IT under the old flow: one per submit, one per finance bounce-back. */
 export function submittedVisits(notes: ThreadNote[]): number {
   return notes.filter((n) => n.kind === "SUBMIT" || n.kind === "REQUEST_INFO").length;
 }
@@ -75,7 +87,7 @@ export function submittedVisits(notes: ThreadNote[]): number {
 export type StopStatus = "done" | "current" | "upcoming";
 
 export interface StepperStop {
-  state: PurchaseRequestState;
+  state: PurchaseOrderState;
   label: string;
   status: StopStatus;
   note?: string;
@@ -88,11 +100,10 @@ export interface Stepper {
   cancelled: boolean;
 }
 
-const STOPS: Array<{ state: PurchaseRequestState; label: string }> = [
-  { state: "DRAFT", label: "Draft" },
-  { state: "SUBMITTED", label: "Submitted" },
-  { state: "IT_REVIEWED", label: "IT reviewed" },
-  { state: "COMPLETED", label: "Completed" },
+const STOPS: Array<{ state: PurchaseOrderState; label: string }> = [
+  { state: "SENT_BACK", label: "With Purchasing" },
+  { state: "WITH_IT", label: "With IT" },
+  { state: "READY", label: "Ready to register" },
 ];
 
 const ORDINAL_SUFFIXES = ["th", "st", "nd", "rd"] as const;
@@ -105,18 +116,17 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-/** How far a cancelled request actually got, read off the thread. */
+/** How far a cancelled order actually got, read off the thread (old and new note kinds alike). */
 function reachedIndex(notes: ThreadNote[]): number {
   let reached = 0;
   for (const n of notes) {
-    if (n.kind === "SUBMIT" && reached < 1) reached = 1;
-    if (n.kind === "IT_REVIEW" && reached < 2) reached = 2;
-    if (n.kind === "COMPLETE") reached = 3;
+    if ((n.kind === "SUBMIT" || n.kind === "IT_REVIEW" || n.kind === "PO_SAVED" || n.kind === "PO_RESUBMITTED") && reached < 1) reached = 1;
+    if (n.kind === "COMPLETE") reached = 2;
   }
   return reached;
 }
 
-export function stepperModel(state: PurchaseRequestState, notes: ThreadNote[]): Stepper {
+export function stepperModel(state: PurchaseOrderState, notes: ThreadNote[]): Stepper {
   const bounce = bounceBack(state, notes);
   const cancelled = state === "CANCELLED";
   const currentIndex = cancelled ? -1 : STOPS.findIndex((s) => s.state === state);
@@ -127,7 +137,7 @@ export function stepperModel(state: PurchaseRequestState, notes: ThreadNote[]): 
     if (cancelled) return { ...stop, status: i <= frozenAt ? "done" : "upcoming" };
     if (i < currentIndex) return { ...stop, status: "done" };
     if (i > currentIndex) return { ...stop, status: "upcoming" };
-    const repeat = stop.state === "SUBMITTED" && visits > 1 ? ` · ${ordinal(visits)} time` : "";
+    const repeat = stop.state === "WITH_IT" && visits > 1 ? ` · ${ordinal(visits)} time` : "";
     return { ...stop, status: "current", note: `NOW${repeat}` };
   });
 

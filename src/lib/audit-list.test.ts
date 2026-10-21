@@ -20,6 +20,11 @@ describe("buildAuditWhere", () => {
   it("entity facet filters entityType", () => {
     expect(buildAuditWhere(parse("entity=asset,employee")).entityType).toEqual({ in: ["asset", "employee"] });
   });
+  it("migration 38: a purchase filter finds both purchase-order and the old purchase-request rows", () => {
+    expect(AUDIT_ENTITY_TYPES).toContain("purchase-order");
+    expect(buildAuditWhere(parse("entity=purchase-order")).entityType).toEqual({ in: ["purchase-order", "purchase-request"] });
+    expect(buildAuditWhere(parse("entity=purchase-request")).entityType).toEqual({ in: ["purchase-request", "purchase-order"] });
+  });
   it("lists the four Phase 27 entity types the page already renders", () => {
     expect(AUDIT_ENTITY_TYPES).toEqual(expect.arrayContaining(["vendor", "stock-item", "stock-category", "stocktake"]));
   });

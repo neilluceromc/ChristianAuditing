@@ -360,9 +360,9 @@ test.describe("Phase 39 — the purchase conversation", () => {
 
     // NoteEntry is append-only (a database trigger) and a request that has notes cannot be deleted
     // (onDelete: Restrict), so these two requests stay behind; every spec file reseeds, which truncates them.
-    const twelve = await db.purchaseRequest.create({
+    const twelve = await db.purchaseOrder.create({
       data: {
-        refNo: `PR-9${tag}`, state: "IT_REVIEWED", requestedById: purchasing.id, departmentId: dept.id,
+        refNo: `PO-9${tag}`, state: "WITH_IT", requestedById: purchasing.id, departmentId: dept.id,
         submittedAt: new Date(now - 13 * DAY), reviewedAt: new Date(now - 12 * DAY), reviewedById: it.id,
       },
     });
@@ -373,7 +373,7 @@ test.describe("Phase 39 — the purchase conversation", () => {
     const dates = Array.from({ length: 12 }, (_, i) => new Date(now - (12 - i) * DAY));
     await db.noteEntry.createMany({
       data: dates.map((createdAt, i) => ({
-        requestId: twelve.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: kindOf(i), text: textOf(i), createdAt,
+        orderId: twelve.id, authorId: i % 2 === 0 ? purchasing.id : it.id, kind: kindOf(i), text: textOf(i), createdAt,
       })),
     });
 
@@ -434,12 +434,12 @@ test.describe("Phase 39 — the purchase conversation", () => {
     await expect(earlier).toBeFocused();
 
     // 31 messages: the panel shows 30, then "Load 30 more" gives 31 and the button goes.
-    const long = await db.purchaseRequest.create({
-      data: { refNo: `PR-8${tag}`, state: "DRAFT", requestedById: purchasing.id, departmentId: dept.id },
+    const long = await db.purchaseOrder.create({
+      data: { refNo: `PO-8${tag}`, state: "SENT_BACK", requestedById: purchasing.id, departmentId: dept.id },
     });
     await db.noteEntry.createMany({
       data: Array.from({ length: 31 }, (_, i) => ({
-        requestId: long.id, authorId: purchasing.id, kind: "COMMENT" as const, text: `Long thread ${i} ${tag}`,
+        orderId: long.id, authorId: purchasing.id, kind: "COMMENT" as const, text: `Long thread ${i} ${tag}`,
         createdAt: new Date(now - (31 - i) * 3_600_000),
       })),
     });

@@ -28,8 +28,8 @@ vi.mock("@/server/db/client", () => ({
         return JSON.stringify(where).includes('"cls":"PURCHASING"') ? 6 : 5;
       },
     },
-    purchaseRequest: {
-      findMany: async ({ where }: { where: Prisma.PurchaseRequestWhereInput }) =>
+    purchaseOrder: {
+      findMany: async ({ where }: { where: Prisma.PurchaseOrderWhereInput }) =>
         "createdAt" in where
           ? [{ createdAt: new Date("2026-10-19T02:00:00Z") }, { createdAt: new Date("2026-10-18T02:00:00Z") }, { createdAt: new Date("2026-10-12T02:00:00Z") }]
           : [{ completedAt: new Date("2026-10-19T02:00:00Z") }],
@@ -43,7 +43,7 @@ vi.mock("@/server/modules/metrics/history", () => ({
   },
 }));
 vi.mock("@/server/modules/purchases/queries", () => ({
-  stateCounts: async () => ({ ALL: 50, DRAFT: 1, SUBMITTED: 21, IT_REVIEWED: 22, COMPLETED: 6, CANCELLED: 0 }),
+  stateCounts: async () => ({ ALL: 50, WITH_IT: 21, SENT_BACK: 1, READY: 22, CANCELLED: 6 }),
 }));
 vi.mock("@/server/modules/stock/queries", () => ({
   stockHomeSignals: async () => ({ low: 31, expiringLots: 32, stocktakesOverdue: 33 }),
@@ -100,11 +100,11 @@ vi.mock("./queries", async (orig) => ({
   financeWaitingRows: async () => [
     {
       id: "w1", refNo: "PR-10", reviewedAt: new Date("2026-10-17T02:00:00Z"), updatedAt: new Date("2026-10-17T02:00:00Z"),
-      requestedBy: { name: "Ina" }, units: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }],
+      requestedBy: { name: "Ina" }, lines: [{ qty: 2, unitPrice: "1000.10" }, { qty: 1, unitPrice: null }],
     },
     {
       id: "w2", refNo: "PR-11", reviewedAt: null, updatedAt: new Date("2026-10-19T02:00:00Z"),
-      requestedBy: { name: "Bo" }, units: [{ qty: 3, unitPrice: "0.30" }],
+      requestedBy: { name: "Bo" }, lines: [{ qty: 3, unitPrice: "0.30" }],
     },
   ],
   directChangeRows: async (since: Date) => {
@@ -140,8 +140,8 @@ describe("purchasingOverview", () => {
   it("six tiles; the linked ones open the page whose count they are", async () => {
     const o = await purchasingOverview(user("purchasing_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
-      ["Awaiting IT", 21, "/purchases?state=SUBMITTED"],
-      ["Awaiting finance", 22, "/purchases?state=IT_REVIEWED"],
+      ["With IT", 21, "/purchases?state=WITH_IT"],
+      ["Ready to register", 22, "/purchases?state=READY"],
       ["Spend this month", 1550.1, undefined],
       ["Below reorder", 31, "/stock?low=1"],
       ["Lots expiring", 32, "/stock/reports/expiry?days=30&tab=expiring"],
@@ -179,10 +179,10 @@ describe("purchasingOverview", () => {
     expect(o.trend.labels).toHaveLength(12);
     expect(o.trend.series.map((s) => [s.name, s.values.slice(-2)])).toEqual([["Created", [1, 2]], ["Completed", [0, 1]]]);
     expect(o.makeUp.rows.map((r) => [r.label, r.value, r.href])).toEqual([
-      ["Drafts", 1, "/purchases?state=DRAFT"],
-      ["Awaiting IT", 21, "/purchases?state=SUBMITTED"],
-      ["Awaiting finance", 22, "/purchases?state=IT_REVIEWED"],
-      ["Completed", 6, "/purchases?state=COMPLETED"],
+      ["With IT", 21, "/purchases?state=WITH_IT"],
+      ["Sent back", 1, "/purchases?state=SENT_BACK"],
+      ["Ready to register", 22, "/purchases?state=READY"],
+      ["Cancelled", 6, "/purchases?state=CANCELLED"],
     ]);
     // from the one spend read, this Manila month only: Bolt's Sep 30 23:30 (Manila) completion is September's
     expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Acme", value: 1050.1 }, { label: "No supplier", value: 500 }] });
@@ -196,7 +196,7 @@ describe("financeOverview", () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
       ["Waiting on you", 2001.1, undefined],
-      ["Requests waiting", 2, "/purchases?state=IT_REVIEWED"],
+      ["Requests waiting", 2, "/purchases?state=READY"],
       ["Approved this month", 3, undefined],
       ["Capitalized this month", 55_000, undefined],
       ["Book value", 48_442_000, undefined],
@@ -259,7 +259,7 @@ describe("financeOverview", () => {
       ["PR-10 · from Ina", "/purchases/w1"],
       ["PR-11 · from Bo", "/purchases/w2"],
     ]);
-    expect(o.needsYouHref).toBe("/purchases?state=IT_REVIEWED");
+    expect(o.needsYouHref).toBe("/purchases?state=READY");
     expect(o.trend).toMatchObject({ title: "Capitalized per month", unit: "₱" });
     expect(o.trend.labels).toEqual(expect.arrayContaining(["Nov 2025", "Oct 2026"]));
     expect(o.trend.series).toHaveLength(1);

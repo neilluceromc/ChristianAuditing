@@ -4,7 +4,8 @@ import { localDateISO } from "./format";
 import type { ListConfig, ListState } from "./url-state";
 
 export const AUDIT_ENTITY_TYPES = [
-  "asset", "employee", "approval", "purchase-request", "user",
+  // Migration 38: "purchase-order" (filtering on it also finds the old "purchase-request" rows; see buildAuditWhere).
+  "asset", "employee", "approval", "purchase-order", "user",
   "asset-category", "asset-type", "department", "equipment-policy",
   "feature-flag", "webhook-endpoint",
   "vendor", "stock-item", "stock-category", "stocktake", // Phase 27 (spec §3.3): rows the page already renders and links
@@ -48,7 +49,14 @@ export function buildAuditWhere(
       ...(matchIds.length ? [{ entityId: { in: matchIds } }] : []),
     ];
   }
-  if (state.filters.entity?.length) where.entityType = { in: state.filters.entity };
+  if (state.filters.entity?.length) {
+    // Migration 38: a purchase order's history spans both entity types; either filter value finds both.
+    const purchase = ["purchase-order", "purchase-request"];
+    const entity = state.filters.entity.some((e) => purchase.includes(e))
+      ? [...new Set([...state.filters.entity, ...purchase])]
+      : state.filters.entity;
+    where.entityType = { in: entity };
+  }
   const when = whenRange(state.filters.when?.[0], todayISO);
   if (when) where.createdAt = when;
   // Phase 14 (spec §3.1), generalised in Phase 27 (spec §3.3): rows about class-bearing things this

@@ -2,13 +2,13 @@ import { cn } from "@/lib/cn";
 import type { Stepper } from "@/lib/purchase-thread";
 
 /**
- * Four stops, and the loop drawn explicitly: when a request came back, the
+ * Three stops, and the loop drawn explicitly: when an order came back, the
  * connector it travelled backwards along is dashed amber/red and labelled
  * "← sent back", so the return path is visible instead of implied.
  */
 export function PurchaseStepper({ model }: { model: Stepper }) {
-  // finance bounced IT_REVIEWED → SUBMITTED (connector 1); IT rejected
-  // SUBMITTED → DRAFT (connector 0)
+  // legacy: finance's bounce left it WITH_IT (connector 1, With IT ↔ Ready); IT's
+  // rejection left it SENT_BACK (connector 0, With Purchasing ↔ With IT)
   const returnAt = model.sentBack === "finance" ? 1 : model.sentBack === "it" ? 0 : -1;
 
   return (

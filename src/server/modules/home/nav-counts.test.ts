@@ -17,7 +17,6 @@ const h = vi.hoisted(() => ({
   employee: vi.fn(),
   purchase: vi.fn(),
   worklist: vi.fn(),
-  reviews: vi.fn(),
   approval: vi.fn(),
   stockItems: vi.fn(),
   stockSums: vi.fn(),
@@ -31,7 +30,7 @@ vi.mock("@/server/db/client", () => ({
   prisma: {
     asset: { count: h.asset, groupBy: h.assetGroup },
     employee: { count: h.employee },
-    purchaseRequest: { count: h.purchase },
+    purchaseOrder: { count: h.purchase },
     approval: { count: h.approval },
     stockItem: { findMany: h.stockItems },
     stockMovement: { groupBy: h.stockSums },
@@ -41,7 +40,7 @@ vi.mock("@/server/db/client", () => ({
     webhookDelivery: { count: h.delivery },
   },
 }));
-vi.mock("./queries", () => ({ worklistCount: h.worklist, purchaseReviewCount: h.reviews }));
+vi.mock("./queries", () => ({ worklistCount: h.worklist }));
 
 import { buildStockItemWhere, STOCK_LIST_CONFIG } from "@/lib/stock-list";
 import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
@@ -68,9 +67,8 @@ beforeEach(() => {
   h.assetGroup.mockImplementation(grouped(FLEET));
   h.employee.mockResolvedValue(4);
   h.purchase.mockImplementation(async ({ where }: { where: { state?: string } }) =>
-    ({ DRAFT: 3, SUBMITTED: 5, IT_REVIEWED: 6 })[where.state ?? ""] ?? 0);
+    ({ SENT_BACK: 3, WITH_IT: 5, READY: 6 })[where.state ?? ""] ?? 0);
   h.worklist.mockResolvedValue(15);
-  h.reviews.mockResolvedValue(1);
 });
 
 afterEach(() => {
@@ -86,17 +84,16 @@ describe("readNavCounts", () => {
     expect(h.employee).not.toHaveBeenCalled();
     expect(h.purchase).not.toHaveBeenCalled();
     expect(h.worklist).not.toHaveBeenCalled();
-    expect(h.reviews).not.toHaveBeenCalled();
   });
 
   it("reads every key it is given", async () => {
     const keys: CountKey[] = [
-      "worklist", "purchaseReviews", "itSpare", "itDefective", "itMissing", "leaving",
-      "prDraft", "prSubmitted", "prItReviewed",
+      "worklist", "itSpare", "itDefective", "itMissing", "leaving",
+      "poSentBack", "poWithIt", "poReady",
     ];
     expect(await readNavCounts(keys, itStaff)).toEqual({
-      worklist: 15, purchaseReviews: 1, itSpare: 7, itDefective: 2, itMissing: 1, leaving: 4,
-      prDraft: 3, prSubmitted: 5, prItReviewed: 6,
+      worklist: 15, itSpare: 7, itDefective: 2, itMissing: 1, leaving: 4,
+      poSentBack: 3, poWithIt: 5, poReady: 6,
     });
     expect(h.worklist).toHaveBeenCalledWith("u1", "it_staff");
   });
@@ -126,10 +123,9 @@ describe("readNavCounts", () => {
     expect(error).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the worklist and purchase reviews admin's and IT's only, as today", async () => {
-    expect(await readNavCounts(["worklist", "purchaseReviews"], viewer)).toEqual({ worklist: 0, purchaseReviews: 0 });
+  it("keeps the worklist admin's and IT's only, as today", async () => {
+    expect(await readNavCounts(["worklist"], viewer)).toEqual({ worklist: 0 });
     expect(h.worklist).not.toHaveBeenCalled();
-    expect(h.reviews).not.toHaveBeenCalled();
     expect(await readNavCounts(["worklist"], { id: "a", role: "admin" })).toEqual({ worklist: 15 });
   });
 
@@ -161,7 +157,7 @@ describe("readNavCounts", () => {
   });
 
   it("does not query assets when no IT status count is wanted", async () => {
-    await readNavCounts(["leaving", "prDraft", "worklist"], itStaff);
+    await readNavCounts(["leaving", "poSentBack", "worklist"], itStaff);
     expect(h.assetGroup).not.toHaveBeenCalled();
     expect(h.asset).not.toHaveBeenCalled();
   });
@@ -185,8 +181,11 @@ describe("readNavCounts", () => {
   });
 
   it("builds the purchase wheres the way /purchases does", async () => {
-    await readNavCounts(["prDraft", "prSubmitted", "prItReviewed"], { id: "p", role: "purchasing_staff" });
-    for (const state of ["DRAFT", "SUBMITTED", "IT_REVIEWED"] as const) {
+    await readNavCounts(["poSentBack", "poWithIt", "poReady"], { id: "p", role: "purchasing_staff" });
+    expect(NAV_COUNT_HREF).toMatchObject({
+      poSentBack: "/purchases?state=SENT_BACK", poWithIt: "/purchases?state=WITH_IT", poReady: "/purchases?state=READY",
+    });
+    for (const state of ["SENT_BACK", "WITH_IT", "READY"] as const) {
       expect(h.purchase).toHaveBeenCalledWith({ where: purchaseWhere(state, "") });
     }
   });
@@ -291,16 +290,16 @@ describe("NAV_COUNT_HREF", () => {
         }
       }
     }
-    // itSpare, itDefective, itMissing, leaving, prDraft, prSubmitted, prItReviewed ×2; Phase 46: stockLow,
+    // itSpare, itDefective, itMissing, leaving, poWithIt, poSentBack, poReady ×2; Phase 46: stockLow,
     // suppliersRenewing, finToConfirmIt, finToConfirmPurchasing, usersDisabled, deadDeliveries, flagsUnavailable
     expect(checked).toBe(15);
   });
 
   it("accounts for every counted view: a list count (equal to its page), an exempt one, or a work count", () => {
-    // Work counts are not a list page's row count: the Approvals badge (getApprovalsBadge), the worklist, and the
-    // purchase reviews (the reviewer's queue). Exempt counts (NAV_COUNT_UNFILTERED) sit on a view whose page has no
+    // Work counts are not a list page's row count: the Approvals badge (getApprovalsBadge) and the worklist.
+    // Exempt counts (NAV_COUNT_UNFILTERED) sit on a view whose page has no
     // filter for them, so they are never asserted equal to that page's rows: only that they sit on that view.
-    const WORK: CountKey[] = ["approvals", "worklist", "purchaseReviews"];
+    const WORK: CountKey[] = ["approvals", "worklist"];
     const seen = new Set<CountKey>();
     for (const sections of Object.values(WORKSPACE_NAV)) {
       for (const view of sections.flatMap((s) => s.items).flatMap((i) => i.views ?? [])) {

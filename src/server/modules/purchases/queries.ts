@@ -1,4 +1,4 @@
-import type { PurchaseRequestState, PurchaseUnitState } from "@prisma/client";
+import type { PurchaseOrderState, PurchaseUnitState } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
@@ -9,7 +9,7 @@ import { pagedSnapshot } from "@/server/paged";
 export interface PurchaseListRow {
   id: string;
   refNo: string;
-  state: PurchaseRequestState;
+  state: PurchaseOrderState;
   requester: string;
   /** what is actually being bought: the first line, plus a count of the rest */
   summary: string;
@@ -41,7 +41,7 @@ export interface PurchaseUnitView {
 export interface PurchaseDetail {
   id: string;
   refNo: string;
-  state: PurchaseRequestState;
+  state: PurchaseOrderState;
   requester: string;
   requestedById: string;
   createdAt: Date;
@@ -63,7 +63,7 @@ export interface PurchaseDetail {
 const money = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
 
 export async function listPurchases(
-  state: PurchaseRequestState | null,
+  state: PurchaseOrderState | null,
   q: string,
   page: number,
   department: string | null = null,
@@ -73,23 +73,23 @@ export async function listPurchases(
   const { rows, total, page: pg, pageCount } = await pagedSnapshot(
     LOG_PAGE_SIZE,
     page,
-    (tx) => tx.purchaseRequest.count({ where }),
+    (tx) => tx.purchaseOrder.count({ where }),
     (tx, pg) =>
-      tx.purchaseRequest.findMany({
+      tx.purchaseOrder.findMany({
         where,
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         skip: pg.skip,
         take: pg.take,
         select: {
           id: true, refNo: true, state: true, updatedAt: true, submittedAt: true,
-          reviewedAt: true, completedAt: true, cancelledAt: true,
+          sentBackAt: true, cancelledAt: true,
           requestedBy: { select: { name: true } },
           department: { select: { name: true } },
           vendor: { select: { name: true } },
           // id is a tiebreaker, not the sort key: units created in the same
           // batch (every seed row, every draft save) share one createdAt
           // millisecond, and createdAt alone is not a stable order across reads.
-          units: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+          lines: { select: { qty: true, unitPrice: true, description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
           // the newest state-carrying note decides "did this come back?" —
           // bounceBack() reads the last non-COMMENT note, so one row is enough
           notes: {
@@ -111,27 +111,27 @@ export async function listPurchases(
       const last: ThreadNote[] = r.notes.map((n) => ({
         id: n.id, kind: n.kind, text: n.text, author: n.author.name, at: n.createdAt,
       }));
-      const value = r.units.reduce((sum, u) => sum + u.qty * money(u.unitPrice), 0);
+      const value = r.lines.reduce((sum, u) => sum + u.qty * money(u.unitPrice), 0);
       return {
         id: r.id,
         refNo: r.refNo,
         state: r.state,
         requester: r.requestedBy.name,
         summary:
-          r.units.length === 0
+          r.lines.length === 0
             ? "no lines yet"
-            : r.units.length === 1
-              ? r.units[0].description
-              : `${r.units[0].description} +${r.units.length - 1} more`,
-        unitCount: r.units.length,
-        totalQty: r.units.reduce((sum, u) => sum + u.qty, 0),
+            : r.lines.length === 1
+              ? r.lines[0].description
+              : `${r.lines[0].description} +${r.lines.length - 1} more`,
+        unitCount: r.lines.length,
+        totalQty: r.lines.reduce((sum, u) => sum + u.qty, 0),
         total: fmtMoney(value),
         department: r.department?.name ?? null,
         supplier: r.vendor?.name ?? null,
         dwell: dwellLine(
           {
             state: r.state, updatedAt: r.updatedAt, submittedAt: r.submittedAt,
-            reviewedAt: r.reviewedAt, completedAt: r.completedAt, cancelledAt: r.cancelledAt,
+            sentBackAt: r.sentBackAt, cancelledAt: r.cancelledAt,
             bounced: bounceBack(r.state, last) !== null,
           },
           now,
@@ -143,9 +143,9 @@ export async function listPurchases(
 
 /** Tab counts — one grouped query, plus the All total. */
 export async function stateCounts(): Promise<Record<string, number>> {
-  const groups = await prisma.purchaseRequest.groupBy({ by: ["state"], _count: { _all: true } });
+  const groups = await prisma.purchaseOrder.groupBy({ by: ["state"], _count: { _all: true } });
   const counts: Record<string, number> = {
-    ALL: 0, DRAFT: 0, SUBMITTED: 0, IT_REVIEWED: 0, COMPLETED: 0, CANCELLED: 0,
+    ALL: 0, WITH_IT: 0, SENT_BACK: 0, READY: 0, CANCELLED: 0,
   };
   for (const g of groups) {
     counts[g.state] = g._count._all;
@@ -155,7 +155,7 @@ export async function stateCounts(): Promise<Record<string, number>> {
 }
 
 export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
-  const r = await prisma.purchaseRequest.findUnique({
+  const r = await prisma.purchaseOrder.findUnique({
     where: { id },
     select: {
       id: true, refNo: true, state: true, createdAt: true, submittedAt: true, reviewedAt: true,
@@ -171,7 +171,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       // See the identical comment in listPurchases: units created in the
       // same batch tie on createdAt, so `unit.index` (unit-N anchors, the
       // bounce-back's "Jump to unit 02") needs a stable tiebreaker.
-      units: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      lines: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       notes: {
         orderBy: { createdAt: "asc" },
         select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
@@ -180,7 +180,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
   });
   if (!r) return null;
 
-  const units = r.units.map((u, i): PurchaseUnitView => {
+  const units = r.lines.map((u, i): PurchaseUnitView => {
     const price = money(u.unitPrice);
     return {
       id: u.id,

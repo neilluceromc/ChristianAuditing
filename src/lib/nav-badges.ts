@@ -25,14 +25,13 @@ export interface BadgeView {
 const LABEL: Record<CountKey, (n: number) => string> = {
   worklist: (n) => `${n} waiting on the worklist`,
   approvals: (n) => `${n} open approvals`,
-  purchaseReviews: (n) => `${n} waiting for IT`,
   itSpare: (n) => `${n} spare`,
   itDefective: (n) => `${n} in repair`,
   itMissing: (n) => `${n} missing`,
   leaving: (n) => `${n} leaving`,
-  prDraft: (n) => `${n} drafts`,
-  prSubmitted: (n) => `${n} awaiting IT`,
-  prItReviewed: (n) => `${n} awaiting finance`,
+  poSentBack: (n) => `${n} sent back`,
+  poWithIt: (n) => `${n} with IT`,
+  poReady: (n) => `${n} ready to register`,
   // Phase 46 spec §4.3
   stockLow: (n) => `${n} below reorder level`,
   stocktakesOverdue: (n) => `${n} overdue`,
@@ -47,8 +46,6 @@ const LABEL: Record<CountKey, (n: number) => string> = {
 
 /** Counts drawn red with a dot whenever they show (spec §4.3): failed webhook deliveries wait on a replay. */
 const ALWAYS_URGENT: ReadonlySet<CountKey> = new Set<CountKey>(["deadDeliveries"]);
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** The count keys the visible links and views use, each once: only these are read (spec §4.3). */
 export function navCountKeys(sections: VisibleSection[]): CountKey[] {
@@ -68,30 +65,14 @@ export function countBadge(key: CountKey, n: number, badges: NavBadges): BadgeVi
 }
 
 /**
- * A link's own badge: the sum of its badge keys. IT's Approvals (approvals + purchase reviews) follows the
- * builder-check ruling in spec §4.3: with no purchase reviews waiting (or none the role can see) it is exactly
- * today's approvals badge; otherwise "{sum} waiting: {a} open approval(s), {b} purchase review(s)", keeping the
- * words "open approval" for the existing locators, plus ", some approvals past SLA" while any is overdue.
+ * A link's own badge: the sum of its badge keys. Migration 38 moved IT's purchase reviews off Approvals onto their
+ * own "Purchase orders" item (poWithIt), so no link sums keys today; a future one reads as its parts.
  */
 export function itemBadge(item: VisibleItem, badges: NavBadges): BadgeView | null {
   const count = (key: CountKey) => badges.counts[key] ?? 0;
   const keys = item.badge;
   if (keys.length === 0) return null;
   if (keys.length === 1) return countBadge(keys[0], count(keys[0]), badges);
-  if (keys.length === 2 && keys.includes("approvals") && keys.includes("purchaseReviews")) {
-    const a = count("approvals");
-    const r = count("purchaseReviews");
-    if (r <= 0) return countBadge("approvals", a, badges);
-    const fault = badges.approvals.overdue > 0;
-    const n = a + r;
-    return {
-      n,
-      label: `${n} waiting: ${plural(a, "open approval")}, ${plural(r, "purchase review")}`
-        + (fault ? ", some approvals past SLA" : ""),
-      fault,
-    };
-  }
-  // No other link sums keys today; any future one reads as its parts.
   const parts = keys.map((k) => countBadge(k, count(k), badges)).filter((p): p is BadgeView => p !== null);
   if (parts.length === 0) return null;
   return {

@@ -30,9 +30,9 @@ export const WORKSPACE_META: Record<WorkspaceId, { label: string; landing: strin
 
 /** A count the nav can show (Phase 42 spec §4.3). Task 3 reads them in the layout. */
 export type CountKey =
-  | "worklist" | "approvals" | "purchaseReviews"
+  | "worklist" | "approvals"
   | "itSpare" | "itDefective" | "itMissing" | "leaving"
-  | "prDraft" | "prSubmitted" | "prItReviewed"
+  | "poSentBack" | "poWithIt" | "poReady"
   // Phase 46 spec §4.3
   | "stockLow" | "stocktakesOverdue" | "suppliersRenewing"
   | "finToConfirmIt" | "finToConfirmPurchasing"
@@ -179,21 +179,22 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Approvals",
           href: "/approvals",
           icon: "approval",
-          // Spec §4.3: purchase reviews waiting for IT stay visible while Approvals is closed.
-          badge: ["approvals", "purchaseReviews"],
+          badge: ["approvals"],
           views: [
             { label: "Open", href: "/approvals", count: "approvals" },
             { label: "Mine", href: "/approvals?tab=mine" },
-            // The `roles` key is the only thing keeping this out of a viewer's sidebar: every IT-workspace role
-            // passes the /purchases path gate.
-            {
-              label: "Purchase reviews",
-              href: "/purchases?state=SUBMITTED",
-              count: "purchaseReviews",
-              roles: ["admin", "it_staff"],
-            },
             { label: "Closed", href: "/approvals?tab=closed" },
           ],
+        },
+        // Migration 38: the purchase orders waiting on IT's check, on their own item (was Approvals › Purchase
+        // reviews). The `roles` key is the only thing keeping it out of a viewer's sidebar: every IT-workspace role
+        // passes the /purchases path gate.
+        {
+          label: "Purchase orders",
+          href: "/purchases?state=WITH_IT",
+          icon: "requests",
+          badge: ["poWithIt"],
+          roles: ["admin", "it_staff"],
         },
       ],
     },
@@ -260,11 +261,11 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           icon: "requests",
           views: [
             { label: "All", href: "/purchases" },
-            { label: "My drafts", href: "/purchases?state=DRAFT", count: "prDraft" },
             // Labels match PURCHASE_TABS (purchases-list.ts), asserted in workspaces.test.ts.
-            { label: "Awaiting IT", href: "/purchases?state=SUBMITTED", count: "prSubmitted" },
-            { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED", count: "prItReviewed" },
-            { label: "Completed", href: "/purchases?state=COMPLETED" },
+            { label: "With IT", href: "/purchases?state=WITH_IT", count: "poWithIt" },
+            { label: "Sent back", href: "/purchases?state=SENT_BACK", count: "poSentBack" },
+            { label: "Ready to register", href: "/purchases?state=READY", count: "poReady" },
+            { label: "Cancelled", href: "/purchases?state=CANCELLED" },
             { label: "Register purchase", href: "/purchases/new" },
           ],
         },
@@ -385,11 +386,10 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Purchases",
           href: "/purchases",
           icon: "requests",
-          badge: ["prItReviewed"],
+          badge: ["poReady"],
           views: [
             { label: "All purchases", href: "/purchases" },
-            { label: "Awaiting finance", href: "/purchases?state=IT_REVIEWED", count: "prItReviewed" },
-            { label: "Approved", href: "/purchases?state=COMPLETED" },
+            { label: "Ready to register", href: "/purchases?state=READY", count: "poReady" },
             { label: "Cancelled", href: "/purchases?state=CANCELLED" },
           ],
         },

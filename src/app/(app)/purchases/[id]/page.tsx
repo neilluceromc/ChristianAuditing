@@ -4,10 +4,9 @@ import { purchaseRefFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { getPurchase } from "@/server/modules/purchases/queries";
-import { supplierOptions } from "@/server/modules/suppliers/queries";
-import { unitEditorMode } from "@/lib/purchase-flow";
+import { PO_STATE_LABEL } from "@/lib/po-flow";
 import { bounceBack, stepperModel } from "@/lib/purchase-thread";
-import { canAttachToRequest, canSetRequestSupplier } from "@/lib/supplier-access";
+import { canAttachToRequest } from "@/lib/supplier-access";
 import { fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -19,8 +18,6 @@ import { PurchaseStepper } from "@/components/purchases/purchase-stepper";
 import { NoteThread } from "@/components/purchases/note-thread";
 import { RequestActions } from "@/components/purchases/request-actions";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
-import { SupplierPicker } from "@/components/purchases/supplier-picker";
-import { UnitEditor } from "@/components/purchases/unit-editor";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -35,10 +32,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
 
   const bounce = bounceBack(request.state, request.notes);
   const stepper = stepperModel(request.state, request.notes);
-  const editorMode = unitEditorMode(request.state, user.role);
   const canComment = user.role !== "viewer";
-  const canSetSupplier = canSetRequestSupplier(user.role);
-  const supplierPickOptions = canSetSupplier ? await supplierOptions(request.supplier?.id) : [];
 
   return (
     <>
@@ -47,7 +41,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         breadcrumb={[{ label: "Purchase requests", href: "/purchases" }, { label: request.refNo }]}
         badge={
           <span className="inline-flex items-center gap-2">
-            <StatusPill value={request.state} />
+            <StatusPill value={request.state} label={PO_STATE_LABEL[request.state]} />
             <Pill>{request.department ? `FOR ${request.department.name.toUpperCase()}` : "NO DEPARTMENT"}</Pill>
             {user.role === "viewer" && <Pill>READ-ONLY · VIEWER</Pill>}
           </span>
@@ -87,26 +81,20 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         <Card>
           <CardHeader title="Supplier" />
           <CardBody>
-            <SupplierPicker
-              requestId={request.id}
-              current={request.supplier}
-              options={supplierPickOptions}
-              canSet={canSetSupplier}
-            />
+            {/* Migration 38: the supplier is set on the order itself (Task 3's save); read-only here. */}
+            {request.supplier ? (
+              <span className="inline-flex items-center gap-2 text-[13px] text-fg">
+                {request.supplier.name}
+                {request.supplier.archived && <Pill>ARCHIVED</Pill>}
+              </span>
+            ) : (
+              <span className="text-xs text-fg-muted">No supplier recorded.</span>
+            )}
           </CardBody>
         </Card>
 
         <Card>
-          <CardHeader
-            title="Lines"
-            actions={
-              editorMode && (
-                <Pill tone="accent">
-                  {editorMode === "it" ? "IT SLOT EDITOR" : "FINANCE UNIT EDITOR"}
-                </Pill>
-              )
-            }
-          />
+          <CardHeader title="Lines" />
           <CardBody className="px-0 py-0">
             <div id="units">
               <Table className="rounded-none border-0 shadow-none">
@@ -124,9 +112,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                   {request.units.map((unit) => (
                     <Tr key={unit.id} id={`unit-${unit.index}`}>
                       <Td mono>{String(unit.index).padStart(2, "0")}</Td>
-                      {/* multi-line on purpose: description, specs, IT and Finance notes, the editor */}
+                      {/* multi-line on purpose: description, specs, and the old flow's IT and Finance notes */}
                       <Td wrap>
-                        {/* a div, not a span: UnitEditor renders block elements */}
                         <div className="flex flex-col gap-0.5 py-1.5">
                           <span className="text-fg">{unit.description}</span>
                           {unit.specs && <span className="text-[11px] text-fg-muted">{unit.specs}</span>}
@@ -135,11 +122,6 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                           )}
                           {unit.financeNotes && (
                             <span className="font-mono text-[10px] text-fg-muted">Finance: {unit.financeNotes}</span>
-                          )}
-                          {editorMode && (
-                            <div className="mt-2">
-                              <UnitEditor unit={unit} mode={editorMode} />
-                            </div>
                           )}
                         </div>
                       </Td>

@@ -1,5 +1,5 @@
-import type { NoteKind, Prisma, PurchaseRequestState } from "@prisma/client";
-import { CANONICAL_NOTE } from "../../src/lib/purchase-flow";
+import type { NoteKind, Prisma } from "@prisma/client";
+import { legacyPoState } from "../../src/lib/po-flow";
 import { DAY, HOUR } from "./random";
 import { pickActor, type Dept } from "./people";
 import { vendorIdOf, type Actor, type Actors, type AssetRec, type AuditRow, type Gen, type ScaleContext } from "./types";
@@ -8,14 +8,26 @@ import { CANCEL_REASONS, CATEGORY_SPECS } from "./vocab";
 /**
  * Phase 43 (spec §3): about 150 purchase requests over six months, every state represented, each with 1–5 units.
  * The COMPLETED ones are where the recently bought assets came from: their units name the asset's model and the
- * assets point back at the request and unit, so the "From PR-…" provenance has data.
+ * assets point back at the request and unit, so the "From PO-…" provenance has data.
+ *
+ * Migration 38: the history is still simulated in the old request flow (its notes and its "purchase-request" audit
+ * rows are what a migrated database holds), and each row is then written the way migration 38 leaves it: the state
+ * mapped by legacyPoState, the ref PO-, no SI number and no line categories (legacy rows).
  */
-export const PR_COUNTS: Record<PurchaseRequestState, number> = { COMPLETED: 70, DRAFT: 25, SUBMITTED: 20, IT_REVIEWED: 20, CANCELLED: 15 };
+type LegacyState = Parameters<typeof legacyPoState>[0];
+export const PR_COUNTS: Record<LegacyState, number> = { COMPLETED: 70, DRAFT: 25, SUBMITTED: 20, IT_REVIEWED: 20, CANCELLED: 15 };
 export const FIRST_PR_NO = 1000;
 const MAX_QTY_PER_UNIT = 5;
 
-type Unit = Prisma.PurchaseUnitCreateManyInput & { id: string };
-type Request = Prisma.PurchaseRequestCreateManyInput & { id: string; refNo: string; createdAt: Date };
+/** The old flow's thread texts (src/lib/purchase-flow.ts's CANONICAL_NOTE, removed in migration 38). */
+const CANONICAL_NOTE = {
+  submit: "Submitted for IT review.",
+  "it-review": "Specs reviewed — passed to finance.",
+  complete: "Approved and completed.",
+} as const;
+
+type Unit = Prisma.PurchaseOrderLineCreateManyInput & { id: string };
+type Request = Prisma.PurchaseOrderCreateManyInput & { id: string; refNo: string; createdAt: Date };
 
 export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], depts: Dept[], actors: Actors) {
   const requests: Request[] = [];
@@ -38,10 +50,10 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
   }
   const queue = g.rng.shuffle(groups);
 
-  const newRequest = (state: PurchaseRequestState, dates: { created: number; submitted?: number; reviewed?: number; completed?: number; cancelled?: number }) => {
+  const newRequest = (state: LegacyState, dates: { created: number; submitted?: number; reviewed?: number; completed?: number; cancelled?: number }) => {
     const dept = g.rng.pick(depts);
     const req: Request = {
-      id: g.id(), refNo: "", state, requestedById: pickActor(g, actors.purchasing, ctx.fixedUsers.purchasing, 0.2).id,
+      id: g.id(), refNo: "", state: legacyPoState(state), requestedById: pickActor(g, actors.purchasing, ctx.fixedUsers.purchasing, 0.2).id,
       departmentId: dept.id,
       vendorId: g.rng.weighted([[vendor("TechServe PH"), 5], [vendor("Metro Office Supply"), 2], [vendor("Quezon Furniture Works"), 1], [null, 2]] as const),
       createdAt: new Date(dates.created), updatedAt: new Date(dates.completed ?? dates.cancelled ?? dates.reviewed ?? dates.submitted ?? dates.created),
@@ -52,7 +64,7 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
     };
     requests.push(req);
     const requester: Actor = [...actors.purchasing, ctx.fixedUsers.purchasing].find((a) => a.id === req.requestedById)!;
-    const note = (kind: NoteKind, by: Actor, at: number, text: string) => notes.push({ requestId: req.id, authorId: by.id, kind, text, createdAt: new Date(at) });
+    const note = (kind: NoteKind, by: Actor, at: number, text: string) => notes.push({ orderId: req.id, authorId: by.id, kind, text, createdAt: new Date(at) });
     const log = (by: Actor, at: number, action: string, diff?: Prisma.InputJsonObject) =>
       audit.push({ actorId: by.id, actorLabel: by.name, entityType: "purchase-request", entityId: req.id, action, createdAt: new Date(at), ...(diff ? { diff } : {}) });
 
@@ -89,14 +101,14 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
     }
     return req;
   };
-  const unitState = (state: PurchaseRequestState) =>
+  const unitState = (state: LegacyState) =>
     state === "COMPLETED" ? "APPROVED" as const : state === "CANCELLED" ? "CANCELLED" as const : "PENDING" as const;
-  const synthUnits = (req: Request, state: PurchaseRequestState) => {
+  const synthUnits = (req: Request, state: LegacyState) => {
     for (let n = g.rng.int(1, 5); n > 0; n--) {
       const model = g.rng.pick(allModels);
       const rejected = state === "COMPLETED" && n > 1 && g.rng.chance(0.1);
       units.push({
-        id: g.id(), requestId: req.id, description: model.model, qty: g.rng.int(1, 10), unitPrice: model.cost,
+        id: g.id(), orderId: req.id, description: model.model, qty: g.rng.int(1, 10), unitPrice: model.cost,
         state: rejected ? "REJECTED" : unitState(state), createdAt: req.createdAt, updatedAt: req.updatedAt,
         itSlotNotes: state === "IT_REVIEWED" && g.rng.chance(0.3) ? "Matches the client policy" : null,
         financeNotes: rejected ? "Over the standing rate — rebid next quarter" : null,
@@ -115,11 +127,11 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
       const req = newRequest("COMPLETED", { created: minus(submitted, 0, 2), submitted, reviewed, completed });
       for (const group of take) {
         const unit: Unit = {
-          id: g.id(), requestId: req.id, description: group[0].row.model, qty: group.length,
+          id: g.id(), orderId: req.id, description: group[0].row.model, qty: group.length,
           unitPrice: group[0].row.cost ?? null, state: "APPROVED", createdAt: req.createdAt, updatedAt: req.updatedAt,
         };
         units.push(unit);
-        for (const r of group) Object.assign(r.row, { purchaseRequestId: req.id, purchaseUnitId: unit.id });
+        for (const r of group) Object.assign(r.row, { purchaseOrderId: req.id, purchaseOrderLineId: unit.id });
       }
     } else {
       const completed = g.rng.between(W + 15 * DAY, g.now - 2 * DAY).getTime();
@@ -149,6 +161,6 @@ export function buildPurchases(g: Gen, ctx: ScaleContext, recs: AssetRec[], dept
 
   // numbering follows creation order, like the app's sequence would have
   requests.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  requests.forEach((r, i) => { r.refNo = `PR-${FIRST_PR_NO + i}`; });
+  requests.forEach((r, i) => { r.refNo = `PO-${FIRST_PR_NO + i}`; });
   return { requests, units, notes, audit, lastPrNo: FIRST_PR_NO + requests.length - 1 };
 }

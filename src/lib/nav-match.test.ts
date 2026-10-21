@@ -38,7 +38,8 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["it", "viewer", "/admin/equipment-policies", "Setup", null],
   ["it", "it_staff", "/approvals?tab=open", "Approvals", "Open"],
   ["it", "it_staff", "/approvals?tab=failed", "Approvals", null],
-  ["it", "it_staff", "/purchases?state=SUBMITTED", "Approvals", "Purchase reviews"],
+  // Migration 38: IT's purchase reviews moved off Approvals onto their own Purchase orders link.
+  ["it", "it_staff", "/purchases?state=WITH_IT", "Purchase orders", null],
   ["it", "it_staff", "/reservations?state=ACTIVE", "Reservations", "Active"],
   ["it", "it_staff", "/equipment-by-client", "Reports", "By client"],
   ["it", "it_staff", "/equipment-by-client?tab=internal", "Reports", "Internal teams"],
@@ -48,8 +49,9 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["purchasing", "purchasing_staff", "/inventory?sort=tag", "Assets", "Purchasing assets"],
   ["purchasing", "admin", "/inventory", "Assets", "IT inventory"],
   ["purchasing", "purchasing_staff", "/inventory/xyz", "Assets", null],
-  ["purchasing", "purchasing_staff", "/purchases?state=CANCELLED", "Requests", null],
-  ["purchasing", "purchasing_staff", "/purchases?state=IT_REVIEWED", "Requests", "Awaiting finance"],
+  ["purchasing", "purchasing_staff", "/purchases?state=CANCELLED", "Requests", "Cancelled"],
+  ["purchasing", "purchasing_staff", "/purchases?state=READY", "Requests", "Ready to register"],
+  ["purchasing", "purchasing_staff", "/purchases?state=DRAFT", "Requests", null],
   ["purchasing", "purchasing_staff", "/stock/stocktakes/xyz", "Stock", "Stocktakes"],
   ["purchasing", "purchasing_staff", "/stock/categories", "Setup", "Stock categories"],
   // Phase 46 spec §4.3: the new views.

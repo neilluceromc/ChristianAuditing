@@ -10,16 +10,15 @@ describe("countBadge", () => {
     expect(countBadge("itSpare", 7, b)?.label).toBe("7 spare");
     expect(countBadge("itDefective", 2, b)?.label).toBe("2 in repair");
     expect(countBadge("worklist", 15, b)?.label).toBe("15 waiting on the worklist");
-    expect(countBadge("purchaseReviews", 1, b)?.label).toBe("1 waiting for IT");
-    expect(countBadge("prDraft", 3, b)?.label).toBe("3 drafts");
+    expect(countBadge("poSentBack", 3, b)?.label).toBe("3 sent back");
     expect(countBadge("itMissing", 0, b)).toBeNull();
   });
 
   it("labels the rest of spec §4.3 word for word", () => {
     expect(countBadge("itMissing", 4, b)?.label).toBe("4 missing");
     expect(countBadge("leaving", 2, b)?.label).toBe("2 leaving");
-    expect(countBadge("prSubmitted", 5, b)?.label).toBe("5 awaiting IT");
-    expect(countBadge("prItReviewed", 6, b)?.label).toBe("6 awaiting finance");
+    expect(countBadge("poWithIt", 5, b)?.label).toBe("5 with IT");
+    expect(countBadge("poReady", 6, b)?.label).toBe("6 ready to register");
   });
 
   it("labels the Phase 46 counts", () => {
@@ -47,22 +46,19 @@ describe("countBadge", () => {
 });
 
 describe("itemBadge", () => {
-  it("IT Approvals sums open approvals and purchase reviews", () => {
-    const item = { label: "Approvals", badge: ["approvals", "purchaseReviews"] } as VisibleItem;
-    expect(itemBadge(item, { approvals: { open: 3, overdue: 1 }, counts: { approvals: 3, purchaseReviews: 1 } }))
-      .toEqual({ n: 4, label: "4 waiting: 3 open approvals, 1 purchase review, some approvals past SLA", fault: true });
-    expect(itemBadge(item, { approvals: { open: 1, overdue: 0 }, counts: { approvals: 1, purchaseReviews: 0 } }))
-      .toEqual({ n: 1, label: "1 open approvals", fault: false }); // today's wording, unchanged
-    expect(itemBadge(item, { approvals: { open: 2, overdue: 1 }, counts: { approvals: 2 } })?.label)
-      .toBe("2 open approvals, some past SLA"); // viewer: no purchaseReviews key
+  it("migration 38: IT's Approvals is the approvals count alone; purchase orders have their own item", () => {
+    const item = { label: "Approvals", badge: ["approvals"] } as VisibleItem;
+    expect(itemBadge(item, { approvals: { open: 3, overdue: 1 }, counts: { approvals: 3, poWithIt: 1 } }))
+      .toEqual({ n: 3, label: "3 open approvals, some past SLA", fault: true });
+    const orders = { label: "Purchase orders", badge: ["poWithIt"] } as VisibleItem;
+    expect(itemBadge(orders, { approvals: { open: 0, overdue: 0 }, counts: { poWithIt: 2 } }))
+      .toEqual({ n: 2, label: "2 with IT", fault: false });
   });
 
-  it("singular and plural follow the numbers in the combined label", () => {
-    const item = { label: "Approvals", badge: ["approvals", "purchaseReviews"] } as VisibleItem;
-    expect(itemBadge(item, { approvals: { open: 1, overdue: 0 }, counts: { approvals: 1, purchaseReviews: 2 } }))
-      .toEqual({ n: 3, label: "3 waiting: 1 open approval, 2 purchase reviews", fault: false });
-    expect(itemBadge(item, { approvals: { open: 0, overdue: 0 }, counts: { approvals: 0, purchaseReviews: 1 } }))
-      .toEqual({ n: 1, label: "1 waiting: 0 open approvals, 1 purchase review", fault: false });
+  it("a link with several keys reads as its parts", () => {
+    const item = { label: "X", badge: ["poWithIt", "poReady"] } as VisibleItem;
+    expect(itemBadge(item, { approvals: { open: 0, overdue: 0 }, counts: { poWithIt: 1, poReady: 2 } }))
+      .toEqual({ n: 3, label: "1 with IT, 2 ready to register", fault: false });
   });
 
   it("is null with no badge keys or nothing counted, and a single key reads as its count", () => {
@@ -83,18 +79,18 @@ describe("navCountKeys", () => {
       .toEqual(["approvals", "itDefective", "itMissing", "itSpare", "leaving", "worklist"]);
   });
 
-  it("adds purchase reviews for IT's reviewers, and nothing twice", () => {
+  it("adds the purchase orders with IT for IT's reviewers, and nothing twice", () => {
     const keys = navCountKeys(filterSectionsForRole(WORKSPACE_NAV.it, "it_staff"));
     expect([...keys].sort())
-      .toEqual(["approvals", "itDefective", "itMissing", "itSpare", "leaving", "purchaseReviews", "worklist"]);
+      .toEqual(["approvals", "itDefective", "itMissing", "itSpare", "leaving", "poWithIt", "worklist"]);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("covers the other workspaces", () => {
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.purchasing, "purchasing_staff")).sort())
-      .toEqual(["approvals", "prDraft", "prItReviewed", "prSubmitted", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
+      .toEqual(["approvals", "poReady", "poSentBack", "poWithIt", "stockLow", "stocktakesOverdue", "suppliersRenewing"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff")).sort())
-      .toEqual(["approvals", "finToConfirmIt", "finToConfirmPurchasing", "prItReviewed"]);
+      .toEqual(["approvals", "finToConfirmIt", "finToConfirmPurchasing", "poReady"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin")).sort())
       .toEqual(["deadDeliveries", "flagsUnavailable", "usersDisabled"]);
   });

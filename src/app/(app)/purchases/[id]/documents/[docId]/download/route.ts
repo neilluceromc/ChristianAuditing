@@ -17,7 +17,7 @@ export async function GET(
   const { id, docId } = await ctx.params;
   const doc = await prisma.requestDocument.findUnique({ where: { id: docId } });
   if (!doc) return new Response("Not found", { status: 404 });
-  if (doc.requestId !== id) return new Response("Not found", { status: 404 });
+  if (doc.orderId !== id) return new Response("Not found", { status: 404 });
 
   const bytes = await readUpload(doc.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });

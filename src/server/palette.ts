@@ -5,6 +5,7 @@ import { prisma } from "./db/client";
 import { actionUser } from "./auth/guards";
 import { pathAllowedForRole } from "@/lib/workspaces";
 import { visibleClassWhere } from "@/lib/asset-class";
+import { PO_STATE_LABEL } from "@/lib/po-flow";
 import {
   PALETTE_LIMIT,
   assetHint,
@@ -96,7 +97,7 @@ export async function paletteSearch(query: unknown): Promise<PaletteResults> {
         })
       : [],
     canRequests
-      ? prisma.purchaseRequest.findMany({
+      ? prisma.purchaseOrder.findMany({
           where: { refNo: { contains: q, mode: "insensitive" } },
           take: PALETTE_LIMIT,
           orderBy: { refNo: "desc" },
@@ -149,7 +150,7 @@ export async function paletteSearch(query: unknown): Promise<PaletteResults> {
       const tag = firstTag.get(e.id);
       return { label: e.name, sub: e.employeeNo, href: `/employees/${e.id}`, ...(tag ? { hint: holdsHint(tag) } : {}) };
     }),
-    requests: requests.map((r) => ({ label: r.refNo, sub: r.state, href: `/purchases/${r.id}` })),
+    requests: requests.map((r) => ({ label: r.refNo, sub: PO_STATE_LABEL[r.state], href: `/purchases/${r.id}` })),
     suppliers: suppliers.map((v) => ({
       label: v.name, sub: v.category ?? v.contactPerson ?? "supplier", href: `/purchases/suppliers/${v.id}`,
     })),

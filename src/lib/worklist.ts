@@ -27,8 +27,8 @@ export const WORK_SECTIONS: readonly WorkSection[] = [
   { id: "repairs", title: "Repairs to chase", blurb: "Defective devices, longest down first." },
   { id: "check", title: "Awaiting IT check", blurb: "Registered by Purchasing; Finance sees them after you." },
   {
-    id: "purchases", title: "Purchase reviews", blurb: "Purchase requests waiting for IT's review, newest first.",
-    href: "/purchases?state=SUBMITTED",
+    id: "purchases", title: "Purchase reviews", blurb: "Purchase orders waiting for IT's check, newest first.",
+    href: "/purchases?state=WITH_IT",
   },
   { id: "hires", title: "New hires", blurb: "Started within 30 days with required slots still empty." },
   { id: "loans", title: "Loans", blurb: "Loans overdue, due this week, or with no due date." },
@@ -217,7 +217,7 @@ export const SEE_ALL_HREF: Record<WorkSectionId, string> = {
   triage: "/inventory?sort=attention", check: "/inventory?sort=attention",
   repairs: "/inventory?status=DEFECTIVE", loans: "/inventory?status=TEMPORARY&sort=attention",
   missing: "/inventory?status=MISSING", hires: "/employees?gaps=1", queue: "/approvals",
-  purchases: "/purchases?state=SUBMITTED",
+  purchases: "/purchases?state=WITH_IT",
 };
 
 /** The standalone page's cap line (spec §5.2); null when every row is shown. */
