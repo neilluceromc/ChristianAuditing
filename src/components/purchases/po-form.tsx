@@ -276,6 +276,16 @@ export function PoForm({
                     <Input
                       aria-label={`Line ${i + 1} unit price`} type="number" min="0" step="0.01" inputMode="decimal" className={ring("cost")}
                       value={u.unitPrice} onChange={(e) => set(i, "unitPrice")(e.target.value)}
+                      // Phase 23 (quick forms): Enter in the last line's price adds a line when that line has a
+                      // description, and moves to it; it never saves (saving sends the PO on).
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        if (i === units.length - 1 && u.description.trim()) {
+                          setUnits((rows) => [...rows, emptyRow()]);
+                          requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[aria-label="Line ${i + 2} description"]`)?.focus());
+                        }
+                      }}
                     />
                   </td>
                   <td className="py-1">
