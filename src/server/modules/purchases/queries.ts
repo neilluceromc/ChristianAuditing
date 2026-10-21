@@ -3,7 +3,7 @@ import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
-import { lineProgress, poProgress } from "@/lib/po-flow";
+import { derivePoProgress, lineProgress, type poProgress } from "@/lib/po-flow";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
@@ -80,7 +80,7 @@ export interface PurchaseDetail {
   assetCount: number;
   /** …and how many of those Finance has approved. */
   approvedCount: number;
-  /** poProgress over the lines: null until something is registered from a line. */
+  /** derivePoProgress: poProgress over the lines, or off the asset counts for an old completed request; null until something is registered. */
   progress: ReturnType<typeof poProgress>;
   /** Some line is IT gear, or has no class yet (a legacy line): the IT check applies. */
   hasItLines: boolean;
@@ -279,7 +279,8 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       : null,
     assetCount: r._count.assets,
     approvedCount,
-    progress: poProgress(units, r._count.assets > 0 && approvedCount === r._count.assets),
+    // An old completed request has linked assets but no line links: derivePoProgress reads it off the asset counts.
+    progress: derivePoProgress(units, { assetCount: r._count.assets, approvedCount, completed: r.completedAt !== null }),
     hasItLines: units.some((u) => u.cls !== "PURCHASING"),
     legacy: units.some((u) => u.categoryId === null),
   };

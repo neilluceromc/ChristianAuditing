@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NoteKind } from "@prisma/client";
+import { derivePoProgress } from "./po-flow";
 import {
   NOTE_CHIP, THREAD_PAGE, THREAD_PREVIEW, bounceBack, stepperModel, submittedVisits, threadCountLine, unitAnchor,
   type StepperContext, type ThreadNote,
@@ -167,6 +168,17 @@ describe("stepperModel (purchase orders: PO saved → With IT → Registered →
     const thread = Array.from({ length: visits }, (_, i) =>
       note(i % 2 === 0 ? "SUBMIT" : "REQUEST_INFO", "P", "x", i));
     expect(stepperModel("WITH_IT", thread, ctx()).stops[1].note).toBe(expected);
+  });
+
+  it("a migrated completed request (READY, linked assets) is not waiting to be registered: Approved is the current stop, or all done", () => {
+    const thread = [note("SUBMIT", "P", "x", 0), note("COMPLETE", "F", "y", 1)];
+    const lines = [{ qty: 3, registered: 0, closedShort: 0 }];
+    const registered = stepperModel("READY", thread, ctx({ progress: derivePoProgress(lines, { assetCount: 3, approvedCount: 2, completed: true }) }));
+    expect(statuses(registered)).toEqual(["done", "done", "done", "current"]);
+    expect(registered.stops[2].note).toBeUndefined();
+    expect(registered.stops[3].note).toBe("WITH FINANCE");
+    const approved = stepperModel("READY", thread, ctx({ progress: derivePoProgress(lines, { assetCount: 3, approvedCount: 3, completed: true }) }));
+    expect(statuses(approved)).toEqual(["done", "done", "done", "done"]);
   });
 
   it("sent back by IT: PO saved is current (SENT BACK) and the return is drawn after it", () => {

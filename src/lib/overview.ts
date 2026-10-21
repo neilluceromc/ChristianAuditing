@@ -453,11 +453,11 @@ const REQUEST_TONE: Record<string, MakeUpTone> = {
   SENT_BACK: "neutral", WITH_IT: "chart-1", READY: "chart-2", CANCELLED: "bad",
 };
 
-/** Purchasing's make-up: requests by state in tab order, each linking to its /purchases tab (whose count it is). */
+/** Purchasing's make-up: purchase orders by state in tab order, each linking to its /purchases tab (whose count it is). */
 export function requestStateMakeUp(counts: Record<string, number>): MakeUp {
   return {
-    title: "Requests by state",
-    unit: "requests",
+    title: "Purchase orders by state",
+    unit: "purchase orders",
     rows: PURCHASE_TABS.filter((t) => t.id !== "ALL" && (counts[t.id] ?? 0) > 0).map((t) => ({
       label: t.label, value: counts[t.id], tone: REQUEST_TONE[t.id] ?? "neutral", href: t.href,
     })),

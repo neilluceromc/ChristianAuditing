@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PO_STATE_LABEL, canRegisterLine, legacyPoState, lineProgress, poProgress, poRefNo, stateAfterResubmit, stateAfterSave,
-  poRefSearch,
+  poRefSearch, derivePoProgress,
 } from "./po-flow";
 
 describe("stateAfterSave", () => {
@@ -110,5 +110,28 @@ describe("poRefSearch", () => {
     expect(poRefSearch("printer")).toBe("printer");
     expect(poRefSearch("0188")).toBe("0188");
     expect(poRefSearch("x PR-1")).toBe("x PR-1");
+  });
+});
+
+describe("derivePoProgress (an old completed request has linked assets but no line links)", () => {
+  const legacyLines = [{ qty: 3, registered: 0, closedShort: 0 }];
+  it("all linked assets approved → Approved", () => {
+    expect(derivePoProgress(legacyLines, { assetCount: 3, approvedCount: 3, completed: true })).toBe("Approved");
+  });
+  it("2 of 3 approved → Registered, not Partly registered and not null", () => {
+    expect(derivePoProgress(legacyLines, { assetCount: 3, approvedCount: 2, completed: true })).toBe("Registered");
+    expect(derivePoProgress(legacyLines, { assetCount: 3, approvedCount: 0, completed: false })).toBe("Registered");
+  });
+  it("a completed request with no linked asset reads Registered, never Approved", () => {
+    expect(derivePoProgress(legacyLines, { assetCount: 0, approvedCount: 0, completed: true })).toBe("Registered");
+  });
+  it("a PO nothing has been registered from has no progress", () => {
+    expect(derivePoProgress(legacyLines, { assetCount: 0, approvedCount: 0, completed: false })).toBeNull();
+    expect(derivePoProgress([{ qty: 5, registered: 0, closedShort: 0 }], { assetCount: 0, approvedCount: 0, completed: false })).toBeNull();
+  });
+  it("a PO with line links keeps poProgress's reading", () => {
+    expect(derivePoProgress([{ qty: 5, registered: 3, closedShort: 0 }], { assetCount: 3, approvedCount: 3, completed: false })).toBe("Partly registered");
+    expect(derivePoProgress([{ qty: 3, registered: 3, closedShort: 0 }], { assetCount: 3, approvedCount: 1, completed: false })).toBe("Registered");
+    expect(derivePoProgress([{ qty: 3, registered: 3, closedShort: 0 }], { assetCount: 3, approvedCount: 3, completed: false })).toBe("Approved");
   });
 });

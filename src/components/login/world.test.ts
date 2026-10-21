@@ -24,7 +24,7 @@ describe("buildWorld", () => {
       "OFFBOARDING",
       "BR-LT-0230",
       "BR-LT-0027",
-      "PR-1042",
+      "PO-1042",
       "PO-2219",
       "₱58,000",
       "RETURN KIT",

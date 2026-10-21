@@ -79,3 +79,21 @@ export function poRefSearch(q: string): string {
   const t = q.trim();
   return /^pr-/i.test(t) ? `PO-${t.slice(3)}` : t;
 }
+
+/**
+ * What a PO's progress pill and stepper read. Normally poProgress over the lines' registered counts. An old request
+ * (migration 38) is different: its units never carried the asset link, so every line reads 0 registered even though
+ * its assets are linked to the PO itself. Spec §3 maps COMPLETED → "Registered, or Approved if all its linked assets
+ * are approved", so with no line link but linked assets (or a completedAt) the progress comes from the asset counts.
+ * Register stays available on such a PO — that is canRegisterLine's and the controls' business, not this pill's.
+ */
+export function derivePoProgress(
+  lines: { qty: number; registered: number; closedShort: number }[],
+  p: { assetCount: number; approvedCount: number; completed: boolean },
+): ReturnType<typeof poProgress> {
+  const anyLineLinked = lines.some((l) => l.registered > 0);
+  if (!anyLineLinked && (p.assetCount > 0 || p.completed)) {
+    return p.assetCount > 0 && p.approvedCount === p.assetCount ? "Approved" : "Registered";
+  }
+  return poProgress(lines, p.assetCount > 0 && p.approvedCount === p.assetCount);
+}

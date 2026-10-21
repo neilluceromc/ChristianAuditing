@@ -259,7 +259,7 @@ function expiringLotsHref(): string {
   return reportHref("/stock/reports/expiry", empty, { days: String(DEFAULT_EXPIRY_WINDOW), tab: "expiring" });
 }
 
-/** Spec §3.2 Purchasing trend: requests created and requests completed per Manila week, 12 weeks. */
+/** Spec §3.2 Purchasing trend: purchase orders created and registered per Manila week, 12 weeks. */
 async function purchaseFlowTrend(now: Date): Promise<TrendSeries> {
   const since = weekWindowStart(now, TREND_WEEKS);
   const [created, completed] = await Promise.all([
@@ -268,13 +268,13 @@ async function purchaseFlowTrend(now: Date): Promise<TrendSeries> {
     prisma.purchaseOrder.findMany({ where: { state: "READY", completedAt: { gte: since } }, select: { completedAt: true } }),
   ]);
   return {
-    title: "Requests per week",
-    unit: "requests",
+    title: "Purchase orders per week",
+    unit: "purchase orders",
     period: "week",
     labels: weekLabels(now, TREND_WEEKS),
     series: [
       { name: "Created", values: weekBuckets(created.map((r) => r.createdAt), now, TREND_WEEKS) },
-      { name: "Completed", values: weekBuckets(completed.map((r) => r.completedAt!), now, TREND_WEEKS) },
+      { name: "Registered", values: weekBuckets(completed.map((r) => r.completedAt!), now, TREND_WEEKS) },
     ],
   };
 }
@@ -319,7 +319,7 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
       states.READY ?? 0, history["pr.itReviewed"],
     ),
     monthToDateTile({ key: "spend.month", label: "Spend this month", upIs: "neutral" }, spend, now, {
-      money: true, hint: (m) => `${plural(m.length, "request", "requests")} completed`,
+      money: true, hint: (m) => `${plural(m.length, "purchase order", "purchase orders")} registered`,
     }),
     historyTile(
       { key: "stock.low", label: "Below reorder", hint: "Stock items at or below reorder level", upIs: "bad", href: lowHref },
@@ -343,7 +343,7 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
     makeUp: requestStateMakeUp(states),
     breakdown: {
       title: "Spend this month by supplier",
-      sub: "Completed requests · top 7 suppliers and Other",
+      sub: "Registered purchase orders · top 7 suppliers and Other",
       rows: suppliers.map((r) => ({ label: r.label, value: cents(r.value) })),
       money: true,
     },
@@ -366,7 +366,7 @@ const FINANCE_KEYS = [
 
 /**
  * Spec §3.2, the Finance row, with the builder-check rulings:
- * - Requests waiting is the /purchases "Ready to register" tab's count (financeWaitingRows reads exactly that state;
+ * - Purchase orders waiting is the /purchases "Ready to register" tab's count (financeWaitingRows reads exactly that state;
  *   migration 38 interim until Task 6's group review);
  * - To confirm sums the two classes' "To review" chips (hint "N IT · N Purchasing") and links to the IT view;
  * - Waiting on you (₱), Approved this month (a count, its ₱ in the hint), Capitalized this month and Book value are
@@ -401,7 +401,7 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
       waiting.reduce((sum, r) => sum + unitsValue(r.lines), 0), history["fin.waitingC"],
     ),
     historyTile(
-      { key: "fin.waitingCount", label: "Requests waiting", hint: "Reviewed by IT, waiting for you", upIs: "bad", href: waitingHref },
+      { key: "fin.waitingCount", label: "Purchase orders waiting", hint: "Past IT, waiting to be registered", upIs: "bad", href: waitingHref },
       waiting.length, history["fin.waitingCount"],
     ),
     monthToDateTile({ key: "approved.month", label: "Approved this month", upIs: "neutral" }, approved, now, {
@@ -438,7 +438,7 @@ export async function financeOverview(user: Viewer, now: Date = new Date()): Pro
     makeUp: bookValueMakeUp(book.rows),
     breakdown: {
       title: "Approved spend by department",
-      sub: "Completed requests this quarter · top 7 and Other",
+      sub: "Registered purchase orders this quarter · top 7 and Other",
       rows: departments.map((r) => ({ label: r.label, value: cents(r.value) })),
       money: true,
     },

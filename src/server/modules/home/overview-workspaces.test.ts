@@ -155,7 +155,7 @@ describe("purchasingOverview", () => {
     expect(h.spendSince.map((d) => d.toISOString())).toEqual([SPARK_START]);
     // Sep 30 23:30 Manila is September: in the sparkline's week (today−20), not in the month's value
     expect(o.kpis[2]).toMatchObject({
-      money: true, display: "₱1,550", hint: "3 requests completed",
+      money: true, display: "₱1,550", hint: "3 purchase orders registered",
       spark: [0, 0, 0, 0, 0, 700, 50, 1000.1], delta: { kind: "week", value: 1900, unit: "pct" }, upIs: "neutral",
     });
   });
@@ -177,7 +177,7 @@ describe("purchasingOverview", () => {
     ]);
     expect(o.needsYouHref).toBe("/purchases");
     expect(o.trend.labels).toHaveLength(12);
-    expect(o.trend.series.map((s) => [s.name, s.values.slice(-2)])).toEqual([["Created", [1, 2]], ["Completed", [0, 1]]]);
+    expect(o.trend.series.map((s) => [s.name, s.values.slice(-2)])).toEqual([["Created", [1, 2]], ["Registered", [0, 1]]]);
     expect(o.makeUp.rows.map((r) => [r.label, r.value, r.href])).toEqual([
       ["With IT", 21, "/purchases?state=WITH_IT"],
       ["Sent back", 1, "/purchases?state=SENT_BACK"],
@@ -196,7 +196,7 @@ describe("financeOverview", () => {
     const o = await financeOverview(user("finance_staff"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
       ["Waiting on you", 2001.1, undefined],
-      ["Requests waiting", 2, "/purchases?state=READY"],
+      ["Purchase orders waiting", 2, "/purchases?state=READY"],
       ["Approved this month", 3, undefined],
       ["Capitalized this month", 55_000, undefined],
       ["Book value", 48_442_000, undefined],
