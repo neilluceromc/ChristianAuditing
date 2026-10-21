@@ -17,6 +17,13 @@ describe("WEBHOOK_EVENTS", () => {
   it("labels every event, so no checkbox renders a bare dotted key", () => {
     for (const event of WEBHOOK_EVENTS) expect(EVENT_LABELS[event]).toBeTruthy();
   });
+
+  it("carries both approval events, the new one under the new name and the old one marked as such", () => {
+    expect(WEBHOOK_EVENTS).toContain("purchase_order.approved");
+    expect(WEBHOOK_EVENTS).toContain("purchase_request.completed");
+    expect(EVENT_LABELS["purchase_order.approved"]).toBe("A purchase order was fully approved");
+    expect(EVENT_LABELS["purchase_request.completed"]).toBe("(old name) A purchase order was fully approved");
+  });
 });
 
 describe("parseEvents", () => {

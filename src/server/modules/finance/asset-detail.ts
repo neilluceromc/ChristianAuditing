@@ -122,7 +122,8 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
             entityType: "asset", entityId: a.id,
             OR: [
               // asset.return.undone: the send-back's undo (finance follow-up); the other undos start with finance./depreciation.
-              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update", "asset.return.undone"] } },
+              // asset.money.fixed: a PO-level money fix reaching this asset (spec §6), with its reason
+              { action: { in: ["create", "register", "update", "it.verify", "import-create", "import-update", "asset.return.undone", "asset.money.fixed"] } },
               { action: { startsWith: "finance." } },
               { action: { startsWith: "depreciation." } },
               { action: { startsWith: "document." } },

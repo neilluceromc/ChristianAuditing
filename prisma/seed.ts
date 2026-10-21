@@ -558,7 +558,7 @@ async function main() {
       {
         endpointId: offHook.id,
         event: "purchase_request.completed",
-        payload: { purchaseRequestId: "seed", refNo: "PR-0188" },
+        payload: { purchaseRequestId: "seed", refNo: "PO-0188" },
         status: "DEAD",
         attempts: 5,
         lastError: "404 Not Found",

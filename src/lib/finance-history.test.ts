@@ -351,3 +351,33 @@ describe("undo and reopen lines (finance follow-up, spec §3)", () => {
     });
   });
 });
+
+describe("Task 8 (spec §6) — a PO money fix and the PO codes in the Financial history", () => {
+  const fix = row({
+    id: "cmfix00000000fix1", action: "asset.money.fixed", reason: "typo on receipt", source: "web",
+    diff: { invoiceRef: { from: "0012", to: "0021" }, cost: { from: 30000, to: 36000 } },
+  });
+  it("asset.money.fixed is finance history: kind cost, a verb naming each field, old and new, and the reason beside it", () => {
+    expect(isFinanceRelevant(fix)).toBe(true);
+    const r = buildHistory([fix], [], {}, CTX).rows[0];
+    expect(r).toMatchObject({
+      kind: "cost", actor: "Ana Cruz", role: "Finance", reason: "typo on receipt", source: "web",
+      verb: "changed the SI number from 0012 to 0021 and the unit price from ₱30,000.00 to ₱36,000.00",
+    });
+    expect(r.changes).toEqual([
+      { field: "cost", from: "₱30,000.00", to: "₱36,000.00" },
+      { field: "SI number", from: "0012", to: "0021" },
+    ]);
+  });
+  it("the PO codes have verbs, and each is finance-relevant", () => {
+    const v = (action: string, diff: unknown = null) => historyVerb({ entityType: "purchase-order", action, diff });
+    expect(v("po.fix", { invoiceRef: { from: "0012", to: "0021" } })).toBe("fixed the SI number");
+    expect(v("po.send-back", { sentBack: { from: null, to: { team: "IT", fields: [], note: null } } })).toBe("sent the purchase order back to Purchasing");
+    expect(v("po.send-back.undone")).toBe("undid the send-back to Purchasing");
+    expect(v("po.resubmit", { state: { from: "SENT_BACK", to: "READY" } })).toBe("corrected the purchase order and sent it back to Finance");
+    expect(v("po.register", { registered: { from: null, to: 3 } })).toBe("registered 3 assets from the purchase order");
+    for (const action of ["po.fix", "po.send-back", "po.send-back.undone", "po.resubmit", "po.register", "asset.money.fixed"]) {
+      expect(isFinanceRelevant({ entityType: "purchase-order", action, diff: null }), action).toBe(true);
+    }
+  });
+});

@@ -217,7 +217,7 @@ export async function listAudit(
         action: e.action,
         fields: e.diff ? Object.keys(e.diff as object).join(", ") : "—",
         sentence: auditSentence(
-          { actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: l.label },
+          { actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: l.label, reason: e.reason },
           { omitEntity: true },
         ),
       };
@@ -260,7 +260,7 @@ export async function listActivity(
     const entity = labels.get(`${e.entityType}:${e.entityId}`)!;
     return {
       id: e.id,
-      sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: entity.label }),
+      sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: entity.label, reason: e.reason }),
       when: fmtDateTime(e.createdAt),
       actor: e.actorLabel,
       dotValue: actionDot(e.action),

@@ -206,12 +206,12 @@ function withHolderNamed(diff: unknown, employees: Map<string, string>): unknown
  * An action the sentence builder has no wording for falls back to the shared action label, never its raw code.
  */
 export function timelinePhrase(
-  entry: { actorLabel: string; action: string; diff: unknown },
+  entry: { actorLabel: string; action: string; diff: unknown; reason?: string | null },
   tag: string,
   employees: Map<string, string>,
 ): string {
   const phrase = auditSentence(
-    { actorLabel: entry.actorLabel, action: entry.action, diff: withHolderNamed(entry.diff, employees), entityLabel: tag },
+    { actorLabel: entry.actorLabel, action: entry.action, diff: withHolderNamed(entry.diff, employees), entityLabel: tag, reason: entry.reason },
     { omitActor: true, omitEntity: true },
   );
   // Phase 41: the fallback compares without the "(via Cris)" ending auditSentence adds, then puts it back

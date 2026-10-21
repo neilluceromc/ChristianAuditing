@@ -46,7 +46,7 @@ export async function heldItemPanel(input: unknown): Promise<ActionResult<{ pane
     where: onAsset,
     orderBy: { createdAt: "desc" },
     take: 5,
-    select: { actorLabel: true, action: true, diff: true, createdAt: true },
+    select: { actorLabel: true, action: true, diff: true, reason: true, createdAt: true },
   });
   // "Held since" is the shared rule (held-since.ts), here for the one item.
   const since = (await heldSinceByAsset(asset.assignee ? [{ assetId, employeeId, employeeNo: asset.assignee.employeeNo }] : [])).get(assetId) ?? null;
@@ -61,7 +61,7 @@ export async function heldItemPanel(input: unknown): Promise<ActionResult<{ pane
       bookValue: asset.cost === null ? null : fmtMoney(Number(asset.cost)),
       history: recent.map((e) => ({
         at: e.createdAt.toISOString(),
-        sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: asset.tag }),
+        sentence: auditSentence({ actorLabel: e.actorLabel, action: e.action, diff: e.diff, entityLabel: asset.tag, reason: e.reason }),
       })),
     },
   });
