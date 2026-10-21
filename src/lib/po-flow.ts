@@ -86,13 +86,17 @@ export function poRefSearch(q: string): string {
  * its assets are linked to the PO itself. Spec §3 maps COMPLETED → "Registered, or Approved if all its linked assets
  * are approved", so with no line link but linked assets (or a completedAt) the progress comes from the asset counts.
  * Register stays available on such a PO — that is canRegisterLine's and the controls' business, not this pill's.
+ *
+ * Registering on a migrated PO today links the new asset to its line, so a line link no longer proves the PO is
+ * new-style. The asset counts decide whenever the old flow completed it, or some asset is linked to the PO but to no
+ * line (an old one the lines can't count): one new laptop on an old completed order must not turn it "Partly registered".
  */
 export function derivePoProgress(
   lines: { qty: number; registered: number; closedShort: number }[],
   p: { assetCount: number; approvedCount: number; completed: boolean },
 ): ReturnType<typeof poProgress> {
-  const anyLineLinked = lines.some((l) => l.registered > 0);
-  if (!anyLineLinked && (p.assetCount > 0 || p.completed)) {
+  const lineLinked = lines.reduce((s, l) => s + l.registered, 0);
+  if (p.completed || p.assetCount > lineLinked) {
     return p.assetCount > 0 && p.approvedCount === p.assetCount ? "Approved" : "Registered";
   }
   return poProgress(lines, p.assetCount > 0 && p.approvedCount === p.assetCount);

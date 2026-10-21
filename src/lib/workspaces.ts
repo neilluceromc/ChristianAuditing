@@ -158,8 +158,7 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
               match: [{ status: "DEFECTIVE" }, { stage: REPAIR_STAGES }],
             },
             { label: "Missing", href: "/inventory?status=MISSING", count: "itMissing" },
-            // The one Register flow (Phase 30): the /inventory/register PATH_RULE's roles, minus purchasing,
-            // who registers from its own workspace.
+            // The direct Register (spec §4 way 3): the /inventory/register PATH_RULE's roles.
             { label: "Register assets", href: "/inventory/register", roles: ["admin", "it_staff"] },
           ],
         },
@@ -307,7 +306,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           views: [
             { label: "Purchasing assets", href: "/inventory?cls=PURCHASING" },
             { label: "IT inventory", href: "/inventory?cls=IT" },
-            { label: "Register assets", href: "/inventory/register", roles: ["admin", "purchasing_staff"] },
+            // Spec §4: Purchasing registers from a purchase order (Purchase orders → Register); an admin keeps this.
+            { label: "Register assets", href: "/inventory/register", roles: ["admin"] },
           ],
         },
         // Phase 14: Purchasing approves lifecycle changes on its own class and reads the directory.
@@ -557,16 +557,14 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Phase 14: a label sheet is each class's own artifact; the page prints only
   // the classes the role manages. Still MUST precede the general /inventory rule.
   { test: /^\/inventory\/labels(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
-  // Phase 13: registering is each department's own — IT registers IT-class
-  // categories, Purchasing registers Purchasing-class ones — so BOTH
-  // workspaces are admitted here and `registerAssets` refuses the wrong class
-  // by name. This MUST still precede the general /inventory rule below,
-  // because that rule admits finance and viewer, and neither registers
-  // anything. The ORDERING is asserted only in workspaces.test.ts.
-  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // Spec §4 way 3 (2026-10-21): the direct Register is IT's and an admin's — Purchasing registers only from a
+  // purchase order (/purchases/[id]/register, under the /purchases rule). Both workspaces stay listed so an admin
+  // arriving from the Purchasing view still gets in. This MUST still precede the general /inventory rule below,
+  // because that rule admits purchasing, finance and viewer. The ORDERING is asserted only in workspaces.test.ts.
+  { test: /^\/inventory\/register(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff"] },
   // Same treatment as /inventory/register (spec §5): a write surface stops
-  // finance and viewer at layer 1, not only at the page's requireRole.
-  { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff", "purchasing_staff"] },
+  // the roles that may not register at layer 1, not only at the page's requireRole.
+  { test: /^\/inventory\/new(\/|$)/, workspaces: ["it", "purchasing"], roles: ["admin", "it_staff"] },
   // Phase 15: the worklist is IT-workspace only — viewer shares that
   // workspace read-only, but purchasing and finance, who both share the
   // general /inventory rule right below, are excluded. MUST precede that

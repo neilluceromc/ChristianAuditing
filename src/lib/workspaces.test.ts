@@ -128,22 +128,20 @@ describe("pathAllowedForRole", () => {
     ["/inventory/import", "viewer", false],
     ["/inventory/import", "purchasing_staff", false],
     ["/inventory/import", "finance_staff", false],
-    // Phase 13: registering is each department's own — IT registers IT-class
-    // categories, Purchasing registers Purchasing-class ones — so BOTH
-    // workspaces are admitted here and `registerAssets` refuses the wrong
-    // class by name. finance and viewer still get nothing: neither registers
-    // anything. Every role asserted explicitly, not just the ones that should
-    // pass, for the same reason as /inventory/import and /inventory/labels
-    // above.
+    // Spec §4 way 3 (Task 5): the direct Register is IT's and an admin's —
+    // Purchasing registers only from a purchase order (/purchases/[id]/register).
+    // finance and viewer still get nothing: neither registers anything. Every
+    // role asserted explicitly, not just the ones that should pass, for the
+    // same reason as /inventory/import and /inventory/labels above.
     ["/inventory/register", "admin", true],
     ["/inventory/register", "it_staff", true],
     ["/inventory/register", "viewer", false],
-    ["/inventory/register", "purchasing_staff", true],
+    ["/inventory/register", "purchasing_staff", false],
     ["/inventory/register", "finance_staff", false],
     // /inventory/new: same shape and same reason as /inventory/register above.
     ["/inventory/new", "admin", true],
     ["/inventory/new", "it_staff", true],
-    ["/inventory/new", "purchasing_staff", true],
+    ["/inventory/new", "purchasing_staff", false],
     ["/inventory/new", "finance_staff", false],
     ["/inventory/new", "viewer", false],
     // Task 4 (Phase 10), the identical E-7/W-1 trap one route over: /inventory
@@ -369,8 +367,10 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   it("Purchasing Assets points at its own class, with IT inventory one view away", () => {
     expect(item("purchasing", "purchasing_staff", "Assets").href).toBe("/inventory?cls=PURCHASING");
     expect(item("purchasing", "purchasing_staff", "Assets").views.map((v) => [v.label, v.href])).toEqual([
-      ["Purchasing assets", "/inventory?cls=PURCHASING"], ["IT inventory", "/inventory?cls=IT"], ["Register assets", "/inventory/register"],
+      ["Purchasing assets", "/inventory?cls=PURCHASING"], ["IT inventory", "/inventory?cls=IT"],
     ]);
+    // Spec §4: Purchasing registers from a purchase order; an admin in the Purchasing workspace keeps Register.
+    expect(item("purchasing", "admin", "Assets").views.map((v) => v.href)).toContain("/inventory/register");
   });
   it("Phase 47 spec §5.2: Disposal is Finance's only, a plain link after Assets, at /finance/disposal", () => {
     const finance = filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff").flatMap((s) => s.items).map((i) => i.label);

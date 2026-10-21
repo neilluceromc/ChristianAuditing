@@ -34,6 +34,7 @@ export const ACTION_LABELS: Record<string, string> = {
   // Purchase orders (spec §3–§6)
   "po.save": "Saved the purchase order", "po.resubmit": "Corrected and sent back on", "po.send-back": "Sent back to Purchasing",
   "po.fix": "Fixed the money details", "po.cancel": "Cancelled the purchase order", "po.line-closed": "Closed a line short",
+  "po.register": "Registered from the purchase order",
   "asset.money.fixed": "Fixed the money details",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",

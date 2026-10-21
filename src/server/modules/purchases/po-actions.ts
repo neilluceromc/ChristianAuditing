@@ -8,6 +8,7 @@ import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { notify } from "@/server/notifications/notify";
+import { lockPo } from "./po-lock";
 import { diffOf, type AuditDiff } from "@/lib/audit-diff";
 import { cleanReason } from "@/lib/reason";
 import { GROUP_ARCHIVED } from "@/lib/groups";
@@ -46,11 +47,6 @@ async function asActionResult<T>(run: () => Promise<ActionResult<T>>): Promise<A
     }
     throw err;
   }
-}
-
-/** `SELECT … FOR UPDATE` on the PO row (table keeps its old name), held until the transaction ends. */
-async function lockPo(tx: Prisma.TransactionClient, id: string): Promise<void> {
-  await tx.$queryRaw`SELECT "id" FROM "PurchaseRequest" WHERE "id" = ${id} FOR UPDATE`;
 }
 
 function revalidatePo(id: string, assetsToo = false) {

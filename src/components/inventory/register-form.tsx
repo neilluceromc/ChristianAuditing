@@ -48,7 +48,7 @@ const TAG_PLACEHOLDER = "YOUR-TAG";
 /** Every error key a field on this form shows; anything else reaches the banner rather than dead-ending. */
 const CLAIMED = new Set([
   "categoryId", "typeId", "model", "brand", "tags", "serials", "requestedStatus", "assigneeId", "loanDueAt",
-  "requestId", "vendorId", "purchasedAt", "warrantyUntil", "cost", "invoiceRef", "notes",
+  "vendorId", "purchasedAt", "warrantyUntil", "cost", "invoiceRef", "notes",
   "receiptRef", "warrantyCoveredBy", "warrantyContact", "fees",
 ]);
 const isRowKey = (key: string) => /^(tags|serials)[.][0-9]+$/.test(key);
@@ -71,7 +71,6 @@ export function RegisterForm({
   vendors,
   recentVendors,
   recentPeople,
-  requests,
   directClasses,
   listHref,
   baseUrl,
@@ -80,8 +79,6 @@ export function RegisterForm({
   vendors: Array<{ id: string; name: string }>;
   recentVendors: string[];
   recentPeople: ComboOption[];
-  /** Completed requests, labelled `{refNo} · {vendor} · {date}`. */
-  requests: Array<{ id: string; label: string; vendorId: string | null }>;
   /** Classes this role applies lifecycle changes to directly — a set, because the category can change the class. */
   directClasses: readonly AssetClass[];
   /** The viewer's default list class. */
@@ -113,7 +110,6 @@ export function RegisterForm({
 
   // Purchase and warranty (spec §4.5) — closed until opened.
   const [purchaseOpen, setPurchaseOpen] = useState(false);
-  const [requestId, setRequestId] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [purchasedAt, setPurchasedAt] = useState("");
   const [invoiceRef, setInvoiceRef] = useState("");
@@ -290,14 +286,6 @@ export function RegisterForm({
     clearError("warrantyUntil");
   }
 
-  function chooseRequest(id: string) {
-    setRequestId(id);
-    const r = requests.find((x) => x.id === id);
-    // Fill an EMPTY vendor from the request's supplier, never overwrite a chosen
-    // one, and only with a supplier the picker can show (an archived one is gone).
-    if (r?.vendorId && !vendorId && vendors.some((v) => v.id === r.vendorId)) setVendorId(r.vendorId);
-  }
-
   /** Money settles on blur: `68,500` → `68,500.00`; anything unreadable says so and keeps what was typed. */
   function normaliseMoney(key: "cost" | "fees") {
     const text = key === "cost" ? cost : fees;
@@ -326,7 +314,7 @@ export function RegisterForm({
   // ── submit ────────────────────────────────────────────────────────────
   /**
    * Keeps what the next unit of the same delivery shares — the category, the model and its type
-   * (spec §3, ruling R7), the vendor, dates, request, invoice no. and warranty (length, until,
+   * (spec §3, ruling R7), the vendor, dates, invoice no. and warranty (length, until,
    * covered by) — and clears the tags and serials (one empty row), holder, loan date, brand, cost, fees,
    * OR no., the repair contact, notes and the documents.
    */
@@ -401,7 +389,7 @@ export function RegisterForm({
       const res = single
         ? await createAsset({
             tag: rows[0].tag, serial: rows[0].serial, model, brand, categoryId, typeId, purchasedAt, cost: costValue,
-            warrantyUntil, vendorId, invoiceRef, notes, requestId,
+            warrantyUntil, vendorId, invoiceRef, notes,
             receiptRef, fees: feesValue, warrantyCoveredBy: coveredBy, warrantyContact: contact,
             requestedStatus: status, assigneeId: holder ? (assigneeId ?? "") : "", loanDueAt: loan ? loanDueAt : "",
           })
@@ -415,7 +403,6 @@ export function RegisterForm({
             cost: costValue || undefined,
             fees: feesValue || undefined,
             vendorId: vendorId || undefined,
-            requestId: requestId || undefined,
             warrantyUntil: warrantyUntil || undefined,
             brand: brand || undefined,
             notes: notes || undefined,
@@ -694,12 +681,6 @@ export function RegisterForm({
           onOpen={setPurchaseOpen}
           single={single}
           quantity={quantity}
-          requests={requests}
-          requestId={requestId}
-          onRequest={(id) => {
-            chooseRequest(id);
-            clearError("requestId");
-          }}
           vendors={vendorOptions}
           recentVendors={recentVendors}
           vendorId={vendorId}

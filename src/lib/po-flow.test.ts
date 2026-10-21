@@ -135,3 +135,33 @@ describe("derivePoProgress (an old completed request has linked assets but no li
     expect(derivePoProgress([{ qty: 3, registered: 3, closedShort: 0 }], { assetCount: 3, approvedCount: 3, completed: false })).toBe("Approved");
   });
 });
+
+describe("derivePoProgress after Task 5 registers on a migrated PO (carried finding)", () => {
+  // A migrated request: its old assets are linked to the PO but to no line. Registering one more today links it to
+  // its line, so "some line is linked" no longer means "every asset is line-linked".
+  const lines = [{ qty: 3, registered: 1, closedShort: 0 }, { qty: 2, registered: 0, closedShort: 0 }];
+  it("a completed request that gets one more asset still reads off the asset counts, never Partly registered", () => {
+    expect(derivePoProgress(lines, { assetCount: 6, approvedCount: 5, completed: true })).toBe("Registered");
+    expect(derivePoProgress(lines, { assetCount: 6, approvedCount: 6, completed: true })).toBe("Approved");
+  });
+  it("an open request with old linked assets plus a new one reads Registered, as it did before the new one", () => {
+    expect(derivePoProgress(lines, { assetCount: 3, approvedCount: 0, completed: false })).toBe("Registered");
+  });
+  it("a completed request with no old assets whose first asset is registered now still reads Registered", () => {
+    expect(derivePoProgress(lines, { assetCount: 1, approvedCount: 0, completed: true })).toBe("Registered");
+  });
+  it("a migrated open request with no old assets reads its lines like any PO", () => {
+    expect(derivePoProgress(lines, { assetCount: 1, approvedCount: 0, completed: false })).toBe("Partly registered");
+  });
+});
+
+describe("poProgress when every line is closed short and nothing was registered (confirmed: null)", () => {
+  // Nothing arrived, so there is no registration progress to show: the PO reads its state, and Purchasing can still
+  // cancel it (cancel needs nothing registered). Register is closed on it — no line has anything left.
+  it("is null, through derivePoProgress too", () => {
+    const shut = [{ qty: 2, registered: 0, closedShort: 2 }, { qty: 1, registered: 0, closedShort: 1 }];
+    expect(poProgress(shut, false)).toBeNull();
+    expect(derivePoProgress(shut, { assetCount: 0, approvedCount: 0, completed: false })).toBeNull();
+    expect(shut.every((l) => lineProgress(l).remaining === 0)).toBe(true);
+  });
+});

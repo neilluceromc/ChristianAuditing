@@ -10,7 +10,6 @@ import { queueCount } from "@/server/modules/inventory/label-queue";
 import { recentPeopleOptions } from "@/server/modules/employees/queries";
 import { recentPicks } from "@/server/recent-picks";
 import { toSearchParams } from "@/lib/url-state";
-import { fmtDate } from "@/lib/format";
 import {
   ASSET_CLASSES, MANAGEABLE_CLASSES, REGISTRABLE_CLASSES, canRegisterClass, defaultClassFor, isDirectLifecycle, parseCls,
   withViewClsQS,
@@ -22,7 +21,9 @@ export const metadata: Metadata = { title: pageTitle("Register assets") };
  * Phase 34 (spec §3, §4): the Register tab of New equipment. Phase 30's one
  * Register flow — quantity 1 creates one asset (with its initial state,
  * holder, loan date and documents), more creates a batch — now picks its
- * category from cards and its type from the model (`registerCatalog`). Purchasing registers both classes, IT its own (Phase 14); the class
+ * category from cards and its type from the model (`registerCatalog`). Spec §4
+ * way 3: this direct Register is IT's (its own class) and an admin's; Purchasing
+ * registers only from a purchase order (/purchases/[id]/register). The class
  * checks themselves live in `createAsset` / `registerAssets`, this only scopes
  * what the form offers.
  */
@@ -31,7 +32,7 @@ export default async function RegisterAssetsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const user = await requireRole("admin", "it_staff", "purchasing_staff");
+  const user = await requireRole("admin", "it_staff");
   const cls = parseCls(toSearchParams(await searchParams).get("cls"));
   // `?cls=` narrows the categories only to a class this role may register —
   // admin arriving from the Purchasing view gets Purchasing's categories, not
@@ -42,7 +43,7 @@ export default async function RegisterAssetsPage({
   // every class this role applies lifecycle changes to directly, not one flag.
   const directClasses = ASSET_CLASSES.filter((c) => isDirectLifecycle(user.role, c));
 
-  const [catalog, waiting, vendors, requests, recentPeople, recentVendors] = await Promise.all([
+  const [catalog, waiting, vendors, recentPeople, recentVendors] = await Promise.all([
     registerCatalog(classes),
     // The Labels tab's badge counts what waits in the Labels tab's own scope
     // (ruling R20): the classes this role manages, plus what this user registered.
@@ -51,13 +52,6 @@ export default async function RegisterAssetsPage({
       where: { archivedAt: null },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
-    }),
-    // Migration 38 (receiving.ts): any purchase order that isn't cancelled may be linked. Task 5 replaces this
-    // picker with the PO line.
-    prisma.purchaseOrder.findMany({
-      where: { state: { not: "CANCELLED" } },
-      select: { id: true, refNo: true, vendorId: true, completedAt: true, updatedAt: true, vendor: { select: { name: true } } },
-      orderBy: [{ updatedAt: "desc" }, { refNo: "desc" }],
     }),
     recentPeopleOptions(user.id),
     recentPicks(user.id, "vendor"),
@@ -86,11 +80,6 @@ export default async function RegisterAssetsPage({
         vendors={vendors}
         recentVendors={recentVendors}
         recentPeople={recentPeople}
-        requests={requests.map((r) => ({
-          id: r.id,
-          vendorId: r.vendorId,
-          label: [r.refNo, r.vendor?.name, fmtDate(r.completedAt ?? r.updatedAt)].filter(Boolean).join(" · "),
-        }))}
         directClasses={directClasses}
         defaultCls={defaultCls}
         listHref={listHref}

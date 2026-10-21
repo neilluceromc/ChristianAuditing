@@ -10,6 +10,8 @@ import { actionRole } from "@/server/auth/guards";
 import { isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
+import { notify } from "@/server/notifications/notify";
+import { canRegisterLine } from "@/lib/po-flow";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { createApproval, newSlaAt, OPEN_APPROVAL_STATES, openApprovalForAsset } from "@/server/modules/approvals/create";
 import {
@@ -211,17 +213,20 @@ const createSchema = z.object({
   // Phase 21 (spec §6): cleaned like every other reason — a zero-width string
   // must fall through to the "assigned at registration" default below.
   assignReason: reasonOptional(),
-  // Phase 30 (spec §5.3, plan P-13): Register at quantity 1 submits here — a loan's due date and the
-  // purchase request the unit came from ride along, so no loan is created without a due date.
+  // Phase 30 (spec §5.3, plan P-13): Register at quantity 1 submits here — a loan's due date rides along, so
+  // no loan is created without a due date. No purchase order (spec §4 way 3): a PO's units register from the PO.
   loanDueAt: dateStr.optional(),
-  requestId: z.string().optional(),
 });
 
 const toDate = (s: string | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
 const toCost = (c: number | "" | undefined) => (c === "" || c === undefined ? null : c);
 
+/**
+ * Register at quantity 1 (spec §4 way 3): IT registers IT gear directly, an admin anything; Purchasing registers only
+ * from a purchase order (po-register.ts). The one asset is its own registration group, and Finance's bell rings once.
+ */
 export async function createAsset(input: unknown): Promise<ActionResult<{ id: string; purchaseRecordId: string }>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff");
+  const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -234,8 +239,7 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   const errors: Record<string, string> = {};
   const category = await prisma.assetCategory.findUnique({ where: { id: d.categoryId }, select: { name: true, cls: true } });
   if (!category) errors.categoryId = "Unknown category";
-  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
-  // managing — an IT asset Purchasing registers is IT's from this moment.
+  // Spec §4 way 3: IT registers its own class directly (REGISTRABLE_CLASSES); Purchasing's items come in from a PO.
   else if (!canRegisterClass(user.role, category.cls)) {
     errors.categoryId = `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not create ${CLASS_LABEL[category.cls]} assets.`;
   }
@@ -261,12 +265,6 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
   }
   // Spec §8, a category with types needs one picked (Phase 36).
   else if (category && (await typeRequired(d.categoryId, d.typeId))) errors.typeId = TYPE_REQUIRED;
-  if (d.requestId) {
-    // Migration 38 (as receiving.ts): the named order must exist and not be cancelled.
-    const po = await prisma.purchaseOrder.findUnique({ where: { id: d.requestId }, select: { refNo: true, state: true } });
-    if (!po) errors.requestId = "Unknown purchase order";
-    else if (po.state === "CANCELLED") errors.requestId = `${po.refNo} is cancelled — a cancelled purchase order can't be linked.`;
-  }
   const tagTaken = await prisma.asset.findUnique({ where: { tag: d.tag }, select: { id: true } });
   if (tagTaken) errors.tag = `${d.tag} is already registered`;
   // Scoped to the class being registered into, like checkIdentifiers (identifierWhere): the message
@@ -321,7 +319,6 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           warrantyCoveredBy: d.warrantyCoveredBy || null,
           warrantyContact: d.warrantyContact || null,
           purchaseRecordId: record.id,
-          purchaseOrderId: d.requestId || null,
           itVerifiedAt: selfChecked ? new Date() : null,
           itVerifiedById: selfChecked ? user.id : null,
         },
@@ -348,6 +345,13 @@ export async function createAsset(input: unknown): Promise<ActionResult<{ id: st
           quantity: { from: null, to: 1 },
           total: { from: null, to: (Number(toCost(d.cost) ?? 0) + Number(toCost(d.fees) ?? 0)).toFixed(2) },
         },
+      });
+      // Spec §4 way 3: the registration reaches Finance as one group, and Finance's bell rings once.
+      await notify(tx, {
+        team: "FINANCE", kind: "TO_CHECK",
+        title: `${created.tag} registered by ${user.role === "admin" ? "an admin" : "IT"}, ready to check`,
+        href: `/finance/review/${record.id}`, actorId: user.id, actorRole: user.role,
+        entityType: "purchase-record", entityId: record.id,
       });
       if (plan.approval) {
         // Phase 15 (spec §2.1): IT registering its own deploy applies directly —
@@ -964,9 +968,10 @@ export async function checkIdentifiers(
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = identifiersSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  // Each hit now names a record (its id, a serial's tag): a class the caller cannot register into is
-  // refused outright, so a hand-crafted call cannot read another class's tags or ids.
-  if (!canRegisterClass(user.role, parsed.data.cls)) return forbidden();
+  // Each hit now names a record (its id, a serial's tag): a class the caller cannot register into — directly, or
+  // from a purchase order (Purchasing's own items, po-register-form.tsx) — is refused outright, so a hand-crafted
+  // call cannot read another class's tags or ids.
+  if (!canRegisterClass(user.role, parsed.data.cls) && !canRegisterLine(user.role, parsed.data.cls, "READY").ok) return forbidden();
   const tags = [...new Set((parsed.data.tags ?? []).map(tagKey).filter(Boolean))];
   const serials = [...new Set((parsed.data.serials ?? []).filter(Boolean))];
   const where = identifierWhere(parsed.data.cls, tags, serials);

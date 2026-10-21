@@ -26,8 +26,8 @@ export const AUDIT_ACTIONS = [
   // Finance follow-up (src/server/modules/finance/undo-actions.ts): written from UNDONE_ACTION, so listed here by hand
   "finance.confirm.undone", "asset.return.undone", "depreciation.override.undone", "finance.confirm.reopened",
   // Purchase orders (src/server/modules/purchases/po-actions.ts): save, resubmit, send back, the PO-level fix (one
-  // asset.money.fixed per asset it reached), cancel and close a line short
-  "po.save", "po.resubmit", "po.send-back", "po.fix", "po.cancel", "po.line-closed", "asset.money.fixed",
+  // asset.money.fixed per asset it reached), cancel and close a line short; register from a PO (po-register.ts)
+  "po.save", "po.resubmit", "po.send-back", "po.fix", "po.cancel", "po.line-closed", "asset.money.fixed", "po.register",
   // people
   "employee.transferred", "employee.setup", "offboarding.completed", "acknowledgement.recorded",
   "note.added", "note.edited", "note.deleted",

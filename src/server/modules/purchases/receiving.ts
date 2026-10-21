@@ -9,6 +9,7 @@ import { TYPE_REQUIRED } from "@/lib/register-type";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
+import { notify } from "@/server/notifications/notify";
 import { TAG_RULE, TAG_SHAPE } from "@/lib/tag-key";
 import { identifierWhere } from "@/lib/inventory-list";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/server/action-result";
 import { serialRequired } from "@/lib/serial-rules";
 import { WARRANTY_COVERED_BY } from "@/lib/purchase-summary";
+import { categoryNoun } from "@/lib/register-catalog";
 
 // Same shape createSchema uses (inventory/actions.ts) — a malformed date
 // string is a field error at the picker, never an Invalid Date reaching
@@ -57,9 +59,8 @@ const registerSchema = z.object({
   // Accepted and ignored: a batch always lands in the class's default status. It exists so the
   // Register form can send one shape at any quantity.
   requestedStatus: z.string().optional(),
-  // OPTIONAL metadata, never a gate (C-5): the purchase order this came from. It must exist and not be
-  // cancelled (migration 38). Task 5 replaces it with the PO line.
-  requestId: z.string().optional(),
+  // No purchase order here (spec §4 way 3): a delivery against a PO registers from the PO itself
+  // (po-register.ts), which links each asset to its line. The old `requestId` is not a field any more.
 });
 
 interface Registered {
@@ -68,8 +69,13 @@ interface Registered {
   purchaseRecordId: string;
 }
 
+/**
+ * Spec §4 way 3: IT registers directly, with no PO — IT gear only (REGISTRABLE_CLASSES), an admin anything.
+ * Purchasing registers only from a purchase order (po-register.ts). The submit is one registration group (a
+ * PurchaseRecord) that reaches Finance as one group and rings Finance's bell once.
+ */
 export async function registerAssets(input: unknown): Promise<ActionResult<Registered>> {
-  const user = await actionRole("admin", "it_staff", "purchasing_staff");
+  const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
@@ -88,16 +94,15 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
   if (dupAt >= 0) errors.tags = `Row ${dupAt + 1} · ${d.tags[dupAt]} appears twice in this batch`;
 
   // The category decides the class; the class decides who may register into
-  // it. Finance and viewers never reach here (actionRole above), so the only
-  // refusal this produces is IT registering a Purchasing category — named,
-  // because "forbidden" would not say what to do instead.
+  // it. Only IT and admin reach here (actionRole above), so the only refusal
+  // this produces is IT registering a Purchasing category — named, because
+  // "forbidden" would not say what to do instead.
   const category = await prisma.assetCategory.findUnique({
     where: { id: d.categoryId },
     select: { name: true, cls: true },
   });
   if (!category) errors.categoryId = "Unknown category";
-  // Spec §4: Purchasing registers both classes, IT its own. Registering is not
-  // managing — an IT asset Purchasing registers is IT's from this moment.
+  // Spec §4 way 3: IT registers its own class directly; Purchasing's items come in from a PO.
   else if (!canRegisterClass(user.role, category.cls)) {
     errors.categoryId = `${category.name} is ${CLASS_PHRASE[category.cls]} category — your department does not register ${CLASS_LABEL[category.cls]} assets.`;
   }
@@ -146,17 +151,6 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
     }
   }
 
-  // OPTIONAL metadata, never a gate (C-5) — but a named order must exist and not be cancelled (migration 38;
-  // Task 5 replaces requestId with the PO line).
-  if (d.requestId) {
-    const po = await prisma.purchaseOrder.findUnique({
-      where: { id: d.requestId },
-      select: { refNo: true, state: true },
-    });
-    if (!po) errors.requestId = "Unknown purchase order";
-    else if (po.state === "CANCELLED") errors.requestId = `${po.refNo} is cancelled — a cancelled purchase order can't be linked.`;
-  }
-
   if (Object.keys(errors).length || !category) return validationError(errors);
   // Spec §4 stamping: born checked when the registrant manages the class.
   const selfChecked = category.cls === "IT" && canManageClass(user.role, "IT");
@@ -174,7 +168,6 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           cls: category.cls, vendorId: d.vendorId || null, purchasedAt: toDate(d.purchasedAt),
           invoiceRef: d.invoiceRef || null, receiptRef: d.receiptRef || null,
           unitCost: d.cost || null, fees: d.fees || null, quantity: d.tags.length, createdById: user.id,
-          purchaseOrderId: d.requestId || null,
         },
       });
       let created = 0;
@@ -208,7 +201,6 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
             warrantyCoveredBy: d.warrantyCoveredBy || null,
             warrantyContact: d.warrantyContact || null,
             purchaseRecordId: record.id,
-            purchaseOrderId: d.requestId || null,
             itVerifiedAt: selfChecked ? new Date() : null,
             itVerifiedById: selfChecked ? user.id : null,
           },
@@ -237,6 +229,13 @@ export async function registerAssets(input: unknown): Promise<ActionResult<Regis
           quantity: { from: null, to: d.tags.length },
           total: { from: null, to: (Number(d.cost || 0) * d.tags.length + Number(d.fees || 0)).toFixed(2) },
         },
+      });
+      // Spec §4 way 3: the batch reaches Finance as one group, and Finance's bell rings once.
+      await notify(tx, {
+        team: "FINANCE", kind: "TO_CHECK",
+        title: `${d.tags.length} ${categoryNoun(category.name, d.tags.length)} registered by ${user.role === "admin" ? "an admin" : "IT"}, ready to check`,
+        href: `/finance/review/${record.id}`, actorId: user.id, actorRole: user.role,
+        entityType: "purchase-record", entityId: record.id,
       });
       done = { created, ids, purchaseRecordId: record.id };
     }, {
