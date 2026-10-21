@@ -14,6 +14,7 @@ import { GROUP_ARCHIVED } from "@/lib/groups";
 import { canEditField, MONEY_FIELDS, poMoneyStage, reasonError, teamOfRole, type IntakeStage } from "@/lib/intake-rules";
 import { lineProgress, PO_WRITE_ROLES, poRefNo, stateAfterResubmit, stateAfterSave, type PoState } from "@/lib/po-flow";
 import { moneyForAsset } from "@/lib/po-money";
+import { shouldReopen } from "@/lib/registration";
 import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
@@ -37,6 +38,9 @@ async function asActionResult<T>(run: () => Promise<ActionResult<T>>): Promise<A
   try {
     return await run();
   } catch (err) {
+    if (err instanceof StaleAssetError) {
+      return conflict(`${err.tag} changed just now — nothing was written. Reload and try again.`);
+    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
       return conflict("The database is busy right now — nothing was written. Try that again.");
     }
@@ -93,12 +97,103 @@ const optionalReason = z.string().overwrite(cleanReason).optional();
 
 /** What an asset from a PO carries of its money (moneyForAsset's fields), plus its review state. */
 const ASSET_SELECT = {
-  id: true, tag: true, purchaseOrderLineId: true, financeConfirmedAt: true, financeReturnedAt: true, financeReturnedTo: true,
+  id: true, tag: true, purchaseOrderLineId: true, purchaseRecordId: true,
+  financeConfirmedAt: true, financeReturnedAt: true, financeReturnedTo: true,
   cost: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true,
 } as const;
 
 function counts(assets: Array<{ financeConfirmedAt: Date | null }>) {
   return { registeredCount: assets.length, approvedCount: assets.filter((a) => a.financeConfirmedAt !== null).length };
+}
+
+/** A state-guarded asset write found the asset changed under it: thrown so the whole transaction rolls back. */
+class StaleAssetError extends Error {
+  constructor(readonly tag: string) {
+    super(`stale asset ${tag}`);
+  }
+}
+
+type PoAsset = {
+  id: string; tag: string; purchaseOrderLineId: string | null; purchaseRecordId: string | null;
+  financeConfirmedAt: Date | null; financeReturnedAt: Date | null; financeReturnedTo: Team | null;
+  cost: unknown; vendorId: string | null; invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null;
+};
+type PoFacts = Partial<{ vendorId: string | null; invoiceRef: string | null; receiptRef: string | null; purchasedAt: Date | null }>;
+type Copied = { id: string; diff: AuditDiff; reopened: boolean; extra: boolean };
+const isWhole = (f: PoFacts): f is Required<PoFacts> =>
+  f.vendorId !== undefined && f.invoiceRef !== undefined && f.receiptRef !== undefined && f.purchasedAt !== undefined;
+
+/**
+ * The one place a PO's money reaches its assets and its registrations (spec §5: money lives on the PO and is copied
+ * at Register and on every later fix) — Purchasing's resubmit and the PO-level fix both come through here.
+ *
+ * - **Assets:** each gets `facts` and, as its cost, its line's price from `linePrice` — moneyForAsset's copy, limited
+ *   to what the caller passes. `approved: "skip"` leaves approved assets alone (a save never reaches them);
+ *   `"include"` writes them without touching their approval, except that a cost given to an approved asset that had
+ *   none reopens it (spec §5 keeps that path for not-capitalised assets; `shouldReopen`, the rule updateAsset uses).
+ *   `extra(a)` adds per-asset fields (the resubmit's un-return), writing the asset even when its money is unchanged.
+ *   Every write is state-guarded; a miss throws StaleAssetError, rolling the transaction back.
+ * - **PurchaseRecords** of the PO: the four facts, and `unitCost` when all of a record's assets come from one line.
+ *
+ * Returns each asset written, with its money diff, so the caller writes its own audit.
+ */
+async function copyPoMoney(
+  tx: Prisma.TransactionClient,
+  args: {
+    poId: string;
+    assets: PoAsset[];
+    facts: PoFacts;
+    linePrice: Map<string, number>;
+    approved: "skip" | "include";
+    extra?: (a: PoAsset) => Record<string, unknown> | null;
+  },
+): Promise<Copied[]> {
+  const { assets, facts, linePrice } = args;
+  const priceOf = (a: PoAsset) => (a.purchaseOrderLineId ? linePrice.get(a.purchaseOrderLineId) : undefined);
+  const out: Copied[] = [];
+
+  for (const a of assets) {
+    if (a.financeConfirmedAt && args.approved === "skip") continue;
+    const price = priceOf(a);
+    // A save passes every fact (moneyForAsset's copy whole); a fix passes only what it changed.
+    const target: Record<string, unknown> = isWhole(facts) && price !== undefined
+      ? moneyForAsset(facts, { unitPrice: price })
+      : { ...facts, ...(price !== undefined ? { cost: price } : {}) };
+    const diff = diffOf(a, target);
+    const extra = args.extra?.(a) ?? null;
+    if (Object.keys(diff).length === 0 && !extra) continue;
+    const reopened = "cost" in diff && shouldReopen(a, target.cost);
+    const data: Record<string, unknown> = {
+      ...Object.fromEntries(Object.keys(diff).map((k) => [k, target[k]])),
+      ...extra,
+      ...(reopened ? { financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false } : {}),
+    };
+    const where = reopened
+      ? { id: a.id, financeConfirmedAt: { not: null }, cost: null }
+      : a.financeConfirmedAt
+        ? { id: a.id, financeConfirmedAt: { not: null } }
+        : { id: a.id, financeConfirmedAt: null };
+    const hit = await tx.asset.updateMany({ where, data });
+    if (hit.count === 0) throw new StaleAssetError(a.tag);
+    out.push({ id: a.id, diff, reopened, extra: extra !== null });
+  }
+
+  const records = await tx.purchaseRecord.findMany({
+    where: { purchaseOrderId: args.poId },
+    select: { id: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true, unitCost: true },
+  });
+  for (const r of records) {
+    const lines = [...new Set(assets.filter((a) => a.purchaseRecordId === r.id).map((a) => a.purchaseOrderLineId))];
+    const unitCost = lines.length === 1 && lines[0] ? linePrice.get(lines[0]) : undefined;
+    const target: Record<string, unknown> = { ...facts, ...(unitCost !== undefined ? { unitCost } : {}) };
+    const diff = diffOf(r, target);
+    if (Object.keys(diff).length === 0) continue;
+    await tx.purchaseRecord.update({
+      where: { id: r.id },
+      data: Object.fromEntries(Object.keys(diff).map((k) => [k, target[k]])),
+    });
+  }
+  return out;
 }
 
 // ---- save ----------------------------------------------------------------------------------------------------------
@@ -369,36 +464,32 @@ async function editPo(
       });
     }
 
-    // Every asset from the PO carries the saved money; Finance's returned ones are un-returned on its resubmit.
-    const priceOf = new Map(d.lines.filter((l) => l.id).map((l) => [l.id!, l.unitPrice]));
-    for (const a of assets) {
-      const linePrice = a.purchaseOrderLineId ? priceOf.get(a.purchaseOrderLineId) : undefined;
-      const money = moneyForAsset(head, { unitPrice: linePrice ?? a.cost });
-      const moneyDiff = diffOf(a, money);
-      const unreturn = resubmitTo === "FINANCE" && a.financeReturnedAt !== null && a.financeReturnedTo === "PURCHASING";
-      if (!unreturn && Object.keys(moneyDiff).length === 0) continue;
-      await tx.asset.updateMany({
-        where: { id: a.id, financeConfirmedAt: null },
-        data: {
-          ...money,
-          ...(unreturn
-            ? {
-                financeReturnedAt: null, financeReturnedById: null, financeReturnedTo: null, financeReturnReason: null,
-                financeReturnFields: [], financeResubmitNote: reply,
-              }
-            : {}),
-        },
-      });
+    // Every asset from the PO, and its registrations, carry the saved money. On Finance's resubmit only the assets
+    // returned to Purchasing are un-returned: one Finance returned to IT (a serial, say) stays with IT.
+    const copied = await copyPoMoney(tx, {
+      poId: id,
+      assets,
+      facts: { vendorId: head.vendorId, invoiceRef: head.invoiceRef, receiptRef: head.receiptRef, purchasedAt: head.purchasedAt },
+      linePrice: new Map(d.lines.filter((l) => l.id).map((l) => [l.id!, l.unitPrice])),
+      approved: "skip",
+      extra: (a) => (resubmitTo === "FINANCE" && a.financeReturnedAt !== null && a.financeReturnedTo === "PURCHASING"
+        ? {
+            financeReturnedAt: null, financeReturnedById: null, financeReturnedTo: null, financeReturnReason: null,
+            financeReturnFields: [], financeResubmitNote: reply,
+          }
+        : null),
+    });
+    for (const c of copied) {
       await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: a.id,
-        action: unreturn ? "finance.resubmit" : "update",
-        diff: unreturn
-          ? { financeReturn: { from: "returned", to: null }, ...(reply ? { reply: { from: null, to: reply } } : {}), ...moneyDiff }
-          : moneyDiff,
+        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: c.id,
+        action: c.extra ? "finance.resubmit" : "update",
+        diff: c.extra
+          ? { financeReturn: { from: "returned", to: null }, ...(reply ? { reply: { from: null, to: reply } } : {}), ...c.diff }
+          : c.diff,
         reason: reply, source: "web",
       });
-      touchedAssets = true;
     }
+    touchedAssets = copied.length > 0;
 
     await tx.noteEntry.create({
       data: {
@@ -485,7 +576,13 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
 
     let team: Team;
     if (user.role === "it_staff") {
+      // The stage, not just the state: a WITH_IT PO with assets registered from it is with Finance (poMoneyStage), and
+      // an IT send-back there would return none of them — a later approval would then strand the PO in SENT_BACK.
       if (po.state !== "WITH_IT") { failure = conflict(`${po.refNo} isn't with IT any more.`); return; }
+      if (poMoneyStage({ state: po.state, ...c }) !== "with-it") {
+        failure = conflict(`Assets from ${po.refNo} are registered, so its money is with Finance now. Ask Finance to send it back.`);
+        return;
+      }
       team = "IT";
     } else if (user.role === "finance_staff") {
       if (c.registeredCount === 0) { failure = conflict(`Nothing from ${po.refNo} is registered yet, so it isn't with Finance.`); return; }
@@ -508,8 +605,10 @@ async function sendBackImpl(input: unknown): Promise<ActionResult<{ refNo: strin
     if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
 
     if (team === "FINANCE") {
+      // Only assets not already returned: one Finance sent to IT (a serial, say) keeps that return, its fields and
+      // its note — Purchasing's resubmit must not clear an IT problem IT never fixed.
       await tx.asset.updateMany({
-        where: { purchaseOrderId: id, financeConfirmedAt: null },
+        where: { purchaseOrderId: id, financeConfirmedAt: null, financeReturnedAt: null },
         data: {
           financeReturnedAt: now, financeReturnedById: user.id, financeReturnedTo: "PURCHASING",
           financeReturnFields: fields, financeReturnReason: note, financeResubmitNote: null,
@@ -568,9 +667,11 @@ const COPIED_KEYS = ["vendorId", "invoiceRef", "receiptRef", "purchasedAt"] as c
 
 /**
  * A PO-level money fix (spec §5, §6). Each patched field must pass `canEditField(role, field, "PURCHASING",
- * poMoneyStage(po))`, with a reason whenever any of them needs one. The fix is copied to every asset from the PO —
- * approved ones included, without reopening them (`financeConfirmedAt` untouched) — with one `asset.money.fixed`
- * audit per changed asset, one `po.fix`, and a PO_FIXED note. Purchasing hears about it unless it made the fix.
+ * poMoneyStage(po))`, with a reason whenever any of them needs one. The fix is copied (copyPoMoney) to every asset
+ * from the PO and its registrations — approved assets included, without reopening them (`financeConfirmedAt`
+ * untouched), except that a price giving a cost to an approved asset that had none reopens it, as updateAsset does
+ * (spec §5) — with one `asset.money.fixed` audit per changed asset (plus `finance.reopened` on a reopen), one
+ * `po.fix`, and a PO_FIXED note. Purchasing hears about it unless it made the fix.
  */
 export async function fixPurchaseOrder(input: unknown): Promise<ActionResult<{ refNo: string; changed: string[] }>> {
   return asActionResult(() => fixImpl(input));
@@ -659,21 +760,26 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
     for (const [lineId, unitPrice] of newPrice) {
       await tx.purchaseOrderLine.update({ where: { id: lineId }, data: { unitPrice } });
     }
-    const copied = Object.fromEntries(COPIED_KEYS.filter((k) => k in headDiff).map((k) => [k, after[k]]));
-    if (Object.keys(copied).length) {
-      await tx.purchaseRecord.updateMany({ where: { purchaseOrderId: id }, data: copied });
-    }
-    for (const a of assets) {
-      const target: Record<string, unknown> = { ...copied };
-      if (a.purchaseOrderLineId && newPrice.has(a.purchaseOrderLineId)) target.cost = newPrice.get(a.purchaseOrderLineId);
-      const assetDiff = diffOf(a, target);
-      if (Object.keys(assetDiff).length === 0) continue;
-      // Approved assets too, and never their approval: financeConfirmedAt is not in the write.
-      await tx.asset.update({ where: { id: a.id }, data: Object.fromEntries(Object.keys(assetDiff).map((k) => [k, target[k]])) });
+    // Approved assets too, without reopening them — except one approved with no cost that now gets one (spec §5).
+    const fixed = await copyPoMoney(tx, {
+      poId: id,
+      assets,
+      facts: Object.fromEntries(COPIED_KEYS.filter((k) => k in headDiff).map((k) => [k, after[k]])) as PoFacts,
+      linePrice: newPrice,
+      approved: "include",
+    });
+    for (const c of fixed) {
       await writeAudit(tx, {
-        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: a.id, action: "asset.money.fixed",
-        diff: assetDiff, reason, source: "web",
+        actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: c.id, action: "asset.money.fixed",
+        diff: c.diff, reason, source: "web",
       });
+      if (c.reopened) {
+        // The same entry updateAsset writes when a cost reopens an approved no-cost asset.
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: c.id, action: "finance.reopened",
+          diff: { cost: c.diff.cost }, source: "web",
+        });
+      }
     }
 
     const words = fieldPhrase(changed);

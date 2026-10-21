@@ -425,6 +425,96 @@ describe("fixPurchaseOrder", () => {
   });
 });
 
+describe("fix round 1", () => {
+  const RETURNED = new Date("2026-10-19T00:00:00Z");
+
+  it("Finance's PO send-back keeps an asset's existing return to IT, and Purchasing's resubmit leaves it with IT", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 2 });
+    seedAsset("a1");
+    seedAsset("a2", {
+      financeReturnedAt: RETURNED, financeReturnedById: ANA.id, financeReturnedTo: "IT",
+      financeReturnFields: ["serial"], financeReturnReason: "serial doesn't match the photo",
+    });
+    const itReturn = {
+      financeReturnedAt: RETURNED, financeReturnedById: ANA.id, financeReturnedTo: "IT",
+      financeReturnFields: ["serial"], financeReturnReason: "serial doesn't match the photo",
+    };
+    h.user = ANA;
+    expect((await sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "wrong SI number" })).ok).toBe(true);
+    expect(asset("a1")).toMatchObject({ financeReturnedTo: "PURCHASING", financeReturnFields: ["invoiceRef"] });
+    expect(asset("a2")).toMatchObject(itReturn);
+
+    h.user = PAT;
+    const r = await savePurchaseOrder(order({ id: "po1", invoiceRef: "SI-0021", lines: [line({ id: "ln1", qty: 2 })], reply: "SI number corrected" }));
+    expect(r).toMatchObject({ ok: true, data: { state: "READY" } });
+    expect(asset("a1")).toMatchObject({ financeReturnedAt: null, financeReturnedTo: null, invoiceRef: "SI-0021" });
+    expect(asset("a2")).toMatchObject({ ...itReturn, invoiceRef: "SI-0021" });
+  });
+
+  it("IT send-back refused once any asset from the PO is registered", async () => {
+    seedPo({ state: "WITH_IT" });
+    seedLine("ln1", { description: "chairs", categoryId: "cat-ch" });
+    seedAsset("a1");
+    h.user = IVAN;
+    const r = await expectNothingWritten(() => sendBackPurchaseOrder({ id: "po1", fields: ["invoiceRef"], note: "SI number is wrong" }));
+    expect(r).toMatchObject({ kind: "conflict" });
+    expect(r.ok ? "" : r.message).toMatch(/registered/);
+  });
+
+  it("a resubmit after Finance's send-back updates the PO's PurchaseRecord too", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "FINANCE", sentBackById: ANA.id, sentBackAt: RETURNED });
+    seedLine("ln1", { qty: 2, unitPrice: 50000 });
+    t("purchaseRecord").push({
+      id: "rec1", purchaseOrderId: "po1", vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: BOUGHT, unitCost: 50000,
+    });
+    for (const id of ["a1", "a2"]) {
+      seedAsset(id, { purchaseRecordId: "rec1", financeReturnedAt: RETURNED, financeReturnedById: ANA.id, financeReturnedTo: "PURCHASING" });
+    }
+    const r = await savePurchaseOrder(order({
+      id: "po1", invoiceRef: "SI-0021", lines: [line({ id: "ln1", qty: 2, unitPrice: 48000 })], reply: "SI number and price corrected",
+    }));
+    expect(r.ok).toBe(true);
+    expect(t("purchaseRecord")[0]).toMatchObject({ invoiceRef: "SI-0021", unitCost: 48000, vendorId: "v1" });
+    for (const id of ["a1", "a2"]) expect(asset(id)).toMatchObject({ invoiceRef: "SI-0021", cost: 48000 });
+  });
+
+  it("the fix updates a record's unitCost only when its assets all come from one line", async () => {
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 1 });
+    seedLine("ln2", { qty: 1, description: "docks", unitPrice: 9000 });
+    t("purchaseRecord").push(
+      { id: "rec1", purchaseOrderId: "po1", vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: BOUGHT, unitCost: 50000 },
+      { id: "rec2", purchaseOrderId: "po1", vendorId: "v1", invoiceRef: "SI-0012", receiptRef: null, purchasedAt: BOUGHT, unitCost: null },
+    );
+    seedAsset("a1", { purchaseRecordId: "rec1" });
+    seedAsset("a2", { purchaseRecordId: "rec2" });
+    seedAsset("a3", { purchaseRecordId: "rec2", purchaseOrderLineId: "ln2", cost: 9000 });
+    h.user = ANA;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { lines: [{ id: "ln1", unitPrice: 48000 }] }, reason: "discount on the invoice" });
+    expect(r.ok).toBe(true);
+    expect(t("purchaseRecord").find((x) => x.id === "rec1")!.unitCost).toBe(48000);
+    expect(t("purchaseRecord").find((x) => x.id === "rec2")!.unitCost).toBeNull();
+  });
+
+  it("a line price fix reopens only the approved asset that had no cost (spec §5)", async () => {
+    const APPROVED = new Date("2026-10-20T00:00:00Z");
+    seedPo({ state: "READY" });
+    seedLine("ln1", { qty: 2, unitPrice: null });
+    seedAsset("a1", { cost: null, financeConfirmedAt: APPROVED, financeConfirmedById: ANA.id, financeNotCapitalised: true });
+    seedAsset("a2", { cost: 50000, financeConfirmedAt: APPROVED, financeConfirmedById: ANA.id, financeNotCapitalised: false });
+    h.user = ANA;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { lines: [{ id: "ln1", unitPrice: 48000 }] }, reason: "price from the invoice" });
+    expect(r.ok).toBe(true);
+    expect(asset("a1")).toMatchObject({ cost: 48000, financeConfirmedAt: null, financeConfirmedById: null, financeNotCapitalised: false });
+    expect(asset("a2")).toMatchObject({ cost: 48000, financeConfirmedAt: APPROVED, financeConfirmedById: ANA.id });
+    expect(audits("asset.money.fixed").map((a) => a.entityId).sort()).toEqual(["a1", "a2"]);
+    expect(audits("finance.reopened")).toEqual([
+      expect.objectContaining({ entityId: "a1", diff: { cost: { from: null, to: 48000 } } }),
+    ]);
+  });
+});
+
 describe("closeLineShort", () => {
   it("closeLineShort over remaining refused", async () => {
     seedPo({ state: "READY" });
