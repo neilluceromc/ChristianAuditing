@@ -93,9 +93,10 @@ export function qrBase(baseUrl: string | undefined): QrBase {
  * and this string is printed onto adhesive paper. Asset.tag is @unique, so
  * the card can find the row from it.
  *
- * `/inventory?q=<tag>&go=1` (the search box's Enter, spec §7.2) still redirects an exact tag match to the full record
- * and is untouched — that is the USB desk scanner's contract, guarded by
- * e2e/it-core.spec.ts. This function decides only where a PHONE lands.
+ * The USB desk scanner's contract is untouched: it types the tag and presses Enter in the Inventory search box, which
+ * opens the full record (`findExactTag`, spec §7.2; guarded by e2e/it-core.spec.ts). `/inventory?q=<tag>&go=1` still
+ * redirects an exact tag to the record, for direct links and e2e only — the box no longer sends it. This function
+ * decides only where a PHONE lands.
  */
 export function qrUrlFor(tag: string, base: { prefix: string }): string {
   return `${base.prefix}/inventory/scan/${encodeURIComponent(tag)}`;

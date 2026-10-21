@@ -62,9 +62,10 @@ export interface WatchDeps {
 }
 
 /**
- * Query parameters a page consumes and then strips with a redirect: Inventory's `go=1` (spec §7.2, the scanner
- * contract — the search box's Enter). A navigation to a URL carrying one has committed once the address bar shows that
- * URL without it, even when that is the page it started from.
+ * Query parameters a page consumes and then strips with a redirect: Inventory's `go=1` (spec §7.2), which only direct
+ * links and e2e send now — the search box's Enter opens a scanned tag through `findExactTag` instead. A navigation to a
+ * URL carrying one has committed once the address bar shows that URL without it, even when that is the page it
+ * started from.
  */
 export const ONE_SHOT_PARAMS: readonly string[] = ["go"];
 
