@@ -157,3 +157,56 @@ describe("fix round 1", () => {
     expect((await groupDetail("rec9"))!.moneyVaries).toBe(false);
   });
 });
+
+describe("PO form redesign (task 7): the PO's own money on the group review", () => {
+  const po = (extra: Record<string, unknown> = {}) => ({
+    id: "po7", refNo: "PO-0215", state: "READY", fees: null, vendorId: "v1", invoiceRef: "44511", receiptRef: null, purchasedAt: REG,
+    vendor: { name: "PCWORX" }, poNumber: "2025-0418", paidBy: "CREDIT_CARD", formV2: true, totalsConsistent: false,
+    totalSales: D(9100), lessVat: D(975), netOfVat: D(8125), discount: null, amountDue: D(8125), addVat: D(975), totalAmountDue: D(9200),
+    lines: [{ id: "l1", description: "Belden Cat6 UTP cable", qty: 1, unitPrice: D(9100) }],
+    documents: [],
+    ...extra,
+  });
+  const record = (p: unknown) => ({
+    id: "rec7", cls: "IT", createdAt: REG, fees: null, vendorId: "v1", invoiceRef: "44511", receiptRef: null, purchasedAt: REG,
+    vendor: { name: "PCWORX" }, createdBy: { name: "Ivan Tan", role: "it_staff" }, purchaseOrder: p, assets: [],
+  });
+  type Args = { select: { purchaseOrder: { select: Record<string, unknown> & { documents: { where: unknown } } } } };
+
+  it("money carries the PO number, paid by, the seven typed totals and whether they added up; po carries formV2", async () => {
+    h.record = record(po());
+    const g = await groupDetail("rec7");
+    const sel = (h.recordArgs as unknown as Args).select.purchaseOrder.select;
+    expect(sel).toMatchObject({
+      poNumber: true, paidBy: true, formV2: true, totalsConsistent: true,
+      totalSales: true, lessVat: true, netOfVat: true, discount: true, amountDue: true, addVat: true, totalAmountDue: true,
+    });
+    expect(g!.money).toMatchObject({
+      poNumber: "2025-0418", paidBy: "CREDIT_CARD", totalsConsistent: false,
+      totals: { totalSales: 9100, lessVat: 975, netOfVat: 8125, discount: null, amountDue: 8125, addVat: 975, totalAmountDue: 9200 },
+    });
+    expect(g!.po!.formV2).toBe(true);
+  });
+
+  it("a legacy PO's totals are all null, and a direct registration has none of the PO's fields", async () => {
+    h.record = record(po({
+      poNumber: null, paidBy: null, formV2: false, totalsConsistent: null,
+      totalSales: null, lessVat: null, netOfVat: null, discount: null, amountDue: null, addVat: null, totalAmountDue: null,
+    }));
+    const legacy = await groupDetail("rec7");
+    expect(legacy!.money).toMatchObject({ poNumber: null, paidBy: null, totalsConsistent: null });
+    expect(Object.values(legacy!.money.totals).every((v) => v === null)).toBe(true);
+    expect(legacy!.po!.formV2).toBe(false);
+
+    h.record = record(null);
+    const direct = await groupDetail("rec7");
+    expect(direct!.money).toMatchObject({ poNumber: null, paidBy: null, totalsConsistent: null });
+    expect(Object.values(direct!.money.totals).every((v) => v === null)).toBe(true);
+  });
+
+  it("the PO's documents leave out removed (superseded) ones", async () => {
+    h.record = record(po());
+    await groupDetail("rec7");
+    expect((h.recordArgs as unknown as Args).select.purchaseOrder.select.documents.where).toEqual({ supersededAt: null });
+  });
+});

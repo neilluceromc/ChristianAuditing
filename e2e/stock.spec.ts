@@ -182,7 +182,7 @@ test.describe.serial("stock", () => {
     await expect(page.getByText("5 packs × 10 = 50 pieces")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByLabel(/^Quantity\b/)).toHaveValue("50");
 
-    const supplier = page.getByRole("main").getByLabel("Supplier");
+    const supplier = page.getByRole("main").getByLabel("Vendor");
     await pickFromCombo(supplier, "TechServe", /TechServe PH/);
     await expect(supplier).toHaveValue("TechServe PH");
     await page.getByLabel("Reference").fill("DR-9001");
@@ -342,7 +342,16 @@ test.describe.serial("stock", () => {
     await waitForHydration(itemCombo);
     await itemCombo.fill("TS-0001");
     await expect(page.getByRole("option", { name: /TS-0001/ })).toHaveCount(0);
-    await expect(page.getByRole("listbox").getByText("No matches.")).toBeVisible();
+    // the words follow the empty listbox in the popup this combobox opened, never sit in it (a listbox owns only
+    // options — Task 9's axe fix); the field points at them (final review I2)
+    const listId = (await itemCombo.getAttribute("aria-controls"))!;
+    const listbox = page.locator(`[id="${listId}"]`);
+    const popup = listbox.locator("xpath=..");
+    await expect(popup.getByText("No matches.", { exact: true })).toBeVisible();
+    // announced by the combobox's own live region beside the field (present before the list emptied; re-review I2)
+    await expect(itemCombo.locator("xpath=..").getByRole("status")).toHaveText("No matches.");
+    await expect(listbox.getByText("No matches.", { exact: true })).toHaveCount(0);
+    expect((await itemCombo.getAttribute("aria-describedby"))?.split(" ")).toContain(`${listId}-empty`);
 
     await page.goto(`/stock/items/${item.id}`);
     const restoreBtn = page.getByRole("button", { name: "Restore item" });

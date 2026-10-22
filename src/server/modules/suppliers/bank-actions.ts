@@ -33,12 +33,12 @@ export async function addBankAccount(input: unknown): Promise<ActionResult<{ id:
   const d = parsed.data;
 
   const vendor = await prisma.vendor.findUnique({ where: { id: d.vendorId } });
-  if (!vendor) return conflict("That supplier no longer exists.");
+  if (!vendor) return conflict("That vendor no longer exists.");
 
   const existing = await prisma.vendorBankAccount.findUnique({
     where: { vendorId_label: { vendorId: d.vendorId, label: d.label } },
   });
-  if (existing) return validationError({ label: "That label already exists on this supplier" });
+  if (existing) return validationError({ label: "That label already exists on this vendor" });
 
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -60,7 +60,7 @@ export async function addBankAccount(input: unknown): Promise<ActionResult<{ id:
     revalidatePath(`/purchases/suppliers/${d.vendorId}`);
     return ok({ id: created.id });
   } catch (e) {
-    if (isP2002(e)) return validationError({ label: "That label already exists on this supplier" });
+    if (isP2002(e)) return validationError({ label: "That label already exists on this vendor" });
     throw e;
   }
 }

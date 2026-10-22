@@ -25,6 +25,8 @@ export default async function AssetCategoriesPage() {
         rows={rows.map((r) => ({
           id: r.id, name: r.name, locked: r.locked, cls: r.cls,
           usage: `${r._count.types} types · ${r._count.assets} assets`,
+          // PO form redesign (spec §5): IT gear Purchasing created on a PO that IT hasn't confirmed yet
+          unconfirmed: r.confirmedAt === null,
         }))}
       />
     </>

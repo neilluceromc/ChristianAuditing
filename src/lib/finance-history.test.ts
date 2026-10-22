@@ -234,25 +234,25 @@ describe("change chips never show raw ids or codes", () => {
   const one = (e: AuditRow, names?: Record<string, string>) =>
     buildHistory([e], [], {}, { ...CTX, names }).rows[0];
 
-  it("a supplier change reads by name when the server resolved it", () => {
+  it("a vendor change reads by name when the server resolved it", () => {
     const r = one(vendor, { cmvendorold000001: "Octagon", cmvendornew000002: "Acme Trading" });
     expect(r.changes).toEqual([
       { field: "cost", from: "₱30,000.00", to: "₱36,000.00" },
-      { field: "supplier", from: "Octagon", to: "Acme Trading" },
+      { field: "vendor", from: "Octagon", to: "Acme Trading" },
     ]);
-    expect(r.verb).toBe("changed the cost, supplier");
+    expect(r.verb).toBe("changed the cost, vendor");
   });
 
   it("an id the server could not resolve drops its chip (the verb still names the field)", () => {
     const r = one(vendor);
     expect(r.changes).toEqual([{ field: "cost", from: "₱30,000.00", to: "₱36,000.00" }]);
     expect(JSON.stringify(r)).not.toContain("cmvendor");
-    expect(r.verb).toBe("changed the cost, supplier");
+    expect(r.verb).toBe("changed the cost, vendor");
   });
 
-  it("a cleared supplier reads — ", () => {
+  it("a cleared vendor reads — ", () => {
     const cleared = row({ id: "cmclr00000000clr1", action: "update", diff: { vendorId: { from: "cmvendorold000001", to: null } } });
-    expect(one(cleared, { cmvendorold000001: "Octagon" }).changes).toEqual([{ field: "supplier", from: "Octagon", to: "—" }]);
+    expect(one(cleared, { cmvendorold000001: "Octagon" }).changes).toEqual([{ field: "vendor", from: "Octagon", to: "—" }]);
   });
 
   it("statuses and classes use their labels", () => {

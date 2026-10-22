@@ -85,7 +85,7 @@ export default async function StockExpiryReportPage({
               state={state}
               extraParams={extra}
               label="Search the lots"
-              placeholder="Search item, reference, supplier…"
+              placeholder="Search item, reference, vendor…"
             />
             <ReportCategoryFacet basePath={BASE} state={state} options={report.facets.category} extraParams={extra} />
           </div>

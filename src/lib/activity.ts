@@ -18,7 +18,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "lifecycle.return executed": "Returned (approved request)",
   "lifecycle.change-status executed": "Status changed (approved request)",
   "reservation.placed": "Hold placed", "reservation.released": "Hold released",
-  "document.uploaded": "Document attached", "document.signed": "Document signed",
+  "document.uploaded": "Document attached", "document.signed": "Document signed", "document.superseded": "Document removed",
   // Phase 47: the shared asset notes and attachments
   "note.posted": "Note posted", "note.replied": "Note reply", "note.resolved": "Note resolved", "note.reopened": "Note reopened",
   "attachment.uploaded": "Attachment added",
@@ -26,7 +26,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "approval.requested": "Change requested", comment: "Comment", "unit-update": "Units updated",
   submit: "Submitted", "it-review": "IT review", "it-reject": "Returned by IT", "request-info": "Info requested",
   cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
-  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Supplier set",
+  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Vendor set",
   "depreciation.policy": "Depreciation policy", "depreciation.override": "Custom depreciation", "depreciation.override.cleared": "Custom depreciation cleared",
   // Finance follow-up (spec §3): undo within 15 minutes, and an admin's reopen
   "finance.confirm.undone": "Approval undone", "asset.return.undone": "Send-back undone",
@@ -36,6 +36,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "po.fix": "Fixed the money details", "po.cancel": "Cancelled the purchase order", "po.line-closed": "Closed a line short",
   "po.register": "Registered from the purchase order", "po.send-back.undone": "Send-back undone",
   "asset.money.fixed": "Fixed the money details",
+  // PO form redesign (spec §5): categories made on the PO form, and IT's confirm or replace at Register
+  "category.create": "Category added from a PO", "category.confirm": "Category confirmed", "category.replace": "Category replaced",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
@@ -53,8 +55,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "stock.category.created": "Stock category added", "stock.category.updated": "Stock category updated",
   "stock.category.archived": "Stock category archived", "stock.category.restored": "Stock category restored",
   "stocktake.opened": "Stocktake started", "stocktake.posted": "Stocktake posted", "stocktake.cancelled": "Stocktake cancelled",
-  "supplier.created": "Supplier added", "supplier.updated": "Supplier updated",
-  "supplier.archived": "Supplier archived", "supplier.restored": "Supplier restored",
+  "supplier.created": "Vendor added", "supplier.updated": "Vendor updated",
+  "supplier.archived": "Vendor archived", "supplier.restored": "Vendor restored",
   "supplier.bank.added": "Bank details added", "supplier.bank.removed": "Bank details removed", "supplier.bank.revealed": "Bank details viewed",
   signup: "Signed up", bootstrap: "First admin set up", "role-change": "Role changed",
   disable: "Account disabled", enable: "Account enabled",
@@ -68,13 +70,13 @@ export function actionLabel(action: string): string { return ACTION_LABELS[actio
 /** Phase 27 (spec §3.5): raw diff keys → words, shared by the `update` and `import-update` sentences. */
 export const FIELD_LABELS: Record<string, string> = {
   name: "name", model: "model", serial: "serial", cost: "cost", location: "location", notes: "notes",
-  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", assignee: "holder", vendorId: "supplier",
+  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", assignee: "holder", vendorId: "vendor",
   purchasedAt: "purchase date", warrantyUntil: "warranty end", loanDueAt: "loan due date",
   employeeNo: "employee number", email: "email", title: "title", employment: "employment", joinedAt: "join date",
   offboardingAt: "offboarding start", offboardingDueAt: "complete-by date",
   registeredName: "registered name", contactPerson: "contact person", phone: "phone", address: "address",
   invoiceRef: "SI number", receiptRef: "OR number",
-  registrationNo: "registration number", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
+  registrationNo: "VAT REG. TIN", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
   unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
   // Phase 40 §8: triage records Dispose/Donate's `reason` apart from Keep/Repair's optional `note`
   reason: "reason", note: "note",
@@ -111,7 +113,7 @@ const reasonTail = (reason: unknown) => (typeof reason === "string" && reason.tr
 const MONEY_FIX_FIELDS = ["vendorId", "invoiceRef", "receiptRef", "purchasedAt", "fees", "cost"] as const;
 type MoneyFixField = (typeof MONEY_FIX_FIELDS)[number];
 const MONEY_FIX_LABEL: Record<MoneyFixField, string> = {
-  vendorId: "supplier", invoiceRef: "SI number", receiptRef: "OR number", purchasedAt: "purchase date", fees: "fees", cost: "unit price",
+  vendorId: "vendor", invoiceRef: "SI number", receiptRef: "OR number", purchasedAt: "purchase date", fees: "fees", cost: "unit price",
 };
 /** A fix's diff key as a money field: a PO's per-line `line2.unitPrice` and a record's `unitCost` are the unit price too. */
 function moneyFixField(key: string): MoneyFixField | null {
@@ -132,7 +134,7 @@ export function moneyFixFields(diff: unknown): string {
   const labels = MONEY_FIX_FIELDS.filter((f) => found.has(f)).map((f) => MONEY_FIX_LABEL[f]);
   return labels.length ? wordList(labels) : "money details";
 }
-/** What an asset's fix changed, with the old and the new value: "the SI number from 0012 to 0021". A supplier is an id, so it is named only. */
+/** What an asset's fix changed, with the old and the new value: "the SI number from 0012 to 0021". A vendor is an id, so it is named only. */
 export function moneyFixChanges(diff: unknown): string {
   const d = (diff && typeof diff === "object" ? diff : {}) as Record<string, { from?: unknown; to?: unknown }>;
   const parts: string[] = [];
@@ -361,6 +363,27 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       const assets = typeof n === "number" && n > 0 ? plural(n, "asset") : "assets";
       return omitEntity ? `${actor}registered ${assets} from the purchase order` : `${actor}registered ${assets} from ${entry.entityLabel}`;
     }
+    // PO form redesign (spec §5): on the category (entityLabel is its name; a replaced one may be gone, so the diff names it)
+    case "category.create": {
+      const name = String(diff?.name?.to ?? entry.entityLabel);
+      const kind = diff?.cls?.to === "IT" ? "IT gear" : diff?.cls?.to === "PURCHASING" ? "an office item" : "a category";
+      return `${actor}added ${name} as ${kind} from a purchase order`;
+    }
+    case "category.confirm": {
+      const how = diff?.implicit?.to === true ? " by registering it" : "";
+      return omitEntity ? `${actor}confirmed the category${how}` : `${actor}confirmed the category ${entry.entityLabel}${how}`;
+    }
+    // On the purchase order (entityLabel is the PO number)
+    case "category.replace": {
+      const line = diff?.line?.to;
+      const where = typeof line === "number" ? `line ${line}` : "a line";
+      const from = diff?.category?.from;
+      const to = diff?.category?.to;
+      const change = typeof from === "string" && typeof to === "string" ? ` from ${from} to ${to}` : "";
+      return omitEntity
+        ? `${actor}changed the category on ${where}${change}`
+        : `${actor}changed the category on ${entry.entityLabel} ${where}${change}`;
+    }
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {
     // from: null, to } }` (transfer-actions.ts) — without this case the raw
@@ -569,6 +592,11 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       const doc = String(diff?.document?.to ?? "a document");
       return omitEntity ? `${actor}attached ${doc}` : `${actor}attached ${doc} to ${entry.entityLabel}`;
     }
+    case "document.superseded": {
+      // PO form redesign: Remove marks a PO's document superseded (it stays on record, out of its slot)
+      const doc = String(diff?.document?.from ?? "a document");
+      return omitEntity ? `${actor}removed ${doc}` : `${actor}removed ${doc} from ${entry.entityLabel}`;
+    }
     case "document.signed": {
       // the writer (inventory/document-actions.ts) keys this diff by the file name alone
       const fileName = diff ? Object.keys(diff)[0] ?? "a document" : "a document";
@@ -612,9 +640,9 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
     case "supplier-set": {
       const to = diff?.supplier?.to;
       if (to) {
-        return omitEntity ? `${actor}set ${String(to)} as the supplier` : `${actor}set ${String(to)} as the supplier on ${entry.entityLabel}`;
+        return omitEntity ? `${actor}set ${String(to)} as the vendor` : `${actor}set ${String(to)} as the vendor on ${entry.entityLabel}`;
       }
-      return omitEntity ? `${actor}cleared the supplier` : `${actor}cleared the supplier on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}cleared the vendor` : `${actor}cleared the vendor on ${entry.entityLabel}`;
     }
     // Phase 37 (spec §4.5, §4.6): notes and IT setup are written on the employee; the diff keeps the text / label.
     case "note.added":

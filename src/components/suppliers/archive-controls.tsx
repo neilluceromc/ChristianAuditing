@@ -17,8 +17,8 @@ export function ArchiveControls({ id, archived }: { id: string; archived: boolea
       <span className="inline-flex flex-col items-end gap-1">
         {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
         {error && <Banner tone="fault" title={error} />}
-        <Button loading={pending} onClick={() => run(() => restoreSupplier({ id }), "Supplier restored")}>
-          Restore supplier
+        <Button loading={pending} onClick={() => run(() => restoreSupplier({ id }), "Vendor restored")}>
+          Restore vendor
         </Button>
       </span>
     );
@@ -26,18 +26,18 @@ export function ArchiveControls({ id, archived }: { id: string; archived: boolea
 
   return (
     <>
-      <Button onClick={() => { reset(); setOpen(true); }}>Archive supplier</Button>
+      <Button onClick={() => { reset(); setOpen(true); }}>Archive vendor</Button>
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Archive this supplier?"
+        title="Archive this vendor?"
         footer={
           <>
             <Button onClick={() => setOpen(false)}>Cancel</Button>
             <Button
               variant="primary"
               loading={pending}
-              onClick={() => run(() => archiveSupplier({ id }), "Supplier archived", { onOk: () => setOpen(false) })}
+              onClick={() => run(() => archiveSupplier({ id }), "Vendor archived", { onOk: () => setOpen(false) })}
             >
               Archive
             </Button>

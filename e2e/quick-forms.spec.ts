@@ -339,23 +339,25 @@ test.describe.serial("quick forms", () => {
 
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
-    const price1 = page.getByLabel("Line 1 unit price");
+    // The A3 form (PO form redesign): one item card per line, its price "Item N unit price in pesos".
+    const field = (name: string) => page.getByRole("textbox", { name, exact: true });
+    const price1 = field("Item 1 unit price in pesos");
     await waitForHydration(price1);
 
     // Spec §7: Enter in a line with an empty description adds nothing.
     await price1.press("Enter");
-    await expect(page.getByLabel("Line 2 description")).toHaveCount(0);
+    await expect(field("Item 2 description")).toHaveCount(0);
     await expect(page).toHaveURL(/\/purchases\/new$/); // preventDefault: the form never submits
 
-    await page.getByLabel("Line 1 description").fill("E2E quick-forms line");
+    await field("Item 1 description").fill("E2E quick-forms line");
     await price1.press("Enter");
-    const description2 = page.getByLabel("Line 2 description");
+    const description2 = field("Item 2 description");
     await expect(description2).toBeVisible({ timeout: 10_000 });
     await expect(description2).toBeFocused();
 
     // The new line is itself description-less, so Enter in it adds no third.
-    await page.getByLabel("Line 2 unit price").press("Enter");
-    await expect(page.getByLabel("Line 3 description")).toHaveCount(0);
+    await field("Item 2 unit price in pesos").press("Enter");
+    await expect(field("Item 3 description")).toHaveCount(0);
 
     // Purchase orders have no drafts or autosave (migration 38): nothing is saved until Save, so no new row.
     expect(await db.purchaseOrder.count()).toBe(draftsBefore);
@@ -384,7 +386,7 @@ test.describe.serial("quick forms", () => {
     expect(await db.employee.count({ where: { employeeNo: "EMP-E2E-QF" } })).toBe(0);
   });
 
-  test("7. typing a seeded supplier's name warns in place, with a link to the record that already exists", async ({
+  test("7. typing a seeded vendor's name warns in place, with a link to the record that already exists", async ({
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /purchases/suppliers/new in this file
@@ -398,18 +400,18 @@ test.describe.serial("quick forms", () => {
     await page.goto("/purchases/suppliers/new");
     const name = page.getByLabel(/^Name\b/);
     await waitForHydration(name);
-    await expect(page.getByText(/^A supplier named/)).toHaveCount(0);
+    await expect(page.getByText(/^A vendor named/)).toHaveCount(0);
 
     await name.fill(supplier.name);
     // 400 ms debounce, then the read-only check — a state-based wait, not a sleep.
-    const banner = page.getByText(`A supplier named "${supplier.name}" already exists`, { exact: true });
+    const banner = page.getByText(`A vendor named "${supplier.name}" already exists`, { exact: true });
     await expect(banner).toBeVisible({ timeout: 20_000 });
     const open = page.getByRole("link", { name: "Open it" });
     await expect(open).toBeVisible();
     await expect(open).toHaveAttribute("href", `/purchases/suppliers/${supplier.id}`);
 
     // §7: the warning is a nudge, not a gate — the form is still fillable.
-    await expect(page.getByRole("button", { name: "Create supplier" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Create vendor" })).toBeEnabled();
   });
 
   test("8. the write-off dialog offers its chips prefilled Expired, and a return dialog's chips follow the outcome", async ({

@@ -223,7 +223,7 @@ export function CommandPalette({ destinations }: { destinations: NavDestination[
         { heading: "Assets", hits: results.assets, mono: true },
         { heading: "People", hits: results.people, mono: false },
         { heading: "Purchase orders", hits: results.requests, mono: true },
-        { heading: "Suppliers", hits: results.suppliers, mono: false },
+        { heading: "Vendors", hits: results.suppliers, mono: false },
         { heading: "Stock", hits: results.stock, mono: true },
         { heading: "Actions", hits: actions, mono: false },
       ].filter((g) => g.hits.length > 0),

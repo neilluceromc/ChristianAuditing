@@ -405,12 +405,12 @@ describe("Phase 27 (spec §3.5) — every action a feed can show reads as a sent
     expect(actionLabel("archive")).toBe("Ended or archived");
     expect(actionLabel("restore")).toBe("Restored");
   });
-  it("supplier set or cleared on a request", () => {
+  it("vendor set or cleared on a request (the action code keeps its old name)", () => {
     const pr = { ...base, entityLabel: "PR-0188" };
     expect(auditSentence({ ...pr, action: "supplier-set", diff: { supplier: { from: null, to: "TechServe PH" } } }))
-      .toBe("J. Sarmiento set TechServe PH as the supplier on PR-0188");
+      .toBe("J. Sarmiento set TechServe PH as the vendor on PR-0188");
     expect(auditSentence({ ...pr, action: "supplier-set", diff: { supplier: { from: "TechServe PH", to: null } } }))
-      .toBe("J. Sarmiento cleared the supplier on PR-0188");
+      .toBe("J. Sarmiento cleared the vendor on PR-0188");
   });
   it("update and import-update print human field names", () => {
     expect(auditSentence({ ...nina, action: "import-update", diff: { departmentId: { from: "d1", to: "d2" }, joinedAt: { from: "a", to: "b" } } }))
@@ -595,7 +595,7 @@ describe("Task 8 (spec §6) — purchase orders and money fixes read as sentence
       vendorId: { from: "v1", to: "v2" }, receiptRef: { from: null, to: "OR-9" }, purchasedAt: { from: null, to: "2026-10-01" },
       fees: { from: 0, to: 50 }, "line1.unitPrice": { from: 1, to: 2 }, "line2.unitPrice": { from: 3, to: 4 },
     }, undefined, "wrong figures")).toBe(
-      "Ana (Finance) fixed the supplier, OR number, purchase date, fees and unit price on PO-0214: 'wrong figures'",
+      "Ana (Finance) fixed the vendor, OR number, purchase date, fees and unit price on PO-0214: 'wrong figures'",
     );
   });
   it("po.fix without a reason has no dangling separator", () => {
@@ -608,11 +608,11 @@ describe("Task 8 (spec §6) — purchase orders and money fixes read as sentence
     expect(auditSentence({ actorLabel: "Ana (Finance)", action: "asset.money.fixed", diff: { invoiceRef: { from: "0012", to: "0021" } }, entityLabel: "BR-LT-0042", reason: "typo on receipt" }))
       .toBe("Ana (Finance) changed the SI number from 0012 to 0021 on BR-LT-0042: 'typo on receipt'");
   });
-  it("asset.money.fixed shows money, dates and empty values as words, and never a raw supplier id", () => {
+  it("asset.money.fixed shows money, dates and empty values as words, and never a raw vendor id", () => {
     expect(s("asset.money.fixed", { cost: { from: 30000, to: 36000 }, receiptRef: { from: null, to: "OR-9" } }, { omitEntity: true }))
       .toBe("Ana (Finance) changed the OR number from nothing to OR-9 and the unit price from ₱30,000.00 to ₱36,000.00");
-    expect(s("asset.money.fixed", { vendorId: { from: "cmv1", to: "cmv2" } }, { omitEntity: true }, "wrong supplier"))
-      .toBe("Ana (Finance) changed the supplier: 'wrong supplier'");
+    expect(s("asset.money.fixed", { vendorId: { from: "cmv1", to: "cmv2" } }, { omitEntity: true }, "wrong vendor"))
+      .toBe("Ana (Finance) changed the vendor: 'wrong vendor'");
     expect(s("asset.money.fixed", { purchasedAt: { from: "2026-09-30T00:00:00.000Z", to: "2026-10-01T00:00:00.000Z" } }, { omitEntity: true }))
       .toBe("Ana (Finance) changed the purchase date from 30 Sept 2026 to 01 Oct 2026");
   });
@@ -651,8 +651,8 @@ describe("Task 8 (spec §6) — purchase orders and money fixes read as sentence
   it("po.cancel, po.line-closed and po.register", () => {
     expect(s("po.cancel", { state: { from: "READY", to: "CANCELLED" } }, undefined, "Ordered by mistake", "Pia (Purchasing)"))
       .toBe("Pia (Purchasing) cancelled PO-0214: 'Ordered by mistake'");
-    expect(s("po.line-closed", { line: { from: null, to: "Dell Latitude" }, closedShort: { from: 1, to: 3 } }, undefined, "Supplier cancelled", "Pia (Purchasing)"))
-      .toBe("Pia (Purchasing) closed 2 of Dell Latitude short on PO-0214: 'Supplier cancelled'");
+    expect(s("po.line-closed", { line: { from: null, to: "Dell Latitude" }, closedShort: { from: 1, to: 3 } }, undefined, "Vendor cancelled", "Pia (Purchasing)"))
+      .toBe("Pia (Purchasing) closed 2 of Dell Latitude short on PO-0214: 'Vendor cancelled'");
     expect(s("po.register", { registered: { from: null, to: 3 }, group: { from: null, to: "g1" } }, undefined, null, "Ben (IT)"))
       .toBe("Ben (IT) registered 3 assets from PO-0214");
     expect(s("po.register", { registered: { from: null, to: 1 } }, { omitEntity: true }, null, "Ben (IT)"))
@@ -668,6 +668,34 @@ describe("Task 8 (spec §6) — purchase orders and money fixes read as sentence
     for (const code of ["po.save", "po.resubmit", "po.send-back", "po.send-back.undone", "po.fix", "po.cancel", "po.line-closed", "po.register", "asset.money.fixed"]) {
       expect(ACTION_LABELS[code], code).toBeTruthy();
       expect(s(code, null), code).not.toContain(code);
+    }
+  });
+});
+
+describe("PO form redesign (spec §5) — category create, confirm and replace read as sentences", () => {
+  const s = (action: string, diff: unknown, entityLabel: string, opts?: { omitEntity?: boolean }) =>
+    auditSentence({ actorLabel: "Pia (Purchasing)", action, diff, entityLabel }, opts);
+
+  it("category.create names the class it was added in", () => {
+    expect(s("category.create", { name: { from: null, to: "Switch" }, cls: { from: null, to: "IT" } }, "Switch"))
+      .toBe("Pia (Purchasing) added Switch as IT gear from a purchase order");
+    expect(s("category.create", { name: { from: null, to: "Whiteboard" }, cls: { from: null, to: "PURCHASING" } }, "Whiteboard"))
+      .toBe("Pia (Purchasing) added Whiteboard as an office item from a purchase order");
+  });
+  it("category.confirm says when registering confirmed it", () => {
+    expect(s("category.confirm", { confirmed: { from: false, to: true } }, "Switch")).toBe("Pia (Purchasing) confirmed the category Switch");
+    expect(s("category.confirm", { confirmed: { from: false, to: true }, implicit: { from: null, to: true } }, "Switch", { omitEntity: true }))
+      .toBe("Pia (Purchasing) confirmed the category by registering it");
+  });
+  it("category.replace names the line and both categories", () => {
+    const diff = { line: { from: null, to: 1 }, category: { from: "Network cable", to: "Switch" }, removed: { from: null, to: "Network cable" } };
+    expect(s("category.replace", diff, "PO-0215")).toBe("Pia (Purchasing) changed the category on PO-0215 line 1 from Network cable to Switch");
+    expect(s("category.replace", diff, "PO-0215", { omitEntity: true })).toBe("Pia (Purchasing) changed the category on line 1 from Network cable to Switch");
+  });
+  it("each has an Action facet label and never shows the raw code", () => {
+    for (const code of ["category.create", "category.confirm", "category.replace"]) {
+      expect(ACTION_LABELS[code], code).toBeTruthy();
+      expect(s(code, null, "X"), code).not.toContain(code);
     }
   });
 });

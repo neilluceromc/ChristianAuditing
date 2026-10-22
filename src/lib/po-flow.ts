@@ -14,6 +14,12 @@ export const PO_STATE_LABEL: Record<PoState, string> = {
   CANCELLED: "Cancelled",
 };
 
+/** Migration 39: how the PO was paid. Mirrors the Prisma enum PaidBy. */
+export const PAID_BY_LABEL: Record<"CREDIT_CARD" | "DEBIT_CARD", string> = {
+  CREDIT_CARD: "Credit card",
+  DEBIT_CARD: "Debit card",
+};
+
 /** Who may create and edit a PO (Purchasing writes it; admin is every party). Replaces the old DRAFT_ROLES. */
 export const PO_WRITE_ROLES: Role[] = ["purchasing_staff", "admin"];
 

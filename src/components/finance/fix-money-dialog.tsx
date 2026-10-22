@@ -127,10 +127,10 @@ function AssetMoneyDialog({
             />
           )}
         </FormField>
-        <FormField label="Supplier" error={fieldErrors.vendorId}>
+        <FormField label="Vendor" error={fieldErrors.vendorId}>
           {(p) => (
             <Select id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
-              <option value="">No supplier</option>
+              <option value="">No vendor</option>
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
           )}

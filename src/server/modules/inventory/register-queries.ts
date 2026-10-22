@@ -6,13 +6,26 @@ import { orderCategories, STOCK_STATUS } from "@/lib/register-catalog";
 export interface CatalogCategory {
   id: string; name: string; cls: AssetClass; tagPrefix: string | null; inStock: number;
   types: Array<{ id: string; name: string }>; models: KnownModel[];
+  /** False only for a category passed in `include` that IT hasn't confirmed yet (a PO line's own new IT category). */
+  confirmed: boolean;
 }
 
-/** Phase 34 (spec §4.1-4.2): the Register tab's cards, each with its stock count, types and known models. */
-export async function registerCatalog(classes: AssetClass[]): Promise<CatalogCategory[]> {
+/**
+ * Phase 34 (spec §4.1-4.2): the Register tab's cards, each with its stock count, types and known models.
+ * PO form redesign (spec §5b.6): an IT category Purchasing created from a PO is left out until IT confirms it —
+ * except the ids in `include`: the PO register page passes its lines' own categories, so a line's new IT category
+ * still brings its types and known models (the server asks for a type whenever the category has some).
+ */
+export async function registerCatalog(classes: AssetClass[], include: string[] = []): Promise<CatalogCategory[]> {
   const cats = await prisma.assetCategory.findMany({
-    where: { cls: { in: classes } },
-    select: { id: true, name: true, cls: true, tagPrefix: true, types: { select: { id: true, name: true }, orderBy: { name: "asc" } } },
+    where: {
+      cls: { in: classes },
+      OR: [{ confirmedAt: { not: null } }, ...(include.length ? [{ id: { in: include } }] : [])],
+    },
+    select: {
+      id: true, name: true, cls: true, tagPrefix: true, confirmedAt: true,
+      types: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+    },
   });
   const ids = cats.map((c) => c.id);
   const [stock, assets] = await Promise.all([
@@ -24,7 +37,7 @@ export async function registerCatalog(classes: AssetClass[]): Promise<CatalogCat
     }),
   ]);
   return orderCategories(cats).map((c) => ({
-    id: c.id, name: c.name, cls: c.cls, tagPrefix: c.tagPrefix, types: c.types,
+    id: c.id, name: c.name, cls: c.cls, tagPrefix: c.tagPrefix, types: c.types, confirmed: c.confirmedAt !== null,
     inStock: stock.filter((s) => s.categoryId === c.id && s.status === STOCK_STATUS[c.cls]).reduce((n, s) => n + s._count._all, 0),
     models: mergeKnownModels(
       assets.filter((a) => a.categoryId === c.id)

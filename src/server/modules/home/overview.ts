@@ -321,7 +321,7 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
   ]);
   const lowHref = stockLowHref();
   const suppliers = rankByLabel(
-    spend.map((r) => ({ at: r.at, amount: r.amount, label: r.supplier })), monthStartManila(now), "No supplier", SPEND_TOP,
+    spend.map((r) => ({ at: r.at, amount: r.amount, label: r.supplier })), monthStartManila(now), "No vendor", SPEND_TOP,
   );
 
   const kpis: KpiTile[] = [
@@ -373,8 +373,8 @@ export async function purchasingOverview(user: Viewer, now: Date = new Date()): 
     trend,
     makeUp: requestStateMakeUp(states),
     breakdown: {
-      title: "Spend this month by supplier",
-      sub: "Registered purchase orders · top 7 suppliers and Other",
+      title: "Spend this month by vendor",
+      sub: "Registered purchase orders · top 7 vendors and Other",
       rows: suppliers.map((r) => ({ label: r.label, value: cents(r.value) })),
       money: true,
     },

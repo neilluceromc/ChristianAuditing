@@ -8,6 +8,7 @@ import { groupDetail, groupUndoBanner, type GroupAsset } from "@/server/modules/
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { fieldLabels } from "@/lib/registration";
 import { poControls } from "@/lib/po-controls";
+import { PAID_BY_LABEL } from "@/lib/po-flow";
 import { previewKind } from "@/lib/finance-asset-page";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -16,6 +17,7 @@ import { DescriptionList } from "@/components/ui/description-list";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
+import { TotalsLadder } from "@/components/purchases/totals-ladder";
 import { FixMoneyButton } from "@/components/finance/fix-money-dialog";
 import { GroupDocsUpload, GroupReview, SendBackPoButton, type GroupReviewAsset } from "@/components/finance/group-review";
 import { PoSendBackUndoBanner } from "@/components/finance/po-undo-banner";
@@ -112,12 +114,13 @@ export default async function GroupReviewPage({
                       po: {
                         id: g.po.id, refNo: g.refNo!, vendorId: g.money.vendorId, invoiceRef: g.money.invoiceRef,
                         receiptRef: g.money.receiptRef, purchasedAt: day(g.money.purchasedAt), fees: g.money.fees,
+                        poNumber: g.money.poNumber, paidBy: g.money.paidBy, totals: g.money.totals, formV2: g.po.formV2,
                       },
                       lines: g.po.lines.map((l, i) => ({ id: l.id, index: i + 1, description: l.description, unitPrice: l.unitPrice })),
                     }}
                   />
                 )}
-                {controls.sendBack && <SendBackPoButton id={g.po.id} refNo={g.refNo!} />}
+                {controls.sendBack && <SendBackPoButton id={g.po.id} refNo={g.refNo!} formV2={g.po.formV2} fees={g.po.fees} />}
               </div>
             )}
             <CardBody className="flex flex-col gap-2">
@@ -134,17 +137,26 @@ export default async function GroupReviewPage({
                     label: "Purchase order",
                     value: g.po ? <Link href={`/purchases/${g.po.id}`} className="text-accent hover:underline">{g.refNo}</Link> : "None — registered directly",
                   },
-                  { label: "Supplier", value: text(g.money.supplier) },
+                  ...(g.po ? [{ label: "PO number", value: text(g.money.poNumber), mono: !!g.money.poNumber }] : []),
+                  { label: "Vendor", value: text(g.money.supplier) },
                   {
                     label: "SI number",
                     value: g.money.invoiceRef ? g.money.invoiceRef : <span className="text-[var(--st-fault-text)]">Missing</span>,
                     mono: true,
                   },
                   { label: "OR number", value: text(g.money.receiptRef), mono: true },
-                  { label: "Purchase date", value: g.money.purchasedAt ? fmtDate(g.money.purchasedAt) : "Not recorded" },
+                  { label: g.po ? "Invoice date" : "Purchase date", value: g.money.purchasedAt ? fmtDate(g.money.purchasedAt) : "Not recorded" },
+                  ...(g.po ? [{ label: "Paid by", value: g.money.paidBy ? PAID_BY_LABEL[g.money.paidBy] : "Not recorded" }] : []),
                   { label: "Registered", value: `${fmtDate(g.registeredAt)} by ${g.registeredBy} (${TEAM_LABEL[g.team]})` },
                 ]}
               />
+              {/* Spec §6: the totals Purchasing typed off the PO's sales invoice, and a note when they didn't add up. */}
+              {g.po && Object.values(g.money.totals).some((v) => v !== null) && (
+                <section aria-labelledby="group-invoice-totals" className="mt-2 flex flex-col gap-2 border-t border-border-faint pt-3">
+                  <h3 id="group-invoice-totals" className="text-[11px] font-medium uppercase tracking-[0.06em] text-fg-muted">Invoice totals</h3>
+                  <TotalsLadder totals={g.money.totals} totalsConsistent={g.money.totalsConsistent} lines={g.po.lines} />
+                </section>
+              )}
             </CardBody>
           </Card>
           <Card>
@@ -164,6 +176,9 @@ export default async function GroupReviewPage({
             <RequestDocumentsCard
               requestId={g.po.id}
               canUpload={g.po.state !== "CANCELLED"}
+              // a PO from the new form needs its sales invoice: the empty slot says Required, as on the PO page
+              invoiceRequired={g.po.formV2}
+              si={g.money.invoiceRef}
               docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy, at: d.at, downloadHref: d.downloadHref }))}
             />
           ) : (

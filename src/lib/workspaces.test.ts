@@ -263,11 +263,11 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
   });
   it("Purchasing, Finance and Admin groups", () => {
     expect(labels("purchasing", "purchasing_staff")).toEqual([
-      ["Home", "Purchase orders", "Suppliers", "Stock", "Assets", "Approvals", "Employees"],
+      ["Home", "Purchase orders", "Vendors", "Stock", "Assets", "Approvals", "Employees"],
       ["Activity", "Setup"],
     ]);
     expect(labels("finance", "finance_staff")).toEqual([
-      ["Home", "To review", "Assets", "Disposal", "Depreciation", "Approvals", "Purchases", "Suppliers", "Stock"],
+      ["Home", "To review", "Assets", "Disposal", "Depreciation", "Approvals", "Purchases", "Vendors", "Stock"],
       ["Reports"],
       ["Activity"],
     ]);
@@ -335,7 +335,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(counts("purchasing", "Assets")).toEqual({ "Sent back": "assetsSentBackPurchasing" });
     expect(counts("finance", "Purchases")).toEqual({ "Ready to register": "poReady" });
     // Phase 46 spec §4.3
-    expect(counts("purchasing", "Suppliers")).toEqual({ "Renewing soon": "suppliersRenewing" });
+    expect(counts("purchasing", "Vendors")).toEqual({ "Renewing soon": "suppliersRenewing" });
     expect(counts("purchasing", "Stock")).toEqual({ "Below reorder": "stockLow", Stocktakes: "stocktakesOverdue" });
     expect(counts("purchasing", "Approvals")).toEqual({ Open: "approvals" });
     expect(counts("finance", "Assets")).toEqual({ "To confirm · IT": "finToConfirmIt", "To confirm · Purchasing": "finToConfirmPurchasing" });
@@ -397,8 +397,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(pathAllowedForRole("/finance/disposal", "admin")).toBe(true);
     for (const role of ["it_staff", "purchasing_staff", "viewer"] as const) expect(pathAllowedForRole("/finance/disposal", role)).toBe(false);
   });
-  it("Purchasing Suppliers and Setup; Finance Purchases and its plain links", () => {
-    expect(item("purchasing", "purchasing_staff", "Suppliers").views.map((v) => v.href)).toEqual([
+  it("Purchasing Vendors and Setup; Finance Purchases and its plain links", () => {
+    expect(item("purchasing", "purchasing_staff", "Vendors").views.map((v) => v.href)).toEqual([
       "/purchases/suppliers", "/purchases/suppliers?renewing=30", "/purchases/suppliers/new", "/purchases/suppliers/import",
     ]);
     expect(item("purchasing", "purchasing_staff", "Setup")).toMatchObject({ href: "/admin/asset-categories" });
@@ -475,9 +475,9 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
   const views = (ws: WorkspaceId, role: Role, label: string) => item(ws, role, label).views.map((v) => [v.label, v.href]);
 
   it("Purchasing: Renewing soon, Below reorder, Approvals and Employees views", () => {
-    expect(views("purchasing", "purchasing_staff", "Suppliers")).toEqual([
-      ["All suppliers", "/purchases/suppliers"], ["Renewing soon", "/purchases/suppliers?renewing=30"],
-      ["New supplier", "/purchases/suppliers/new"], ["Import suppliers", "/purchases/suppliers/import"],
+    expect(views("purchasing", "purchasing_staff", "Vendors")).toEqual([
+      ["All vendors", "/purchases/suppliers"], ["Renewing soon", "/purchases/suppliers?renewing=30"],
+      ["New vendor", "/purchases/suppliers/new"], ["Import vendors", "/purchases/suppliers/import"],
     ]);
     expect(views("purchasing", "purchasing_staff", "Stock")).toEqual([
       ["Items", "/stock"], ["Below reorder", "/stock?low=1"], ["Receive stock", "/stock/receive"],
@@ -493,7 +493,7 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
     ]);
   });
 
-  it("Finance: Assets, Depreciation, Approvals, Suppliers and Stock views", () => {
+  it("Finance: Assets, Depreciation, Approvals, Vendors and Stock views", () => {
     expect(views("finance", "finance_staff", "Assets")).toEqual([
       ["All assets", "/finance/assets"],
       ["To confirm · IT", "/finance/assets?fin=with-finance"],
@@ -506,8 +506,8 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
     expect(views("finance", "finance_staff", "Approvals")).toEqual([
       ["Open", "/approvals"], ["Mine", "/approvals?tab=mine"], ["Closed", "/approvals?tab=closed"],
     ]);
-    expect(views("finance", "finance_staff", "Suppliers")).toEqual([
-      ["All suppliers", "/purchases/suppliers"], ["Active contracts", "/purchases/suppliers?contract=ACTIVE"],
+    expect(views("finance", "finance_staff", "Vendors")).toEqual([
+      ["All vendors", "/purchases/suppliers"], ["Active contracts", "/purchases/suppliers?contract=ACTIVE"],
       ["Expired contracts", "/purchases/suppliers?contract=EXPIRED"],
     ]);
     expect(views("finance", "finance_staff", "Stock")).toEqual([

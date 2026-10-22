@@ -1,16 +1,14 @@
 import type { Metadata } from "next";
-import type { AssetClass } from "@prisma/client";
 import { notFound, redirect } from "next/navigation";
 import { pageTitle } from "@/lib/page-title";
 import { purchaseRefFor } from "@/server/page-titles";
 import { requireRole } from "@/server/auth/guards";
 import { getPurchase } from "@/server/modules/purchases/queries";
-import { registerCatalog } from "@/server/modules/inventory/register-queries";
-import { canRegisterLine } from "@/lib/po-flow";
+import { poRegisterModel } from "@/server/modules/purchases/po-register-model";
 import { poControls } from "@/lib/po-controls";
 import { fmtDate } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
-import { PoRegisterForm, type PoRegisterLine } from "@/components/purchases/po-register-form";
+import { PoRegisterForm } from "@/components/purchases/po-register-form";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -36,26 +34,11 @@ export default async function RegisterFromPoPage({ params }: { params: Promise<{
   });
   if (!register) redirect(`/purchases/${id}`);
 
-  // Classes this person may register on this PO — what a legacy line's category may be picked from.
-  const classes = (["IT", "PURCHASING"] as AssetClass[]).filter((c) => canRegisterLine(user.role, c, po.state).ok);
-  const catalog = await registerCatalog(classes);
-
-  const lines: PoRegisterLine[] = po.units
-    .filter((u) => u.remaining > 0)
-    .map((u) => {
-      const verdict = u.cls
-        ? canRegisterLine(user.role, u.cls, po.state)
-        : classes.length > 0 ? { ok: true as const } : canRegisterLine(user.role, "IT", po.state);
-      return {
-        id: u.id, index: u.index, description: u.description, specs: u.specs,
-        categoryId: u.categoryId, categoryName: u.categoryName, cls: u.cls,
-        price: u.price, remaining: u.remaining, progressLabel: u.progressLabel,
-        blocked: verdict.ok ? null : verdict.why,
-      };
-    });
+  // The lines with units left and the catalog, which carries each line's own (even new) category (poRegisterModel).
+  const { lines, catalog } = await poRegisterModel(po, user.role);
 
   const facts = [
-    po.supplier?.name ?? "no supplier",
+    po.supplier?.name ?? "no vendor",
     po.invoiceRef ? `SI ${po.invoiceRef}` : "no SI number yet",
     po.purchasedAt ? `bought ${fmtDate(`${po.purchasedAt}T00:00:00Z`)}` : null,
   ].filter(Boolean).join(" · ");

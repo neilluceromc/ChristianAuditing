@@ -14,6 +14,8 @@ export const AUDIT_ACTIONS = [
   "lifecycle.assign", "lifecycle.return", "lifecycle.change-status", "lifecycle.replace", "lifecycle.triage",
   "lifecycle.transfer", "loan.due-changed", "reservation.placed", "reservation.released",
   "document.uploaded", "document.signed", "secret.created", "SECRET_READ",
+  // PO form redesign (spec §5b.1): a PO's document removed — marked superseded, never deleted (document-actions.ts)
+  "document.superseded",
   // Phase 47: the shared asset notes and attachments (src/server/modules/assets)
   "note.posted", "note.replied", "note.resolved", "note.reopened", "attachment.uploaded",
   // approvals: the queue's transitions and the worker
@@ -30,6 +32,9 @@ export const AUDIT_ACTIONS = [
   "po.save", "po.resubmit", "po.send-back", "po.fix", "po.cancel", "po.line-closed", "asset.money.fixed", "po.register",
   // Task 6 fix round 1: the sender takes a PO's send-back back within 15 minutes (po-actions.ts undoPoSendBack)
   "po.send-back.undone",
+  // PO form redesign (spec §5): a category created from the PO form (category-actions.ts); IT confirming a new IT
+  // category, or replacing it on a line, at Register (po-register.ts)
+  "category.create", "category.confirm", "category.replace",
   // people
   "employee.transferred", "employee.setup", "offboarding.completed", "acknowledgement.recorded",
   "note.added", "note.edited", "note.deleted",

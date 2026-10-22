@@ -26,7 +26,7 @@ import { SupplierDocumentsCard } from "@/components/suppliers/supplier-documents
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  return { title: pageTitle((await supplierNameFor(id)) ?? "Supplier") };
+  return { title: pageTitle((await supplierNameFor(id)) ?? "Vendor") };
 }
 
 export default async function SupplierProfilePage({
@@ -53,7 +53,7 @@ export default async function SupplierProfilePage({
         title={detail.name}
         breadcrumb={[
           { label: "Purchase orders", href: "/purchases" },
-          { label: "Suppliers", href: "/purchases/suppliers" },
+          { label: "Vendors", href: "/purchases/suppliers" },
           { label: detail.name },
         ]}
         badge={
@@ -68,7 +68,7 @@ export default async function SupplierProfilePage({
         actions={
           manage ? (
             <>
-              <ButtonLink href={`/purchases/suppliers/${id}/edit`}>Edit supplier</ButtonLink>
+              <ButtonLink href={`/purchases/suppliers/${id}/edit`}>Edit vendor</ButtonLink>
               <ArchiveControls id={id} archived={detail.archived} />
             </>
           ) : undefined
@@ -86,7 +86,7 @@ export default async function SupplierProfilePage({
                 { label: "Phone", value: detail.phone ?? "—" },
                 { label: "Email", value: detail.email ?? "—" },
                 { label: "Address", value: detail.address ?? "—" },
-                { label: "Registration no.", value: detail.registrationNo ?? "—" },
+                { label: "VAT REG. TIN", value: detail.registrationNo ?? "—" },
                 { label: "Notes", value: detail.notes ?? "—" },
               ]}
             />
@@ -130,7 +130,7 @@ export default async function SupplierProfilePage({
           <CardHeader title="Purchase orders" />
           <CardBody className="flex flex-col gap-3">
             {detail.requests.rows.length === 0 ? (
-              <p className="py-2 text-center text-xs text-fg-muted">No purchase orders name this supplier yet.</p>
+              <p className="py-2 text-center text-xs text-fg-muted">No purchase orders name this vendor yet.</p>
             ) : (
               <>
                 <Table>
@@ -172,7 +172,7 @@ export default async function SupplierProfilePage({
           <CardHeader title="Registered assets" />
           <CardBody className="flex flex-col gap-3">
             {detail.assets.rows.length === 0 ? (
-              <p className="py-2 text-center text-xs text-fg-muted">No assets are registered against this supplier.</p>
+              <p className="py-2 text-center text-xs text-fg-muted">No assets are registered against this vendor.</p>
             ) : (
               <>
                 <Table>

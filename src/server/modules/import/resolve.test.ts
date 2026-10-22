@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { refKey } from "@/lib/import-assets";
+import { matchHeaders, planAssetRows, refKey, type ImportOptions } from "@/lib/import-assets";
 import { nameDeptKey } from "@/lib/same-name";
 import { buildAssetRefs, buildEmployeeRefs, buildSupplierRefs } from "./resolve";
 
@@ -321,5 +321,34 @@ describe("buildSupplierRefs", () => {
   it("leaves a name with no stored vendor unresolved (undefined), for planSupplierRows to treat as a create", () => {
     const refs = buildSupplierRefs([{ id: "v-1", name: "TechServe PH" }]);
     expect(refs.byName.get(refKey("Harbor Logistics"))).toBeUndefined();
+  });
+});
+
+describe("buildAssetRefs — unconfirmed categories (PO form redesign, spec §5b.6)", () => {
+  // The importer is direct Register: IT gear Purchasing created on a PO form is usable on purchase orders only until IT
+  // confirms it, so its name resolves as unknown here — the resolver's normal "unknown-category" block.
+  const cats = [
+    { id: "cat-lt", name: "Laptops", cls: "IT" as const, confirmedAt: new Date("2026-01-01T00:00:00Z") },
+    { id: "cat-sw", name: "Switch", cls: "IT" as const, confirmedAt: null },
+  ];
+
+  it("leaves an unconfirmed category out of the name and class maps", () => {
+    const refs = buildAssetRefs(cats, [], [], [], [], []);
+    expect(refs.categories.get("laptops")).toBe("cat-lt");
+    expect(refs.categories.has("switch")).toBe(false);
+    expect(refs.categoryClass.has("cat-sw")).toBe(false);
+  });
+
+  it("a row naming only an unconfirmed category blocks as unknown-category; a confirmed one plans", () => {
+    const refs = buildAssetRefs(cats, [], [], [], [], []);
+    const header = matchHeaders(["Tag", "Model", "Serial", "Category"]);
+    const p = planAssetRows(
+      header,
+      [["BR-SW-0001", "USW-24", "SN-1", "switch"], ["BR-LT-0001", "T14", "SN-2", "Laptops"]],
+      refs,
+      {} as ImportOptions,
+    );
+    expect(p.rows[0]).toMatchObject({ kind: "blocked", cause: "unknown-category" });
+    expect(p.rows[1].kind).not.toBe("blocked");
   });
 });

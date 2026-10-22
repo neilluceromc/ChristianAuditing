@@ -223,7 +223,7 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     await expect(page).toHaveURL(new RegExp(`/inventory/${laptop.id}$`));
   });
 
-  test("6. /stock/receive loads with no open listbox; a click opens it; No supplier clears a chosen supplier", async ({ page }) => {
+  test("6. /stock/receive loads with no open listbox; a click opens it; No vendor clears a chosen vendor", async ({ page }) => {
     await login(page, PURCHASING);
     await page.goto("/stock/receive");
     // FormField label="Item" is `required`, so the accessible name carries the
@@ -234,14 +234,14 @@ test.describe("Phase 27 — activity feeds, audit sentences and the visible smal
     await item.click();
     await expect(page.getByRole("listbox")).toHaveCount(1);
     await page.keyboard.press("Escape");
-    const supplier = page.getByRole("combobox", { name: "Supplier" });
+    const supplier = page.getByRole("combobox", { name: "Vendor" });
     await supplier.click();
     const list = supplier.locator("xpath=following-sibling::ul");
-    await expect(list.getByRole("option").first()).toHaveText(/No supplier/);
+    await expect(list.getByRole("option").first()).toHaveText(/No vendor/);
     await list.getByRole("option").nth(1).click();
     await expect(supplier).not.toHaveValue("");
     await supplier.click();
-    await list.getByRole("option", { name: "No supplier" }).click();
+    await list.getByRole("option", { name: "No vendor" }).click();
     await expect(supplier).toHaveValue("");
     await expectNoSeriousAxe(page);
   });

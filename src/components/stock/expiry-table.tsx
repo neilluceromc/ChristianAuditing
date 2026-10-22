@@ -30,7 +30,7 @@ export function ExpiryTable({
               <Th>Item</Th>
               <Th>Lot date</Th>
               <Th>Reference</Th>
-              <Th>Supplier</Th>
+              <Th>Vendor</Th>
               <Th>Expires</Th>
               <Th>Days</Th>
               <Th align="right">Remaining</Th>

@@ -52,7 +52,7 @@ export function SupplierSameName({
   if (!match) return null;
 
   return (
-    <Banner tone="attention" title={`A supplier named "${match.name}" already exists`}>
+    <Banner tone="attention" title={`A vendor named "${match.name}" already exists`}>
       <Link href={`/purchases/suppliers/${match.id}`} className="underline">Open it</Link>
     </Banner>
   );

@@ -290,15 +290,17 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           ],
         },
         {
-          label: "Suppliers",
+          label: "Vendors",
           href: "/purchases/suppliers",
           icon: "suppliers",
+          // Spec §2.2 renamed the page; the palette still finds it by the word people used before.
+          also: ["Suppliers"],
           views: [
-            { label: "All suppliers", href: "/purchases/suppliers" },
+            { label: "All vendors", href: "/purchases/suppliers" },
             // Phase 46: contracts ending within 30 days (supplier-list.ts, RENEWING_DAYS).
             { label: "Renewing soon", href: "/purchases/suppliers?renewing=30", count: "suppliersRenewing" },
-            { label: "New supplier", href: "/purchases/suppliers/new", roles: ["admin", "purchasing_staff"] },
-            { label: "Import suppliers", href: "/purchases/suppliers/import", roles: ["admin", "purchasing_staff"] },
+            { label: "New vendor", href: "/purchases/suppliers/new", roles: ["admin", "purchasing_staff"] },
+            { label: "Import vendors", href: "/purchases/suppliers/import", roles: ["admin", "purchasing_staff"] },
           ],
         },
         {
@@ -431,11 +433,13 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
         },
         {
           // Spec §4.3 ruling: there is no "verified" field for bank details, so the views are the contract facet's.
-          label: "Suppliers",
+          label: "Vendors",
           href: "/purchases/suppliers",
           icon: "suppliers",
+          // Spec §2.2 renamed the page; the palette still finds it by the word people used before.
+          also: ["Suppliers"],
           views: [
-            { label: "All suppliers", href: "/purchases/suppliers" },
+            { label: "All vendors", href: "/purchases/suppliers" },
             { label: "Active contracts", href: "/purchases/suppliers?contract=ACTIVE" },
             { label: "Expired contracts", href: "/purchases/suppliers?contract=EXPIRED" },
           ],

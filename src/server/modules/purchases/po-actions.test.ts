@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 import { reasonError } from "@/lib/intake-rules";
 
 /*
@@ -17,14 +18,38 @@ const h = vi.hoisted(() => ({
   ops: [] as string[],
   revalidated: [] as string[],
   webhooks: [] as Array<{ event: string; data: Record<string, unknown> }>,
+  /** Stored files (the storage driver, faked), and every path deleted from it. */
+  objects: {} as Record<string, string>,
+  deleted: [] as string[],
+  /** The next requestDocument.create throws this (a failure inside the save's transaction). */
+  failDoc: null as Error | null,
+  /** Skip the PO-number pre-check this many times: another save took the number in between (a race). */
+  racePoCheck: 0,
+  /** The next revalidatePath throws this (a failure after the save's transaction committed). */
+  failRevalidate: null as Error | null,
+  /** Runs once after a transaction rolls back: another session's write that the rollback must not undo. */
+  afterRollback: null as (() => void) | null,
 }));
 
-vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
+vi.mock("next/cache", () => ({
+  revalidatePath: (p: string) => {
+    if (h.failRevalidate) {
+      const err = h.failRevalidate;
+      h.failRevalidate = null;
+      throw err;
+    }
+    h.revalidated.push(p);
+  },
+}));
 vi.mock("@/server/auth/guards", () => ({
   actionUser: async () => h.user,
   actionRole: async (...roles: string[]) => (h.user && roles.includes(h.user.role) ? h.user : null),
 }));
 vi.mock("@/server/rate-limit", () => ({ checkRate: async () => ({ allowed: true, retryAfterSec: 0 }) }));
+vi.mock("@/server/storage", () => ({
+  writeObject: async (relPath: string, bytes: Buffer) => { h.objects[relPath] = bytes.toString(); },
+  deleteObject: async (relPath: string) => { h.deleted.push(relPath); delete h.objects[relPath]; },
+}));
 vi.mock("@/server/webhooks/emit", () => ({
   emitWebhook: async (_tx: unknown, event: string, data: Record<string, unknown>) => { h.webhooks.push({ event, data }); },
 }));
@@ -63,6 +88,11 @@ vi.mock("@/server/db/client", () => {
       return rows(name).filter((x) => matches(x, where)).length;
     },
     create: async ({ data }: { data: R }) => {
+      if (name === "requestDocument" && h.failDoc) {
+        const err = h.failDoc;
+        h.failDoc = null;
+        throw err;
+      }
       const { lines, ...rest } = data as R & { lines?: { create: R[] } };
       const row: R = { id: `${name}-${++n}`, createdAt: new Date(), ...rest };
       rows(name).push(row);
@@ -93,15 +123,37 @@ vi.mock("@/server/db/client", () => {
   const $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("$");
     if (sql.includes("nextval")) return [{ nextval: BigInt(h.seq++) }];
+    if (sql.includes('"poNumber"')) {
+      // lower(btrim("poNumber")) = lower(btrim($1)) among POs that aren't CANCELLED, other than $2
+      if (h.racePoCheck > 0) { h.racePoCheck--; return []; }
+      const [num, except] = values as [string, string];
+      const key = (v: unknown) => String(v).trim().toLowerCase();
+      return rows("purchaseOrder")
+        .filter((p) => p.poNumber != null && p.state !== "CANCELLED" && p.id !== except && key(p.poNumber) === key(num))
+        .slice(0, 1).map((p) => ({ id: p.id, refNo: p.refNo }));
+    }
     h.ops.push(`lock:${values.join(",")}`);
     return [];
   };
   const client = Object.fromEntries(
     ["purchaseOrder", "purchaseOrderLine", "asset", "purchaseRecord", "noteEntry", "auditEntry", "notification",
-      "user", "vendor", "department", "assetCategory"].map((t) => [t, table(t)]),
+      "user", "vendor", "department", "assetCategory", "requestDocument"].map((t) => [t, table(t)]),
   ) as Record<string, ReturnType<typeof table>>;
   const full = { ...client, $queryRaw };
-  return { prisma: { ...full, $transaction: async (fn: (tx: typeof full) => Promise<unknown>) => fn(full) } };
+  // A throw rolls the transaction back, as Postgres would.
+  const $transaction = async (fn: (tx: typeof full) => Promise<unknown>) => {
+    const before = structuredClone(h.tables);
+    try {
+      return await fn(full);
+    } catch (err) {
+      h.tables = before;
+      const then = h.afterRollback;
+      h.afterRollback = null;
+      then?.();
+      throw err;
+    }
+  };
+  return { prisma: { ...full, $transaction } };
 });
 
 import {
@@ -160,30 +212,59 @@ const order = (extra: Row = {}) => ({
   vendorId: "v1", invoiceRef: "SI-0012", purchasedAt: "2026-10-15", lines: [line()], ...extra,
 });
 
+/** The owner's sales invoice (Review Focus 3): one laptop at ₱9,100.00, VAT inclusive. */
+const OWNER_TOTALS = {
+  totalSales: "9,100.00", lessVat: "975.00", netOfVat: "8,125.00", discount: "", amountDue: "8,125.00", addVat: "975.00",
+  totalAmountDue: "9,100.00",
+};
+/** A save from the new form: every required field filled in. */
+const v2Order = (extra: Row = {}) => order({
+  poNumber: "2025-0418", paidBy: "CREDIT_CARD", totals: OWNER_TOTALS,
+  lines: [line({ description: "Laptop", qty: 1, unit: "pc", unitPrice: 9100 })], ...extra,
+});
+const pdf = (name = "si.pdf") => new File(["%PDF-1.4 test"], name, { type: "application/pdf" });
+/** The new form's multipart save: the JSON payload plus its document slots. */
+function form(payload: unknown, files: Record<string, File | string> = { "doc:invoice": pdf() }) {
+  const fd = new FormData();
+  fd.set("payload", JSON.stringify(payload));
+  for (const [k, v] of Object.entries(files)) fd.set(k, v);
+  return fd;
+}
+const stored = () => Object.keys(h.objects);
+
 beforeEach(() => {
   h.user = PAT;
   h.seq = 214;
   h.ops = [];
   h.revalidated = [];
   h.webhooks = [];
+  h.objects = {};
+  h.deleted = [];
+  h.failDoc = null;
+  h.racePoCheck = 0;
+  h.failRevalidate = null;
+  h.afterRollback = null;
   h.tables = {
     user: [PAT, IVAN, ANA, ADA].map((u) => ({ ...u })),
     vendor: [{ id: "v1", name: "Octagon", archivedAt: null }, { id: "v2", name: "PC Express", archivedAt: null }],
     department: [{ id: "d1", name: "Operations", archivedAt: null }],
     assetCategory: [{ id: "cat-lt", name: "Laptops", cls: "IT" }, { id: "cat-ch", name: "Chairs", cls: "PURCHASING" }],
     purchaseOrder: [], purchaseOrderLine: [], asset: [], purchaseRecord: [], noteEntry: [], auditEntry: [], notification: [],
+    requestDocument: [],
   };
 });
 
 describe("savePurchaseOrder", () => {
   it("save routes by class: non-IT is READY with no bell, mixed is WITH_IT with one IT TO_CHECK", async () => {
-    const chairs = await savePurchaseOrder(order({ lines: [line({ description: "office chairs", categoryId: "cat-ch", qty: 4 })] }));
+    const chairs = await savePurchaseOrder(form(v2Order({
+      poNumber: "2025-0417", lines: [line({ description: "office chairs", categoryId: "cat-ch", qty: 4 })],
+    })));
     expect(chairs).toMatchObject({ ok: true, data: { refNo: "PO-0214", state: "READY" } });
     expect(t("notification")).toHaveLength(0);
 
-    const mixed = await savePurchaseOrder(order({
+    const mixed = await savePurchaseOrder(form(v2Order({
       lines: [line(), line({ description: "office chairs", categoryId: "cat-ch", qty: 4, unitPrice: 4500 })],
-    }));
+    })));
     expect(mixed).toMatchObject({ ok: true, data: { refNo: "PO-0215", state: "WITH_IT" } });
     expect(t("notification")).toHaveLength(1);
     expect(t("notification")[0]).toMatchObject({
@@ -383,6 +464,14 @@ describe("fixPurchaseOrder", () => {
     expect(h.ops.indexOf("lock:po1")).toBeGreaterThanOrEqual(0);
     expect(h.ops.indexOf("lock:po1")).toBeLessThan(h.ops.indexOf("read:purchaseOrder"));
     expect(h.ops.indexOf("lock:po1")).toBeLessThan(h.ops.indexOf("read:asset"));
+  });
+
+  it("a fix's notification names the vendor and the invoice date in the words the send-back checklist uses (Task 8)", async () => {
+    partlyApproved();
+    h.user = ANA;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { vendorId: "v2", purchasedAt: "2026-10-01" }, reason: "wrong invoice" });
+    expect(r.ok).toBe(true);
+    expect(t("notification")[0]).toMatchObject({ title: "Finance changed the vendor and invoice date on PO-0214" });
   });
 
   it("a line price fix flows to that line's assets as their cost", async () => {
@@ -763,5 +852,322 @@ describe("undoPoSendBack (Task 6 fix round 1: the send-back, undone as one actio
     });
     const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
     expect(r).toMatchObject({ message: "Can't undo: BR-LT-a2's review has changed since." });
+  });
+});
+
+describe("PO form redesign (A3): save with documents, PO number, totals, legacy rules", () => {
+  const errorsOf = (r: { ok: boolean; fieldErrors?: Record<string, string> }) => (r.ok ? {} : r.fieldErrors ?? {});
+  const p2002 = () => new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+    code: "P2002", clientVersion: "6", meta: { target: "PurchaseRequest_poNumber_live_key" },
+  });
+  /** PO-0214 from the new form: 5 laptops at ₱50,000, its typed totals adding up, and its sales invoice on file. */
+  function seedV2(extra: Row = {}) {
+    seedPo({
+      formV2: true, poNumber: "2025-0300", paidBy: "DEBIT_CARD",
+      totalSales: 250000, lessVat: 26785.71, netOfVat: 223214.29, discount: null, amountDue: 223214.29, addVat: 26785.71,
+      totalAmountDue: 250000, totalsConsistent: true, ...extra,
+    });
+    seedLine("ln1", { unit: "pc" });
+    t("requestDocument").push({ id: "doc-si", orderId: "po1", kind: "invoice", fileName: "si.pdf", path: "requests/po1/si.pdf", supersededAt: null });
+  }
+
+  it("a new PO needs every required field", async () => {
+    const r = await expectNothingWritten(() =>
+      savePurchaseOrder(form({ lines: [{ description: "Laptop", categoryId: "", qty: 0 }], totals: { totalAmountDue: "" } }, {})));
+    expect(r).toMatchObject({ kind: "validation" });
+    const errs = errorsOf(r);
+    for (const k of [
+      "vendorId", "poNumber", "invoiceRef", "purchasedAt", "paidBy", "totals.totalAmountDue", "doc:invoice",
+      "lines.0.categoryId", "lines.0.qty", "lines.0.unitPrice",
+    ]) {
+      expect(errs, k).toHaveProperty([k]);
+    }
+    expect(errs).toMatchObject({
+      poNumber: "Enter the purchase order number", paidBy: "Pick how it was paid",
+      "totals.totalAmountDue": "Enter the total amount due", "doc:invoice": "Attach the sales invoice",
+    });
+    expect(errorsOf(await savePurchaseOrder(form(v2Order({ lines: [] }))))).toHaveProperty(["lines"]);
+
+    // Everything filled in but no sales invoice: a plain object (no files) or a form without the invoice slot.
+    expect(await savePurchaseOrder(v2Order())).toMatchObject({ kind: "validation", fieldErrors: { "doc:invoice": "Attach the sales invoice" } });
+    const noSi = await savePurchaseOrder(form(v2Order(), { "doc:official-receipt": pdf("or.pdf") }));
+    expect(errorsOf(noSi)).toEqual({ "doc:invoice": "Attach the sales invoice" });
+    // A file that breaks the upload rules is refused on its slot, before anything is stored.
+    const bad = await savePurchaseOrder(form(v2Order(), { "doc:invoice": new File(["x"], "si.exe", { type: "application/x-msdownload" }) }));
+    expect(errorsOf(bad)).toHaveProperty(["doc:invoice"]);
+    expect(stored()).toEqual([]);
+    expect(t("purchaseOrder")).toEqual([]);
+  });
+
+  it("the owner's invoice saves READY→WITH_IT with totalsConsistent true", async () => {
+    const r = await savePurchaseOrder(form(v2Order({ poNumber: "  2025-0418 " }), { "doc:invoice": pdf(), "doc:warranty-slip": pdf("ws.pdf") }));
+    expect(r).toMatchObject({ ok: true, data: { refNo: "PO-0214", state: "WITH_IT" } });
+    const id = r.ok ? r.data.id : "";
+    const saved = t("purchaseOrder").find((p) => p.id === id)!;
+    expect(saved).toMatchObject({
+      formV2: true, poNumber: "2025-0418", paidBy: "CREDIT_CARD", invoiceRef: "SI-0012",
+      totalSales: 9100, lessVat: 975, netOfVat: 8125, discount: null, amountDue: 8125, addVat: 975, totalAmountDue: 9100,
+      totalsConsistent: true,
+    });
+    expect(saved.fees ?? null).toBeNull();
+    expect(t("purchaseOrderLine")).toEqual([expect.objectContaining({ orderId: id, unit: "pc", qty: 1, unitPrice: 9100 })]);
+    // the documents are written with the PO, each one stored
+    const docs = t("requestDocument");
+    expect(docs.map((d) => [d.orderId, d.kind, d.fileName, d.uploadedById])).toEqual([
+      [id, "invoice", "si.pdf", PAT.id], [id, "warranty-slip", "ws.pdf", PAT.id],
+    ]);
+    expect(docs.map((d) => d.path).sort()).toEqual(stored().sort());
+    // final review M3: the PO's id is minted before its files are stored, so a new PO's documents live under
+    // requests/<poId>/ like every other PO document
+    expect(id).not.toBe("");
+    expect(stored().every((p) => p.startsWith(`requests/${id}/`))).toBe(true);
+    expect(audits("document.uploaded")).toHaveLength(2);
+    expect(audits("document.uploaded").every((a) => a.entityId === id && a.source === "web")).toBe(true);
+    expect(t("notification")).toEqual([expect.objectContaining({ team: "IT", kind: "TO_CHECK", title: "PO-0214 · 1 Laptop from Purchasing to check" })]);
+
+    // An office-only order from the new form is ready to register; a unit other than pc is kept as typed.
+    const chairs = await savePurchaseOrder(form(v2Order({
+      poNumber: "2025-0419", lines: [line({ description: "office chairs", categoryId: "cat-ch", qty: 1, unit: " set ", unitPrice: 9100 })],
+    })));
+    expect(chairs).toMatchObject({ ok: true, data: { state: "READY" } });
+    expect(t("purchaseOrderLine")[1].unit).toBe("set");
+
+    // Editing a saved PO from the new form keeps its sales invoice: nothing to re-attach.
+    const lineId = t("purchaseOrderLine")[0].id;
+    const again = await savePurchaseOrder(v2Order({ id, lines: [line({ id: lineId, description: "Laptop", qty: 1, unitPrice: 9100 })], receiptRef: "OR-1" }));
+    expect(again).toMatchObject({ ok: true });
+    expect(t("purchaseOrder").find((p) => p.id === id)).toMatchObject({ receiptRef: "OR-1", totalsConsistent: true });
+  });
+
+  it("totals that don't add up still save, with totalsConsistent false", async () => {
+    const r = await savePurchaseOrder(form(v2Order({ totals: { ...OWNER_TOTALS, totalSales: "9,000.00" } })));
+    expect(r.ok).toBe(true);
+    expect(t("purchaseOrder")[0]).toMatchObject({ totalSales: 9000, totalsConsistent: false });
+
+    // An amount that isn't one is refused on its own key.
+    const bad = await savePurchaseOrder(form(v2Order({ poNumber: "2025-0420", totals: { ...OWNER_TOTALS, lessVat: "nine" } })));
+    expect(errorsOf(bad)).toHaveProperty(["totals.lessVat"]);
+    const neg = await savePurchaseOrder(form(v2Order({ poNumber: "2025-0420", totals: { ...OWNER_TOTALS, discount: "-5" } })));
+    expect(errorsOf(neg)).toHaveProperty(["totals.discount"]);
+  });
+
+  it("PO number duplicates are refused case- and space-insensitively", async () => {
+    expect((await savePurchaseOrder(form(v2Order({ poNumber: " ab-2025-0418" })))).ok).toBe(true);
+    expect(t("purchaseOrder")[0].poNumber).toBe("ab-2025-0418");
+
+    for (const typed of ["AB-2025-0418 ", "ab-2025-0418", "  Ab-2025-0418  "]) {
+      const r = await expectNothingWritten(() => savePurchaseOrder(form(v2Order({ poNumber: typed }))));
+      expect(r).toMatchObject({ kind: "validation", fieldErrors: { poNumber: `PO ${typed.trim()} is already used on PO-0214` } });
+    }
+    expect(stored()).toHaveLength(1); // the refused saves stored nothing
+
+    // Two saves at once: the pre-check passes for both, the partial unique index refuses the second.
+    h.racePoCheck = 1;
+    h.failDoc = p2002();
+    const raced = await savePurchaseOrder(form(v2Order({ poNumber: "AB-2025-0418" })));
+    expect(raced).toMatchObject({ kind: "validation", fieldErrors: { poNumber: "PO AB-2025-0418 is already used on PO-0214" } });
+    expect(t("purchaseOrder")).toHaveLength(1);
+    expect(stored()).toHaveLength(1);
+
+    // A cancelled PO frees its number.
+    expect((await cancelPurchaseOrder({ id: t("purchaseOrder")[0].id, reason: "ordered twice by mistake" })).ok).toBe(true);
+    expect((await savePurchaseOrder(form(v2Order({ poNumber: "AB-2025-0418" })))).ok).toBe(true);
+  });
+
+  it("a failure after storing files leaves nothing behind", async () => {
+    h.failDoc = new Error("connection reset");
+    const files = { "doc:invoice": pdf(), "doc:delivery-receipt": new File(["png"], "dr.png", { type: "image/png" }) };
+    await expect(savePurchaseOrder(form(v2Order(), files))).rejects.toThrow("connection reset");
+    // cleanup ran: both stored files were deleted, and the transaction left no PO, line, document or audit
+    expect(h.deleted).toHaveLength(2);
+    expect(stored()).toEqual([]);
+    for (const name of ["purchaseOrder", "purchaseOrderLine", "requestDocument", "auditEntry", "noteEntry", "notification"]) {
+      expect(t(name), name).toEqual([]);
+    }
+
+    const retry = await savePurchaseOrder(form(v2Order(), files));
+    expect(retry).toMatchObject({ ok: true });
+    expect(t("purchaseOrder")).toHaveLength(1);
+    expect(t("requestDocument")).toHaveLength(2);
+    expect(stored()).toHaveLength(2);
+  });
+
+  it("a legacy PO edits without the new fields", async () => {
+    seedPo({ state: "SENT_BACK", sentBackBy: "IT", sentBackById: IVAN.id, sentBackFields: ["invoiceRef"] });
+    seedLine("ln1");
+    t("purchaseOrder").push({ id: "po9", refNo: "PO-0209", state: "READY", poNumber: "2025-0500", formV2: true });
+    const edit = (extra: Row = {}) => order({ id: "po1", invoiceRef: "SI-0021", lines: [line({ id: "ln1" })], reply: "SI number corrected", ...extra });
+
+    // Filled in, a new field is still checked.
+    const taken = await expectNothingWritten(() => savePurchaseOrder(edit({ poNumber: " 2025-0500" })));
+    expect(taken).toMatchObject({ fieldErrors: { poNumber: "PO 2025-0500 is already used on PO-0209" } });
+    const cash = await expectNothingWritten(() => savePurchaseOrder(edit({ paidBy: "CASH" })));
+    expect(errorsOf(cash)).toHaveProperty(["paidBy"]);
+    const long = await expectNothingWritten(() => savePurchaseOrder(edit({ poNumber: "x".repeat(41) })));
+    expect(errorsOf(long)).toHaveProperty(["poNumber"]);
+
+    // Left out (or blank), they stay optional: no PO number, paid by, totals or sales invoice.
+    const r = await savePurchaseOrder(edit({ poNumber: "", paidBy: "", totals: { totalAmountDue: "" } }));
+    expect(r).toMatchObject({ ok: true, data: { state: "WITH_IT" } });
+    expect(po()).toMatchObject({ invoiceRef: "SI-0021", poNumber: null, paidBy: null, totalAmountDue: null, totalsConsistent: null });
+    expect(po().formV2 ?? false).toBe(false);
+    expect(po().fees).toBeNull(); // fees are left as they were
+
+    const typed = await savePurchaseOrder(order({ id: "po1", invoiceRef: "SI-0021", lines: [line({ id: "ln1" })], poNumber: " 2025-0501 " }));
+    expect(typed.ok).toBe(true);
+    expect(po().poNumber).toBe("2025-0501");
+  });
+
+  it("a PO from the new form keeps its required fields on edit", async () => {
+    seedV2();
+    const r = await expectNothingWritten(() =>
+      savePurchaseOrder(order({ id: "po1", lines: [line({ id: "ln1" })], poNumber: "", paidBy: "", totals: { totalAmountDue: "" } })));
+    expect(errorsOf(r)).toMatchObject({
+      poNumber: "Enter the purchase order number", paidBy: "Pick how it was paid", "totals.totalAmountDue": "Enter the total amount due",
+    });
+    // Its only sales invoice removed: the next save needs one attached.
+    t("requestDocument")[0].supersededAt = new Date();
+    const noSi = await savePurchaseOrder(order({
+      id: "po1", lines: [line({ id: "ln1" })], poNumber: "2025-0300", paidBy: "DEBIT_CARD", totals: { totalAmountDue: "250000" },
+    }));
+    expect(errorsOf(noSi)).toEqual({ "doc:invoice": "Attach the sales invoice" });
+  });
+
+  it("fix can change totalAmountDue and recomputes totalsConsistent", async () => {
+    seedV2();
+    h.user = IVAN;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { totalAmountDue: "250,100.00" }, reason: "invoice says 250,100" });
+    expect(r).toEqual({ ok: true, data: { refNo: "PO-0214", changed: ["totalAmountDue"] } });
+    expect(po()).toMatchObject({ totalAmountDue: 250100, totalsConsistent: false });
+    expect(audits("po.fix")[0].diff).toEqual({
+      totalAmountDue: { from: 250000, to: 250100 }, totalsConsistent: { from: true, to: false },
+    });
+    expect(t("notification")[0]).toMatchObject({ title: "IT changed the total amount due on PO-0214" });
+
+    // Back to the invoice's figure: consistent again; a price fix that moves the items off the totals: not.
+    h.user = PAT;
+    expect((await fixPurchaseOrder({ id: "po1", patch: { totalAmountDue: "250000" } })).ok).toBe(true);
+    expect(po().totalsConsistent).toBe(true);
+    expect((await fixPurchaseOrder({ id: "po1", patch: { lines: [{ id: "ln1", unitPrice: 48000 }] } })).ok).toBe(true);
+    expect(po().totalsConsistent).toBe(false);
+
+    // PO number and paid by are fixable money fields; the number is checked for clashes; required ones can't be cleared.
+    t("purchaseOrder").push({ id: "po9", refNo: "PO-0209", state: "READY", poNumber: "2025-0500" });
+    const clash = await expectNothingWritten(() => fixPurchaseOrder({ id: "po1", patch: { poNumber: "2025-0500 " } }));
+    expect(clash).toMatchObject({ fieldErrors: { "patch.poNumber": "PO 2025-0500 is already used on PO-0209" } });
+    const cleared = await expectNothingWritten(() => fixPurchaseOrder({ id: "po1", patch: { totalAmountDue: "" } }));
+    expect(errorsOf(cleared)).toEqual({ "patch.totalAmountDue": "Enter the total amount due" });
+    const fixed = await fixPurchaseOrder({ id: "po1", patch: { poNumber: " 2025-0301 ", paidBy: "CREDIT_CARD" } });
+    expect(fixed).toMatchObject({ ok: true, data: { changed: ["poNumber", "paidBy"] } });
+    expect(po()).toMatchObject({ poNumber: "2025-0301", paidBy: "CREDIT_CARD" });
+  });
+
+  it("IT and Finance can send back the PO number, paid by and the invoice totals", async () => {
+    seedV2();
+    h.user = IVAN;
+    const r = await sendBackPurchaseOrder({ id: "po1", fields: ["poNumber", "paidBy", "totals"], note: "totals don't match the invoice" });
+    expect(r.ok).toBe(true);
+    expect(po().sentBackFields).toEqual(["poNumber", "paidBy", "totals"]);
+    expect(t("notification")[0].title).toBe("PO-0214 sent back by IT: PO number, paid by and invoice totals");
+  });
+
+  it("closeLineShort leaves totalsConsistent as it is: the items are Σ qty × unit price, as on the paper invoice", async () => {
+    seedV2({ state: "READY" });
+    expect((await closeLineShort({ lineId: "ln1", qty: 2, reason: "vendor cancelled 2 units" })).ok).toBe(true);
+    expect(po().totalsConsistent).toBe(true);
+    expect(audits("po.line-closed")[0].diff).not.toHaveProperty("totalsConsistent");
+    // and a save after it still checks qty × unit price: 5 × ₱50,000 matches the invoice's ₱250,000
+    const seeded = {
+      totalSales: "250,000.00", lessVat: "26,785.71", netOfVat: "223,214.29", discount: "", amountDue: "223,214.29",
+      addVat: "26,785.71", totalAmountDue: "250,000.00",
+    };
+    const saved = await savePurchaseOrder(order({
+      id: "po1", lines: [line({ id: "ln1" })], receiptRef: "OR-9", poNumber: "2025-0300", paidBy: "DEBIT_CARD", totals: seeded,
+    }));
+    expect(saved.ok).toBe(true);
+    expect(po().totalsConsistent).toBe(true);
+  });
+
+  it("a throw after the transaction committed never cleans up the stored files", async () => {
+    h.failRevalidate = new Error("revalidation failed");
+    await expect(savePurchaseOrder(form(v2Order()))).rejects.toThrow("revalidation failed");
+    // the PO and its sales invoice committed, and the file they point at is still stored
+    expect(t("purchaseOrder")).toHaveLength(1);
+    expect(t("requestDocument")).toHaveLength(1);
+    expect(h.deleted).toEqual([]);
+    expect(stored()).toEqual([t("requestDocument")[0].path]);
+
+    // the same on an edit that attaches a document
+    const id = t("purchaseOrder")[0].id as string;
+    const lineId = t("purchaseOrderLine")[0].id;
+    h.failRevalidate = new Error("revalidation failed");
+    await expect(savePurchaseOrder(form(v2Order({ id, lines: [line({ id: lineId, description: "Laptop", qty: 1, unitPrice: 9100 })] }), {
+      "doc:official-receipt": pdf("or.pdf"),
+    }))).rejects.toThrow("revalidation failed");
+    expect(t("requestDocument")).toHaveLength(2);
+    expect(h.deleted).toEqual([]);
+    expect(stored()).toHaveLength(2);
+  });
+
+  it("an empty document slot is no file: sent as \"\" or as an empty file input", async () => {
+    const r = await savePurchaseOrder(form(v2Order(), {
+      "doc:invoice": pdf(), "doc:official-receipt": "", "doc:delivery-receipt": new File([], "", { type: "application/octet-stream" }),
+      "doc:warranty-slip": "",
+    }));
+    expect(r).toMatchObject({ ok: true });
+    expect(t("requestDocument").map((d) => d.kind)).toEqual(["invoice"]);
+    // an empty sales invoice slot on a new PO is "attach it", not "pick a file"
+    const none = await savePurchaseOrder(form(v2Order({ poNumber: "2025-0420" }), { "doc:invoice": "" }));
+    expect(errorsOf(none)).toEqual({ "doc:invoice": "Attach the sales invoice" });
+  });
+});
+
+describe("a category deleted while the form was open (Task 3 carried: IT replaced it at Register)", () => {
+  const GONE = "That category no longer exists — pick another";
+  const errorsOf = (r: { ok: boolean; fieldErrors?: Record<string, string> }) => (r.ok ? {} : r.fieldErrors ?? {});
+  const p2003 = (field: string) => new Prisma.PrismaClientKnownRequestError("Foreign key constraint violated", {
+    code: "P2003", clientVersion: "6", meta: { field_name: field },
+  });
+  const v2 = (extra: Row = {}) => order({
+    poNumber: "2025-0418", paidBy: "CREDIT_CARD", totals: { totalAmountDue: "9,100.00" },
+    lines: [line({ description: "Laptop", qty: 1, unitPrice: 9100 }), line({ description: "Network cable", categoryId: "cat-gone", qty: 1, unitPrice: 100 })],
+    ...extra,
+  });
+
+  it("is refused on that line's category, before anything is stored", async () => {
+    const r = await expectNothingWritten(() => savePurchaseOrder(form(v2())));
+    expect(r).toMatchObject({ kind: "validation" });
+    expect(errorsOf(r)).toEqual({ "lines.1.categoryId": GONE });
+    expect(stored()).toEqual([]);
+  });
+
+  it("deleted between the check and the write: the foreign key's refusal says the same, and the files are cleaned up", async () => {
+    h.failDoc = p2003("PurchaseUnit_categoryId_fkey (index)");
+    const r = await savePurchaseOrder(form(v2({ lines: [line({ description: "Laptop", qty: 1, unitPrice: 9100 })] })));
+    expect(r).toMatchObject({ kind: "validation", fieldErrors: { lines: GONE } });
+    expect(t("purchaseOrder")).toEqual([]);
+    expect(stored()).toEqual([]);
+
+    // final review M4: the category really went in between — the refusal names each line that used it
+    h.failDoc = p2003("PurchaseUnit_categoryId_fkey (index)");
+    h.afterRollback = () => { h.tables.assetCategory = t("assetCategory").filter((c) => c.id !== "cat-lt"); };
+    const named = await savePurchaseOrder(form(v2({
+      lines: [
+        line({ description: "Laptop", qty: 1, unitPrice: 9100 }),
+        line({ description: "office chairs", categoryId: "cat-ch", qty: 1, unitPrice: 100 }),
+        line({ description: "Spare laptop", qty: 1, unitPrice: 100 }),
+      ],
+    })));
+    expect(named).toMatchObject({ kind: "validation" });
+    expect(errorsOf(named)).toEqual({ "lines.0.categoryId": GONE, "lines.2.categoryId": GONE });
+    expect(t("purchaseOrder")).toEqual([]);
+    expect(stored()).toEqual([]);
+    t("assetCategory").push({ id: "cat-lt", name: "Laptops", cls: "IT" }); // back for the next case
+
+    // any other foreign-key refusal is not laundered into a category message
+    h.failDoc = p2003("RequestDocument_uploadedById_fkey (index)");
+    await expect(savePurchaseOrder(form(v2({ lines: [line({ description: "Laptop", qty: 1, unitPrice: 9100 })] }))))
+      .rejects.toThrow("Foreign key constraint violated");
+    expect(stored()).toEqual([]);
   });
 });

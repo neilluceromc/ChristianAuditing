@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { login } from "./fixtures/login";
+import { fillItem, fillMinimalPo, saveButton, savePo, waitForPoForm } from "./fixtures/po-form";
 
 /**
  * Purchase orders (migration 38, spec docs/superpowers/specs/2026-10-21-purchase-orders-intake-design.md §3): the list,
@@ -46,6 +47,15 @@ async function expectNoSeriousAxe(page: Page) {
 const toast = (page: Page, text: string | RegExp) => page.locator("[data-toast-id]").filter({ hasText: text });
 const header = (page: Page) => page.locator("main header").first();
 const poId = async (refNo: string) => (await db.purchaseOrder.findUniqueOrThrow({ where: { refNo } })).id;
+
+/** The A3 form's "For department" combobox: type the name, pick it (options carry an Internal/Client tag). */
+async function pickDepartment(page: Page, name: string) {
+  const box = page.getByRole("combobox", { name: /^For department/ });
+  await box.click();
+  await box.fill(name);
+  await page.getByRole("option", { name: new RegExp(`^${name}\\b`) }).first().click();
+  await expect(box).toHaveValue(name);
+}
 
 test.describe("purchase orders — ?state= tab contract & sidebar", () => {
   test("tabs write ?state=; the sidebar's Purchase orders views share the same highlight", async ({ page }) => {
@@ -155,15 +165,13 @@ test.describe("purchase orders — saving", () => {
   test("a missing price is refused in the form; nothing is sent", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/purchases/new");
-    const save = page.getByRole("button", { name: "Save", exact: true });
-    await waitForHydration(save);
+    await waitForPoForm(page);
     const before = await db.purchaseOrder.count();
 
-    await page.getByLabel("Line 1 description").fill("Docking stations");
-    await page.getByLabel("Line 1 category").selectOption({ label: "Other" });
+    await fillItem(page, 1, { description: "Docking stations", category: "Other", unitPrice: "" });
     // price deliberately left blank
-    await save.click();
-    await expect(page.getByText("Every line needs its unit price.")).toBeVisible();
+    await saveButton(page).click();
+    await expect(page.getByRole("article", { name: /^Item 1/ })).toContainText("Enter the unit price");
     await expect(page).toHaveURL(/\/purchases\/new$/);
     expect(await db.purchaseOrder.count()).toBe(before);
   });
@@ -171,30 +179,21 @@ test.describe("purchase orders — saving", () => {
   test("an IT line saves straight to IT; centavos survive the Decimal(12,2) round trip", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto("/purchases/new");
-    const save = page.getByRole("button", { name: "Save", exact: true });
-    await waitForHydration(save);
-
-    await page.getByRole("main").getByLabel("Supplier").selectOption({ label: "TechServe PH" });
-    await page.getByRole("main").getByLabel("SI number").fill("SI-50001");
-    await page.getByRole("main").getByLabel("Purchase date").fill("2026-10-19");
-    await page.getByRole("main").getByLabel("Department").selectOption({ label: "IT" });
-    await page.getByLabel("Line 1 description").fill("Wireless mice");
-    await page.getByLabel("Line 1 category").selectOption({ label: "Mouse" });
-    await page.getByLabel("Line 1 quantity").fill("3");
-    await page.getByLabel("Line 1 unit price").fill("1850.50");
-    await save.click();
-
-    await page.waitForURL(/\/purchases\/(?!new)[^/]+$/, { timeout: 30_000 });
-    id = new URL(page.url()).pathname.split("/").pop()!;
-    refNo = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
-    expect(refNo).toMatch(/^PO-\d{4}$/);
+    await fillMinimalPo(page, {
+      vendor: "TechServe PH", poNumber: "2026-50001", si: "SI-50001", date: "2026-10-19",
+      items: [{ description: "Wireless mice", category: "Mouse", qty: 3, unitPrice: "1850.50" }],
+      totalAmountDue: "5,551.50",
+    });
+    await pickDepartment(page, "IT");
+    ({ id, refNo } = await savePo(page));
     await expect(toast(page, `${refNo} saved`)).toBeVisible();
     // no drafts: saving sends IT gear to IT
     await expect(header(page)).toContainText("With IT");
 
-    // The edit form's price input reads straight from what Postgres holds: exactly "1850.5", not truncated or drifted.
+    // The edit form's price input reads straight from what Postgres holds: ₱1,850.50, not truncated or drifted (the
+    // A3 form shows it with its centavos and thousands separator).
     await page.goto(`/purchases/${id}/edit`);
-    await expect(page.getByLabel("Line 1 unit price")).toHaveValue("1850.5");
+    await expect(page.getByRole("textbox", { name: "Item 1 unit price in pesos", exact: true })).toHaveValue("1,850.50");
     const row = await db.purchaseOrder.findUniqueOrThrow({ where: { id }, include: { lines: true } });
     expect(row.state).toBe("WITH_IT");
     expect(row.invoiceRef).toBe("SI-50001");
@@ -206,10 +205,9 @@ test.describe("purchase orders — saving", () => {
     await page.goto(`/purchases/${id}`);
     await page.getByRole("link", { name: "Edit", exact: true }).click();
     await page.waitForURL(new RegExp(`/purchases/${id}/edit$`));
-    const save = page.getByRole("button", { name: "Save", exact: true });
-    await waitForHydration(save);
-    await page.getByLabel("Line 1 quantity").fill("4");
-    await save.click();
+    await waitForPoForm(page);
+    await page.getByRole("textbox", { name: "Item 1 quantity", exact: true }).fill("4");
+    await saveButton(page).click();
     await page.waitForURL(new RegExp(`/purchases/${id}$`), { timeout: 30_000 });
     await expect(page.locator("#unit-1")).toContainText("4");
     await expect(header(page)).toContainText("With IT");

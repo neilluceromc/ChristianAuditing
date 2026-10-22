@@ -23,7 +23,7 @@ export const SUPPLIER_IMPORT_HEADERS = [
   { key: "phone", labels: ["phone", "telephone", "mobile"], required: false, title: "Phone" },
   { key: "email", labels: ["email", "e-mail"], required: false, title: "Email" },
   { key: "address", labels: ["address"], required: false, title: "Address" },
-  { key: "registrationNo", labels: ["registration no", "registration number", "reg no", "tin"], required: false, title: "Registration no" },
+  { key: "registrationNo", labels: ["vat reg. tin", "vat reg tin", "registration no", "registration number", "reg no", "tin"], required: false, title: "VAT REG. TIN" },
   { key: "contractStatus", labels: ["contract status", "contract"], required: false, title: "Contract status" },
   { key: "contractStart", labels: ["contract start", "start date"], required: false, title: "Contract start" },
   { key: "contractEnd", labels: ["contract end", "end date", "expiry"], required: false, title: "Contract end" },

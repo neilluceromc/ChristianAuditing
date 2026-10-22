@@ -152,7 +152,7 @@ async function pageCount(page: Page): Promise<number> {
     case "/admin/users":
       return rows(main.getByText(/^No (disabled|active) accounts$/));
     case "/purchases/suppliers":
-      return rows(main.getByText("No suppliers match", { exact: true }));
+      return rows(main.getByText("No vendors match", { exact: true }));
     case "/admin/flags": {
       const switches = main.getByRole("switch");
       const empty = main.getByText("No unavailable flags", { exact: true });

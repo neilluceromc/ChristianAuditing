@@ -495,7 +495,7 @@ const SPECS: Record<BlockCause, BlockSpec> = {
     label: "Contract status not recognised",
     explain:
       `These rows carry a contract status that is not one of this system's four: ${VENDOR_CONTRACT_STATUSES.join(", ")}. ` +
-      "Leave the cell blank for a supplier with no contract.",
+      "Leave the cell blank for a vendor with no contract.",
     fix: { kind: "reupload", label: "Fix the file" },
   },
   "bad-email": {
@@ -515,12 +515,12 @@ const SPECS: Record<BlockCause, BlockSpec> = {
   // `/purchases/suppliers/[id]/edit` DOES let someone rename the colliding
   // record (there is no "asset's edit form" in this wizard at all).
   "duplicate-supplier-name": {
-    label: "Two suppliers already share this name",
+    label: "Two vendors already share this name",
     explain:
-      "Two supplier records already exist whose names differ only by letter case, so this import can't " +
+      "Two vendor records already exist whose names differ only by letter case, so this import can't " +
       "tell which one this row means. Rename one of them — to something differing by more than letter " +
       "case, or the rename lands on this same block — then re-upload.",
-    fix: { kind: "link", label: "Open suppliers", href: "/purchases/suppliers" },
+    fix: { kind: "link", label: "Open vendors", href: "/purchases/suppliers" },
   },
 
   // Phase 19 Task 6: the stock importer's own causes, from here down.

@@ -38,7 +38,7 @@ export function SupplierForm(props: Props) {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (props.mode === "new") {
-      run(() => createSupplier(form), "Supplier created", {
+      run(() => createSupplier(form), "Vendor created", {
         refresh: false,
         onOk: (data) => router.push(`/purchases/suppliers/${data.id}`),
       });
@@ -92,7 +92,7 @@ export function SupplierForm(props: Props) {
             {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
               value={form.address} onChange={(e) => set("address", e.target.value)} />}
           </FormField>
-          <FormField label="Registration no." error={fieldErrors.registrationNo}>
+          <FormField label="VAT REG. TIN" error={fieldErrors.registrationNo}>
             {(p) => <Input id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
               value={form.registrationNo} onChange={(e) => set("registrationNo", e.target.value)} />}
           </FormField>
@@ -135,7 +135,7 @@ export function SupplierForm(props: Props) {
       </Card>
       <div>
         <Button type="submit" variant="primary" loading={pending}>
-          {props.mode === "new" ? "Create supplier" : "Save changes"}
+          {props.mode === "new" ? "Create vendor" : "Save changes"}
         </Button>
       </div>
     </form>

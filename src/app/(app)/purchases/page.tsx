@@ -132,7 +132,7 @@ export default async function PurchasesPage({
           <ChipFilterRow
             chips={[
               ...(toRegister ? [{ label: "Purchasing can register", removeHref: hrefWithout(TO_REGISTER_PARAM) }] : []),
-              ...(supplier && supplierRow ? [{ label: `Supplier: ${supplierRow.name}`, removeHref: hrefWithout("supplier") }] : []),
+              ...(supplier && supplierRow ? [{ label: `Vendor: ${supplierRow.name}`, removeHref: hrefWithout("supplier") }] : []),
             ]}
             clearHref="/purchases"
           />
@@ -155,7 +155,7 @@ export default async function PurchasesPage({
               if (toRegister) parts.push("lines Purchasing can register");
               if (department === "none") parts.push("no department");
               else if (department) parts.push(`department "${departments.find((d) => d.id === department)?.name ?? department}"`);
-              if (supplier && supplierRow) parts.push(`supplier "${supplierRow.name}"`);
+              if (supplier && supplierRow) parts.push(`vendor "${supplierRow.name}"`);
               if (q) parts.push(`searching "${q}"`);
               return parts.length ? `Filtered to ${parts.join(", ")}.` : "Try clearing the filters.";
             })()}

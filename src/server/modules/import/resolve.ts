@@ -49,6 +49,8 @@ interface CategoryRow {
   id: string;
   name: string;
   cls: AssetClass;
+  /** PO form redesign (spec §5b.6): null = IT gear Purchasing created on a PO form that IT hasn't confirmed yet. */
+  confirmedAt?: Date | null;
 }
 interface TypeRow {
   id: string;
@@ -120,6 +122,9 @@ export function buildAssetRefs(
   byTagRows: RawRecord[],
   bySerialRows: (RawRecord & { serial: string | null })[],
 ): AssetRefs {
+  // PO form redesign (spec §5b.6, controller ruling): the importer is direct Register — an unconfirmed category is
+  // usable on purchase orders only, so here its name resolves as unknown ("unknown-category"), as any unknown name does.
+  const usable = categories.filter((c) => c.confirmedAt !== null);
   // Employee.name is NOT unique (only employeeNo is), so a name matching more
   // than one employee must resolve `ambiguous: true` and block, rather than
   // silently keeping whichever row the map happened to insert last. Two
@@ -150,7 +155,7 @@ export function buildAssetRefs(
   }
 
   return {
-    categories: buildCollisionMap(categories, (c) => refKey(c.name)),
+    categories: buildCollisionMap(usable, (c) => refKey(c.name)),
     // Composite key: `${categoryId}:${refKey(name)}` — AssetType is only
     // unique PER CATEGORY, so the collision guard is scoped the same way:
     // "Standard" under two different categories is not a collision, but
@@ -168,7 +173,7 @@ export function buildAssetRefs(
     // refKey'd name map above — planAssetRows already has the resolved
     // categoryId by the time it checks class, so no case-collision handling
     // is needed here (id, unlike a refKey'd name, is never case-ambiguous).
-    categoryClass: new Map(categories.map((c) => [c.id, c.cls])),
+    categoryClass: new Map(usable.map((c) => [c.id, c.cls])),
   };
 }
 
@@ -205,7 +210,7 @@ export async function resolveAssetRefs(tags: string[], serials: string[]): Promi
   const upperTags = tags.map(tagKey);
 
   const [categories, types, employees, vendors, byTagRows, bySerialRows] = await Promise.all([
-    prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } }),
+    prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true, confirmedAt: true }, orderBy: { name: "asc" } }),
     // Categories AND names, never a flat name→id map: AssetType is
     // `@@unique([categoryId, name])`, not globally unique, so two categories
     // can each have their own same-named type and a flat key would silently

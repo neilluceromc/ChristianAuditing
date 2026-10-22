@@ -223,10 +223,10 @@ describe("BLOCK_CAUSES", () => {
   // wizard). Unlike a Vendor reference on an asset row, a supplier's own
   // name CAN be renamed — on the suppliers page — so this gets a link, not
   // an option.
-  it("sends duplicate-supplier-name to the suppliers page with copy that is true for a supplier row", () => {
+  it("sends duplicate-supplier-name to the vendors page with copy that is true for a vendor row", () => {
     const spec = blockSpec("duplicate-supplier-name");
-    expect(spec.label).toBe("Two suppliers already share this name");
-    expect(spec.fix).toEqual({ kind: "link", label: "Open suppliers", href: "/purchases/suppliers" });
+    expect(spec.label).toBe("Two vendors already share this name");
+    expect(spec.fix).toEqual({ kind: "link", label: "Open vendors", href: "/purchases/suppliers" });
     expect(spec.explain).not.toMatch(/optional/i);
     expect(spec.explain).not.toMatch(/asset/i);
   });

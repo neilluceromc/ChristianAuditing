@@ -23,6 +23,8 @@ export interface RefRow {
   locked: boolean;
   categoryName?: string; // types only
   cls?: AssetClass; // categories only
+  /** Categories only: created on a PO form as IT gear and not yet confirmed by IT ("New · from a PO"). */
+  unconfirmed?: boolean;
 }
 
 /** One table design serves all three reference screens (README 4c): inline add row, locked rows, in-use delete refusal. */
@@ -176,7 +178,10 @@ export function RefTable({
                       onBlur={() => setRenaming(null)}
                     />
                   ) : (
-                    <span className="text-[12.5px] text-fg">{row.name}</span>
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span className="text-[12.5px] text-fg">{row.name}</span>
+                      {row.unconfirmed && <Pill tone="accent">New · from a PO</Pill>}
+                    </span>
                   )}
                 </Td>
                 {isCategory && <Td mono className="text-[10.5px]">{row.cls && CLASS_LABEL[row.cls].toUpperCase()}</Td>}
