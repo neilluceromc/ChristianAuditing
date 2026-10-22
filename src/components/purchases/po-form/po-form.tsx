@@ -334,8 +334,10 @@ export function PoForm({
       <div className="flex flex-col gap-5 min-[900px]:flex-row min-[900px]:items-start">
         <SectionRail done={done} className="shrink-0 min-[900px]:sticky min-[900px]:top-5 min-[900px]:w-[210px]" />
 
+        {/* The cards' basis (420px) keeps the totals column beside them from a 1280px laptop with the app sidebar and
+            the rail open (420 + 20 + 300 fits the 758px left there); narrower, the totals wrap under the cards. */}
         <div className="flex min-w-0 flex-1 flex-wrap items-start gap-5">
-          <div className="flex min-w-0 flex-[999_1_540px] flex-col gap-4">
+          <div className="flex min-w-0 flex-[999_1_420px] flex-col gap-4">
             <VendorCard
               vendors={vendors} vendorId={draft.vendorId} onChange={(id) => set("vendorId", id)}
               error={fieldErrors.vendorId} flagged={flagged("vendorId")}
