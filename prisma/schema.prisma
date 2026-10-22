@@ -213,6 +213,7 @@ model User {
   notificationsActed       Notification[]          @relation("notificationActor")
   notificationReads        NotificationRead[]
   categoriesCreated        AssetCategory[]         @relation("categoriesCreated")
+  requestDocumentsSuperseded RequestDocument[]     @relation("requestDocumentsSuperseded")
 }
 
 model UserPreference {
@@ -265,8 +266,9 @@ model AssetCategory {
   depreciationLifeMonths     Int?
   depreciationSalvagePercent Decimal?    @db.Decimal(5, 2)
   /// Migration 39 (spec §5): null = an IT category Purchasing created from a PO that IT hasn't confirmed yet
-  /// (usable on PO forms only). Existing categories were backfilled as confirmed.
-  confirmedAt DateTime?
+  /// (usable on PO forms only). Existing categories were backfilled as confirmed; every other create path is
+  /// confirmed by the default (migration 39b), so createCategoryFromPo passes `confirmedAt: null` for IT explicitly.
+  confirmedAt DateTime?   @default(now())
   createdById String?
   createdBy   User?       @relation("categoriesCreated", fields: [createdById], references: [id], onDelete: SetNull)
   types     AssetType[]
@@ -378,6 +380,7 @@ model RequestDocument {
   /// Migration 39 (spec §5b.1): Remove marks a document superseded instead of deleting it (append-only).
   supersededAt   DateTime?
   supersededById String?
+  supersededBy   User?         @relation("requestDocumentsSuperseded", fields: [supersededById], references: [id], onDelete: Restrict)
 
   @@index([orderId])
 }

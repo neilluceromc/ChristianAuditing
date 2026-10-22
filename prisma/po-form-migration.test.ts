@@ -54,3 +54,35 @@ describe("migration 20261023090000_po_form_fields", () => {
     expect(sql).not.toMatch(/(CREATE|DROP|ALTER)\s+(OR\s+REPLACE\s+)?TRIGGER/i);
   });
 });
+
+/** Migration 39b (fix round 1): defaults, the supersede FK and the sanity checks. */
+const file2 = fileURLToPath(new URL("./migrations/20261023091000_po_form_defaults/migration.sql", import.meta.url));
+const sql2 = existsSync(file2) ? readFileSync(file2, "utf8") : "";
+
+describe("migration 20261023091000_po_form_defaults", () => {
+  it("exists", () => expect(existsSync(file2)).toBe(true));
+
+  it("confirms every category created anywhere else by default", () => {
+    expect(sql2).toContain(`ALTER TABLE "AssetCategory" ALTER COLUMN "confirmedAt" SET DEFAULT CURRENT_TIMESTAMP;`);
+  });
+
+  it("links who superseded a document, RESTRICT like uploadedById", () => {
+    expect(sql2).toMatch(
+      /"RequestDocument_supersededById_fkey" FOREIGN KEY \("supersededById"\) REFERENCES "User"\("id"\) ON DELETE RESTRICT/,
+    );
+  });
+
+  it.each(["totalSales", "lessVat", "netOfVat", "discount", "amountDue", "addVat", "totalAmountDue"])(
+    "keeps %s non-negative",
+    (k) => expect(sql2).toContain(`ADD CONSTRAINT "PurchaseRequest_${k}_nonneg" CHECK ("${k}" IS NULL OR "${k}" >= 0)`),
+  );
+
+  it("refuses a blank unit", () => {
+    expect(sql2).toContain(`ADD CONSTRAINT "PurchaseUnit_unit_nonblank" CHECK (length(btrim("unit")) >= 1)`);
+  });
+
+  it("drops nothing and touches no trigger", () => {
+    expect(sql2).not.toMatch(/\bDROP\b/);
+    expect(sql2).not.toMatch(/(CREATE|DROP|ALTER)\s+(OR\s+REPLACE\s+)?TRIGGER/i);
+  });
+});
