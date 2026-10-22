@@ -20,7 +20,7 @@ export function Dialog({
   children: React.ReactNode;
   footer?: React.ReactNode;
   /**
-   * "viewer": a document viewer (the file Preview): full screen on a phone, about 90vw × 85vh from `sm` up. The title,
+   * "viewer": a document viewer (the file Preview): full screen on a phone, about 90vw Ã— 85vh from `sm` up. The title,
    * `description` and `headerActions` sit in a header bar that never scrolls away, and `children` fill the rest.
    * Focus starts on the panel itself (it is named by the title), so Tab reaches the actions before a framed PDF.
    */

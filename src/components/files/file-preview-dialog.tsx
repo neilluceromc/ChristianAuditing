@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { previewKindOf, uploadedLine } from "@/lib/file-preview";
+import { frameLoadFailed, previewKindOf, uploadedLine, type FrameSeen } from "@/lib/file-preview";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog } from "@/components/ui/dialog";
@@ -32,16 +32,27 @@ const FAILED = "Couldn't load this file";
 const UNSUPPORTED = "This file type can't be shown here";
 
 /**
- * A route that refuses (a 404 for a missing object, a sign-in redirect) answers with text or a page, never the file:
- * a same-origin frame whose document is text/plain or text/html did not get its PDF. A PDF viewer's document reports
- * application/pdf, and a frame that can't be read is left alone.
+ * What a loaded frame lets the page read, for `frameLoadFailed` (src/lib/file-preview.ts): the same-origin document's
+ * type and the frame's path. A cross-origin or unreadable frame gives null, which never counts as failed. (Browsers
+ * fire no `error` on a frame for an HTTP error, so `load` is the only place to look.)
  */
-function frameFailed(frame: HTMLIFrameElement): boolean {
+function readFrame(frame: HTMLIFrameElement): FrameSeen {
   try {
-    const type = frame.contentDocument?.contentType ?? "";
-    return type === "text/plain" || type === "text/html";
+    const doc = frame.contentDocument;
+    if (!doc) return null;
+    return { contentType: doc.contentType || null, pathname: frame.contentWindow?.location.pathname ?? null };
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** The inline URL's path, to tell a redirect (sign-in) from the file; none for a held file's object URL. */
+function pathOf(inlineHref: string): string | null {
+  if (inlineHref.startsWith("blob:")) return null;
+  try {
+    return new URL(inlineHref, window.location.href).pathname;
+  } catch {
+    return null;
   }
 }
 
@@ -68,12 +79,12 @@ export function FilePreviewDialog({ open, onClose, ...file }: PreviewFile & { op
       onClose={close}
       size="viewer"
       title={title ?? fileName}
-      description={(
+      description={title || line ? (
         <>
           {title && <p className="truncate" title={fileName}>{fileName}</p>}
           {line && <p>{line}</p>}
         </>
-      )}
+      ) : undefined}
       headerActions={(
         <>
           {shown && <ButtonLink native newTab size="sm" href={inlineHref}>Open in new tab</ButtonLink>}
@@ -86,8 +97,7 @@ export function FilePreviewDialog({ open, onClose, ...file }: PreviewFile & { op
         <iframe
           title={fileName}
           src={inlineHref}
-          onLoad={(e) => { if (frameFailed(e.currentTarget)) fail(); }}
-          onError={fail}
+          onLoad={(e) => { if (frameLoadFailed(readFrame(e.currentTarget), pathOf(inlineHref))) fail(); }}
           className="block min-h-0 w-full flex-1 border-0 bg-surface-subtle"
         />
       ) : shown ? (
@@ -149,6 +159,7 @@ export function HeldPreviewButton({ file, title, describedBy }: { file: File; ti
   }, []);
 
   function open() {
+    if (current.current) URL.revokeObjectURL(current.current);
     const next = URL.createObjectURL(file);
     current.current = next;
     setUrl(next);

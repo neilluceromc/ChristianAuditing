@@ -173,7 +173,7 @@ export function RequestDocumentsCard({
                 key={slot} kind={slot} required={invoiceRequired && slot === "invoice"} si={si ?? ""}
                 shown={doc ? {
                   fileName: doc.fileName,
-                  detail: uploadedLine(doc.uploadedAt, doc.uploadedBy) ?? "",
+                  detail: uploadedLine(doc.uploadedAt, doc.uploadedBy),
                   preview: { href: doc.downloadHref, inlineHref: `${doc.downloadHref}?inline=1`, uploadedAt: doc.uploadedAt, uploadedBy: doc.uploadedBy },
                 } : null}
                 onPick={canUpload ? (file) => storeInSlot(slot, file) : undefined}

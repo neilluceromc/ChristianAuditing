@@ -68,6 +68,12 @@ describe("RequestDocumentsCard (the PO page)", () => {
     expect(other).toContain('aria-label="Document file"');
   });
 
+  it("a slot document with no upload time: no empty line under its name", () => {
+    const html = render({ docs: [{ ...row("d9", "invoice", "si.pdf"), uploadedAt: "" }] });
+    expect(html).not.toMatch(/<span[^>]*title=""[^>]*><\/span>/);
+    expect(html).not.toContain("Uploaded");
+  });
+
   it("an empty sales invoice slot is Required on a PO from the new form, and names the SI number", () => {
     const t = text(render({ docs: [] }));
     expect(t).toContain("Sales invoice Required The page with № 44511.");

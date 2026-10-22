@@ -92,7 +92,7 @@ export function FormTab({
           </>
         )}
       </p>
-      {latest && (
+      {latest && uploadedLine(latest.uploadedAt, latest.uploadedBy) && (
         <p className="-mt-2 pl-3.5 text-[11px] text-fg-muted">{uploadedLine(latest.uploadedAt, latest.uploadedBy)}</p>
       )}
       {status.since && (
@@ -115,9 +115,10 @@ export function FormTab({
           <div className="flex flex-col gap-1.5 border-t border-border-faint px-3 py-2.5">
             {history.map((row) => {
               const n = itemCount(row.items);
+              const line = uploadedLine(row.uploadedAt, row.uploadedBy);
               return (
                 <p key={row.id} className="text-[11px] text-fg-secondary">
-                  {fmtDate(row.signedAt)} · {n} item{plural(n)} · {uploadedLine(row.uploadedAt, row.uploadedBy)} ·{" "}
+                  {fmtDate(row.signedAt)} · {n} item{plural(n)} ·{line && ` ${line} ·`}{" "}
                   <PreviewForm employeeId={employeeId} row={row} /> ·{" "}
                   <a href={download(employeeId, row.id)} className="text-accent hover:underline">Download</a>
                 </p>

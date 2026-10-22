@@ -11,7 +11,7 @@ vi.mock("@/components/ui/dialog", () => ({
   }) => (open ? (
     <div role="dialog" aria-label={title} data-size={size}>
       <h2>{title}</h2>
-      <section data-part="description">{description}</section>
+      {description !== undefined && <section data-part="description">{description}</section>}
       <section data-part="actions">{headerActions}</section>
       <section data-part="body">{children}</section>
     </div>
@@ -55,6 +55,11 @@ describe("FilePreviewDialog", () => {
     const html = render();
     expect(html).toContain('aria-label="si-44511.pdf"');
     expect(text(part(html, "description")).trim()).toBe("Uploaded 22 Oct 2026 09:41 · A. Reyes");
+  });
+
+  it("no title and no upload time: no description at all (nothing empty to describe the dialog)", () => {
+    expect(render({ uploadedAt: null })).not.toContain('data-part="description"');
+    expect(render({ uploadedAt: null, title: "Sales invoice" })).toContain('data-part="description"');
   });
 
   it("no uploader: the time alone", () => {

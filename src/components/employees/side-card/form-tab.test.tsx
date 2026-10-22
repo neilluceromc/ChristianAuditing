@@ -37,6 +37,13 @@ describe("FormTab: the signed forms", () => {
     expect(history).toMatch(/<a href="\/employees\/e1\/acknowledgements\/k1\/download"[^>]*>Download<\/a>/);
   });
 
+  it("a row with no upload time: no empty separator", () => {
+    const html = render(ack(), [ack({ id: "k1", uploadedAt: "" })]);
+    const t = text(html.slice(html.indexOf("History (1)")));
+    expect(t).toContain("21 Oct 2026 · 3 items · Preview");
+    expect(t).not.toMatch(/· +·/);
+  });
+
   it("nothing on file: no Preview, no uploaded line", () => {
     const html = render(null);
     expect(text(html)).toContain("No signed form on file");

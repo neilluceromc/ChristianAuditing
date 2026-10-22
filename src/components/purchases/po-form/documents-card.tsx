@@ -45,8 +45,8 @@ export interface StoredPreview {
 /** What a filled slot shows. */
 export interface SlotShown {
   fileName: string;
-  /** Under the name: "0.8 MB", "Uploaded 22 Oct 2026 09:41 · Ana Cruz", "on file". */
-  detail: string;
+  /** Under the name: "0.8 MB", "Uploaded 22 Oct 2026 09:41 · Ana Cruz", "on file"; null shows no second line. */
+  detail: string | null;
   /** Preview (the dialog): the stored document, or the file held in the browser ("Not saved yet"). */
   preview: StoredPreview | File;
 }
@@ -178,7 +178,7 @@ export function DocSlot({ kind, required, si = "", shown, onPick, onRemove, erro
           <div className="flex flex-col gap-1 px-3.5 py-3">
             <span id={`${id}-title`} className="text-sm font-medium text-fg">{title}</span>
             <span id={`${id}-file`} className="truncate text-xs text-fg-muted" title={shown.fileName}>{shown.fileName}</span>
-            <span className="truncate text-[11.5px] text-fg-muted" title={shown.detail}>{shown.detail}</span>
+            {shown.detail && <span className="truncate text-[11.5px] text-fg-muted" title={shown.detail}>{shown.detail}</span>}
             <div className="mt-1.5 flex items-center gap-1">
               {shown.preview instanceof File ? (
                 <HeldPreviewButton file={shown.preview} title={title} describedBy={`${id}-title`} />
