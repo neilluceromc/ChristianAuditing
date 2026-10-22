@@ -367,7 +367,8 @@ const FORM_GARBLED = "The form didn't arrive whole — reload the page and try a
 
 /**
  * The new form sends FormData: a JSON `payload` (the save object) and the files `doc:<slot>` (PO_DOCUMENT_SLOTS).
- * Anything else is a plain save object with no files (the old form, and tests). An empty file input is no file.
+ * Anything else is a plain save object with no files (the old form, and tests). An empty slot is no file: the
+ * field left out, sent as "", or an empty file input (a zero-size File with no name).
  */
 function unpackSave(input: unknown): { payload: unknown; files: Partial<Record<PoDocumentSlot, FormDataEntryValue>> } | null {
   if (!(input instanceof FormData)) return { payload: input, files: {} };
@@ -382,7 +383,7 @@ function unpackSave(input: unknown): { payload: unknown; files: Partial<Record<P
   const files: Partial<Record<PoDocumentSlot, FormDataEntryValue>> = {};
   for (const slot of PO_DOCUMENT_SLOTS) {
     const value = input.get(`doc:${slot}`);
-    if (value === null || (value instanceof File && value.size === 0 && value.name === "")) continue;
+    if (value === null || value === "" || (value instanceof File && value.size === 0 && value.name === "")) continue;
     files[slot] = value;
   }
   return { payload, files };
@@ -484,13 +485,21 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
   } catch {
     return conflict("Could not store the documents — nothing was saved. Try again.");
   }
+  // Set once the transaction has committed: from then on the document rows point at the stored files, so nothing
+  // after it (revalidation, say) may clean them up.
+  const commit = { done: false };
   try {
-    const result = d.id ? await editPo(d.id, d, user, lineCls, archived, store.stored) : await createPo(d, user, lineCls, store.stored);
+    const result = d.id
+      ? await editPo(d.id, d, user, lineCls, archived, store.stored, commit)
+      : await createPo(d, user, lineCls, store.stored, commit);
+    // A refusal (decided under the lock, before any write) committed nothing that points at the files.
     if (!result.ok) await store.cleanup();
     return result;
   } catch (err) {
-    await store.cleanup();
-    if (d.poNumber && isPoNumberClash(err)) return validationError({ poNumber: await poNumberRefusal(d.poNumber, d.id ?? null) });
+    if (!commit.done) await store.cleanup();
+    if (!commit.done && d.poNumber && isPoNumberClash(err)) {
+      return validationError({ poNumber: await poNumberRefusal(d.poNumber, d.id ?? null) });
+    }
     throw err;
   }
 }
@@ -524,7 +533,7 @@ async function writeStoredDocs(tx: Prisma.TransactionClient, orderId: string, st
 
 /** Every new PO is from the new form (formV2): saveImpl has refused it unless its required fields are all there. */
 async function createPo(
-  d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, stored: readonly StoredFile[],
+  d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, stored: readonly StoredFile[], commit: { done: boolean },
 ): Promise<ActionResult<Saved>> {
   const state = stateAfterSave(lineCls.map((cls) => ({ cls })));
   const totals = totalsOf(d.totals ?? {});
@@ -568,6 +577,7 @@ async function createPo(
     }
     return { id: created.id, refNo, state };
   });
+  commit.done = true;
 
   revalidatePo(saved.id);
   return ok(saved);
@@ -575,7 +585,7 @@ async function createPo(
 
 async function editPo(
   id: string, d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, archived: { vendor: boolean; dept: boolean },
-  stored: readonly StoredFile[],
+  stored: readonly StoredFile[], commit: { done: boolean },
 ): Promise<ActionResult<Saved>> {
   // The new fields only when the save names them: left out, an edit keeps what the PO has (spec §5b.3).
   const head: ReturnType<typeof header> & Partial<{ poNumber: string | null; paidBy: PaidBy | null; totalsConsistent: boolean | null }>
@@ -673,10 +683,7 @@ async function editPo(
       itRegistered: assets.some((a) => a.cls === "IT"),
     });
     // Spec §5b.4: whether the typed totals add up, over the saved lines and the totals the PO will have.
-    head.totalsConsistent = totalsConsistency(
-      d.lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, closedShort: l.id ? known.get(l.id)!.closedShort : 0 })),
-      d.totals ? totalsOf(d.totals) : rowTotals(po),
-    );
+    head.totalsConsistent = totalsConsistency(d.lines, d.totals ? totalsOf(d.totals) : rowTotals(po));
     const diff: AuditDiff = {
       ...(state !== po.state ? { state: { from: po.state, to: state } } : {}),
       ...diffOf(po, head),
@@ -791,6 +798,7 @@ async function editPo(
     }
     out = { id, refNo: po.refNo, state };
   });
+  commit.done = true;
 
   if (failure) return failure;
   revalidatePo(id, touchedAssets);
@@ -1093,7 +1101,7 @@ async function fixWrite(
     if (!po) { failure = conflict("That purchase order no longer exists."); return; }
     if (po.state === "CANCELLED") { failure = conflict(`${po.refNo} is cancelled.`); return; }
     const lines = await tx.purchaseOrderLine.findMany({
-      where: { orderId: id }, select: { id: true, description: true, qty: true, closedShort: true, unitPrice: true },
+      where: { orderId: id }, select: { id: true, description: true, qty: true, unitPrice: true },
     });
     const assets = await tx.asset.findMany({ where: { purchaseOrderId: id }, select: ASSET_SELECT });
     const stage = poMoneyStage({ state: po.state, ...counts(assets) });
@@ -1148,10 +1156,7 @@ async function fixWrite(
     if (newPrice.size > 0 || TOTAL_KEYS.some((k) => k in headDiff)) {
       const totals = { ...rowTotals(po), ...Object.fromEntries(TOTAL_KEYS.filter((k) => k in headDiff).map((k) => [k, after[k]])) };
       const next = totalsConsistency(
-        lines.map((l) => ({
-          qty: l.qty, closedShort: l.closedShort,
-          unitPrice: newPrice.get(l.id) ?? (l.unitPrice === null ? null : Number(l.unitPrice)),
-        })),
+        lines.map((l) => ({ qty: l.qty, unitPrice: newPrice.get(l.id) ?? (l.unitPrice === null ? null : Number(l.unitPrice)) })),
         totals,
       );
       if (next !== (po.totalsConsistent ?? null)) consistency.totalsConsistent = { from: po.totalsConsistent ?? null, to: next };
@@ -1253,9 +1258,7 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
 
   await prisma.$transaction(async (tx) => {
     await lockPo(tx, id);
-    const po = await tx.purchaseOrder.findUnique({
-      where: { id }, select: { id: true, refNo: true, state: true, totalsConsistent: true, ...TOTALS_SELECT },
-    });
+    const po = await tx.purchaseOrder.findUnique({ where: { id }, select: { id: true, refNo: true, state: true } });
     if (!po) { failure = conflict("That purchase order no longer exists."); return; }
     if (po.state === "CANCELLED") { failure = conflict(`${po.refNo} is cancelled.`); return; }
     const line = await tx.purchaseOrderLine.findUnique({
@@ -1274,30 +1277,12 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
     const closedShort = line.closedShort + qty;
     const state = po.state as PoState;
     const next = state === "WITH_IT" ? await stateAfterClose(tx, id, lineId, closedShort) : state;
-    // Spec §5b.4: units closed short leave the items, so the typed totals are checked again (totalsConsistency).
-    const allLines = await tx.purchaseOrderLine.findMany({
-      where: { orderId: id }, select: { id: true, qty: true, closedShort: true, unitPrice: true },
-    });
-    const wasConsistent = po.totalsConsistent ?? null;
-    const consistent = totalsConsistency(
-      allLines.map((l) => ({
-        qty: l.qty, closedShort: l.id === lineId ? closedShort : l.closedShort,
-        unitPrice: l.unitPrice === null ? null : Number(l.unitPrice),
-      })),
-      rowTotals(po),
-    );
-    const poWrite = next !== state || consistent !== wasConsistent;
+    // totalsConsistent stays as it is: the items are Σ qty × unit price (spec §3), and closing units short changes
+    // neither — nor the paper invoice the totals were typed from.
 
-    // ---- writes (every refusal is above this line; the PO's guarded write comes first, so a miss writes nothing) ----
-    if (poWrite) {
-      const moved = await tx.purchaseOrder.updateMany({
-        where: { id, state },
-        data: {
-          ...(next !== state ? { state: next } : {}),
-          ...(consistent !== wasConsistent ? { totalsConsistent: consistent } : {}),
-          updatedAt: new Date(),
-        },
-      });
+    // ---- writes (every refusal is above this line; the PO's guarded move comes first, so a miss writes nothing) ----
+    if (next !== state) {
+      const moved = await tx.purchaseOrder.updateMany({ where: { id, state }, data: { state: next, updatedAt: new Date() } });
       if (moved.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
     }
     const hit = await tx.purchaseOrderLine.updateMany({
@@ -1305,7 +1290,7 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
       data: { closedShort, closedShortReason: reason },
     });
     if (hit.count === 0) {
-      if (poWrite) throw new Error(`${po.refNo}: line changed under the PO row lock`); // rolls the PO's write back
+      if (next !== state) throw new Error(`${po.refNo}: line changed under the PO row lock`); // rolls the move back
       failure = conflict("Someone else changed this line first — reload and try again.");
       return;
     }
@@ -1317,7 +1302,6 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
       diff: {
         ...(next !== state ? { state: { from: state, to: next } } : {}),
         line: { from: null, to: line.description }, closedShort: { from: line.closedShort, to: closedShort },
-        ...(consistent !== wasConsistent ? { totalsConsistent: { from: wasConsistent, to: consistent } } : {}),
       },
       reason, source: "web",
     });

@@ -25,9 +25,20 @@ const h = vi.hoisted(() => ({
   failDoc: null as Error | null,
   /** Skip the PO-number pre-check this many times: another save took the number in between (a race). */
   racePoCheck: 0,
+  /** The next revalidatePath throws this (a failure after the save's transaction committed). */
+  failRevalidate: null as Error | null,
 }));
 
-vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
+vi.mock("next/cache", () => ({
+  revalidatePath: (p: string) => {
+    if (h.failRevalidate) {
+      const err = h.failRevalidate;
+      h.failRevalidate = null;
+      throw err;
+    }
+    h.revalidated.push(p);
+  },
+}));
 vi.mock("@/server/auth/guards", () => ({
   actionUser: async () => h.user,
   actionRole: async (...roles: string[]) => (h.user && roles.includes(h.user.role) ? h.user : null),
@@ -226,6 +237,7 @@ beforeEach(() => {
   h.deleted = [];
   h.failDoc = null;
   h.racePoCheck = 0;
+  h.failRevalidate = null;
   h.tables = {
     user: [PAT, IVAN, ANA, ADA].map((u) => ({ ...u })),
     vendor: [{ id: "v1", name: "Octagon", archivedAt: null }, { id: "v2", name: "PC Express", archivedAt: null }],
@@ -1041,11 +1053,53 @@ describe("PO form redesign (A3): save with documents, PO number, totals, legacy 
     expect(t("notification")[0].title).toBe("PO-0214 sent back by IT: PO number, paid by and invoice totals");
   });
 
-  it("closeLineShort recomputes totalsConsistent", async () => {
+  it("closeLineShort leaves totalsConsistent as it is: the items are Σ qty × unit price, as on the paper invoice", async () => {
     seedV2({ state: "READY" });
     expect((await closeLineShort({ lineId: "ln1", qty: 2, reason: "vendor cancelled 2 units" })).ok).toBe(true);
-    // 3 laptops will arrive, the invoice is for 5: the totals no longer match the items
-    expect(po().totalsConsistent).toBe(false);
-    expect(audits("po.line-closed")[0].diff).toMatchObject({ totalsConsistent: { from: true, to: false } });
+    expect(po().totalsConsistent).toBe(true);
+    expect(audits("po.line-closed")[0].diff).not.toHaveProperty("totalsConsistent");
+    // and a save after it still checks qty × unit price: 5 × ₱50,000 matches the invoice's ₱250,000
+    const seeded = {
+      totalSales: "250,000.00", lessVat: "26,785.71", netOfVat: "223,214.29", discount: "", amountDue: "223,214.29",
+      addVat: "26,785.71", totalAmountDue: "250,000.00",
+    };
+    const saved = await savePurchaseOrder(order({
+      id: "po1", lines: [line({ id: "ln1" })], receiptRef: "OR-9", poNumber: "2025-0300", paidBy: "DEBIT_CARD", totals: seeded,
+    }));
+    expect(saved.ok).toBe(true);
+    expect(po().totalsConsistent).toBe(true);
+  });
+
+  it("a throw after the transaction committed never cleans up the stored files", async () => {
+    h.failRevalidate = new Error("revalidation failed");
+    await expect(savePurchaseOrder(form(v2Order()))).rejects.toThrow("revalidation failed");
+    // the PO and its sales invoice committed, and the file they point at is still stored
+    expect(t("purchaseOrder")).toHaveLength(1);
+    expect(t("requestDocument")).toHaveLength(1);
+    expect(h.deleted).toEqual([]);
+    expect(stored()).toEqual([t("requestDocument")[0].path]);
+
+    // the same on an edit that attaches a document
+    const id = t("purchaseOrder")[0].id as string;
+    const lineId = t("purchaseOrderLine")[0].id;
+    h.failRevalidate = new Error("revalidation failed");
+    await expect(savePurchaseOrder(form(v2Order({ id, lines: [line({ id: lineId, description: "Laptop", qty: 1, unitPrice: 9100 })] }), {
+      "doc:official-receipt": pdf("or.pdf"),
+    }))).rejects.toThrow("revalidation failed");
+    expect(t("requestDocument")).toHaveLength(2);
+    expect(h.deleted).toEqual([]);
+    expect(stored()).toHaveLength(2);
+  });
+
+  it("an empty document slot is no file: sent as \"\" or as an empty file input", async () => {
+    const r = await savePurchaseOrder(form(v2Order(), {
+      "doc:invoice": pdf(), "doc:official-receipt": "", "doc:delivery-receipt": new File([], "", { type: "application/octet-stream" }),
+      "doc:warranty-slip": "",
+    }));
+    expect(r).toMatchObject({ ok: true });
+    expect(t("requestDocument").map((d) => d.kind)).toEqual(["invoice"]);
+    // an empty sales invoice slot on a new PO is "attach it", not "pick a file"
+    const none = await savePurchaseOrder(form(v2Order({ poNumber: "2025-0420" }), { "doc:invoice": "" }));
+    expect(errorsOf(none)).toEqual({ "doc:invoice": "Attach the sales invoice" });
   });
 });

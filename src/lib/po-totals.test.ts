@@ -106,7 +106,7 @@ describe("checkTotals", () => {
 
 describe("totalsConsistency (what a write stores as totalsConsistent)", () => {
   const BLANK = { totalSales: null, lessVat: null, netOfVat: null, discount: null, amountDue: null, addVat: null, totalAmountDue: null };
-  const line = { qty: 1, unitPrice: 9100, closedShort: 0 };
+  const line = { qty: 1, unitPrice: 9100 };
 
   it("null when no total is typed (a legacy PO)", () => {
     expect(totalsConsistency([line], BLANK)).toBeNull();
@@ -117,9 +117,11 @@ describe("totalsConsistency (what a write stores as totalsConsistent)", () => {
     expect(totalsConsistency([{ ...line, unitPrice: 9000 }], { ...BLANK, ...GOOD })).toBe(false);
   });
 
-  it("units closed short leave the items: the invoice for 5 no longer matches 3 coming", () => {
+  it("the items are Σ qty × unit price (spec §3): units closed short still count, as on the paper invoice", () => {
     const five = { totalSales: 250000, totalAmountDue: 250000 };
-    expect(totalsConsistency([{ qty: 5, unitPrice: 50000, closedShort: 0 }], { ...BLANK, ...five })).toBe(true);
-    expect(totalsConsistency([{ qty: 5, unitPrice: 50000, closedShort: 2 }], { ...BLANK, ...five })).toBe(false);
+    expect(totalsConsistency([{ qty: 5, unitPrice: 50000 }], { ...BLANK, ...five })).toBe(true);
+    // a line row carrying closedShort is read for qty × price only
+    const closed = { qty: 5, unitPrice: 50000, closedShort: 2 };
+    expect(totalsConsistency([closed], { ...BLANK, ...five })).toBe(true);
   });
 });
