@@ -32,14 +32,24 @@ export type IntakeField = MoneyField | DeviceField;
 export const PO_MONEY_FIELDS = [...MONEY_FIELDS, "poNumber", "paidBy", ...TOTAL_KEYS] as const;
 export type PoMoneyField = (typeof PO_MONEY_FIELDS)[number];
 
-/** A field key as the registration form and a send-back name it. "other" has no owner: the sender picks the team. */
-export type OwnedKey = IntakeField | Exclude<RegFieldKey, "other">;
+/** A PO send-back's one key for the seven typed totals (spec §5b.4: "Invoice totals" on the checklist). */
+export const PO_TOTALS_KEY = "totals";
+
+/**
+ * A field key as the registration form and a send-back name it. "other" has no owner: the sender picks the team.
+ * A PO's own money keys (PO_MONEY_FIELDS, and "totals") are here too: Purchasing's, like every money field.
+ */
+export type OwnedKey = IntakeField | PoMoneyField | typeof PO_TOTALS_KEY | Exclude<RegFieldKey, "other">;
 
 const MONEY_DOCS: readonly string[] = ["doc:invoice", "doc:official-receipt", "doc:delivery-receipt"];
 
-/** A money field, or a document that proves the money (sales invoice, OR, delivery receipt). */
+/**
+ * A money field, or a document that proves the money (sales invoice, OR, delivery receipt). PO_MONEY_FIELDS holds
+ * MONEY_FIELDS plus the PO's own keys (PO number, paid by, the totals), which no asset carries — so an asset's
+ * answer is the same as before migration 39.
+ */
 export function isMoneyKey(key: OwnedKey): boolean {
-  return (MONEY_FIELDS as readonly string[]).includes(key) || MONEY_DOCS.includes(key);
+  return (PO_MONEY_FIELDS as readonly string[]).includes(key) || key === PO_TOTALS_KEY || MONEY_DOCS.includes(key);
 }
 
 /** Money fields and money documents are Purchasing's; device fields and the warranty slip follow the asset's class. */

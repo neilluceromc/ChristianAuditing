@@ -78,3 +78,17 @@ export function checkTotals(
   const ok = Object.keys(problems).length === 0 && present(totalAmountDue) && allNumbers;
   return { ok, problems };
 }
+
+/**
+ * What a write stores as `totalsConsistent` (spec §5b.4: recomputed on every save, fix and close-short): null when no
+ * total is typed (a legacy PO), else `checkTotals(...).ok`. The items count the units still coming — a line's
+ * quantity less what was closed short — so an invoice billed for 5 when only 3 will arrive no longer adds up.
+ */
+export function totalsConsistency(
+  lines: { qty: number; closedShort?: number; unitPrice: number | string | null }[],
+  totals: Partial<Record<TotalKey, number | null>>,
+): boolean | null {
+  if (TOTAL_KEYS.every((k) => totals[k] === null || totals[k] === undefined)) return null;
+  const items = itemsTotal(lines.map((l) => ({ qty: l.qty - (l.closedShort ?? 0), unitPrice: l.unitPrice })));
+  return checkTotals(items, totals).ok;
+}

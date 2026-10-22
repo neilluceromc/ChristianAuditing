@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -106,4 +106,26 @@ export async function readUpload(relPath: string): Promise<Buffer | null> {
   const abs = localAbs(relPath);
   if (!abs) return null;
   return readFile(abs).catch(() => null);
+}
+
+/**
+ * Removes a stored object. Only for files nothing references yet: a save that stored its documents and then failed
+ * (src/server/modules/purchases/po-files.ts). Documents on record are never deleted (append-only). A missing object
+ * counts as removed.
+ */
+export async function deleteObject(relPath: string): Promise<void> {
+  if (!isSafeRelPath(relPath)) throw new Error(`Invalid upload path: ${relPath}`);
+  if (storageDriver() === "supabase") {
+    const res = await fetch(objectUrl("object", relPath), { method: "DELETE", headers: authHeaders() });
+    if (res.ok || res.status === 404) return;
+    const body = await bodySnippet(res);
+    if (res.status === 400 && isMissingBody(body)) return;
+    throw failure("delete", res.status, body);
+  }
+  if (process.env.VERCEL) return; // nothing was written locally; see writeObject
+  const abs = localAbs(relPath);
+  if (!abs) throw new Error(`Invalid upload path: ${relPath}`);
+  await unlink(abs).catch((err: NodeJS.ErrnoException) => {
+    if (err.code !== "ENOENT") throw err;
+  });
 }

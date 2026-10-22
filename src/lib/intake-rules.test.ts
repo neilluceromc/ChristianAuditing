@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssetClass, Role } from "@prisma/client";
 import {
-  DEVICE_FIELDS, EDIT_REASON, MONEY_FIELDS, PO_MONEY_FIELDS, assetMoneyStage, canEditField, fieldOwner, poMoneyStage,
+  DEVICE_FIELDS, EDIT_REASON, MONEY_FIELDS, PO_MONEY_FIELDS, assetMoneyStage, canEditField, fieldOwner, isMoneyKey, poMoneyStage,
   reasonError, returnTeamFor, teamOfRole, type IntakeField, type IntakeStage,
 } from "./intake-rules";
 import { TOTAL_KEYS } from "./po-totals";
@@ -31,6 +31,17 @@ describe("fieldOwner", () => {
         expect(fieldOwner(d, cls)).toBe("PURCHASING");
       }
     }
+  });
+
+  it("a PO's own money keys (PO number, paid by, each total, and the send-back's \"totals\") are Purchasing's money", () => {
+    for (const cls of CLASSES) {
+      for (const f of [...PO_MONEY_FIELDS, "totals"] as const) {
+        expect(isMoneyKey(f)).toBe(true);
+        expect(fieldOwner(f, cls)).toBe("PURCHASING");
+      }
+    }
+    for (const f of DEVICE_FIELDS) expect(isMoneyKey(f)).toBe(false);
+    expect(isMoneyKey("doc:warranty-slip")).toBe(false);
   });
 
   it("device fields and the warranty slip follow the class", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOTAL_KEYS, TOTAL_LABEL, checkTotals, itemsTotal, parseMoney } from "./po-totals";
+import { TOTAL_KEYS, TOTAL_LABEL, checkTotals, itemsTotal, parseMoney, totalsConsistency } from "./po-totals";
 
 const GOOD = { totalSales: 9100, lessVat: 975, netOfVat: 8125, amountDue: 8125, addVat: 975, totalAmountDue: 9100 };
 
@@ -101,5 +101,25 @@ describe("checkTotals", () => {
 
   it("is not ok when a typed total isn't a number", () => {
     expect(checkTotals(9100, { ...GOOD, lessVat: Number.NaN }).ok).toBe(false);
+  });
+});
+
+describe("totalsConsistency (what a write stores as totalsConsistent)", () => {
+  const BLANK = { totalSales: null, lessVat: null, netOfVat: null, discount: null, amountDue: null, addVat: null, totalAmountDue: null };
+  const line = { qty: 1, unitPrice: 9100, closedShort: 0 };
+
+  it("null when no total is typed (a legacy PO)", () => {
+    expect(totalsConsistency([line], BLANK)).toBeNull();
+  });
+
+  it("checkTotals over the items for typed totals", () => {
+    expect(totalsConsistency([line], { ...BLANK, ...GOOD })).toBe(true);
+    expect(totalsConsistency([{ ...line, unitPrice: 9000 }], { ...BLANK, ...GOOD })).toBe(false);
+  });
+
+  it("units closed short leave the items: the invoice for 5 no longer matches 3 coming", () => {
+    const five = { totalSales: 250000, totalAmountDue: 250000 };
+    expect(totalsConsistency([{ qty: 5, unitPrice: 50000, closedShort: 0 }], { ...BLANK, ...five })).toBe(true);
+    expect(totalsConsistency([{ qty: 5, unitPrice: 50000, closedShort: 2 }], { ...BLANK, ...five })).toBe(false);
   });
 });

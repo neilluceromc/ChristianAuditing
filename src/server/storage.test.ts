@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authHeaders, readUpload, storageDriver, writeObject } from "./storage";
+import { authHeaders, deleteObject, readUpload, storageDriver, writeObject } from "./storage";
 
 const fetchMock = vi.fn();
 
@@ -211,5 +211,50 @@ describe("local driver", () => {
 
   it.each(BAD_PATHS)("write of %j throws and writes nothing", async (p) => {
     await expect(writeObject(p, Buffer.from("x"), "application/pdf")).rejects.toThrow();
+  });
+});
+
+describe("deleteObject (PO form redesign: a failed save removes the files it stored)", () => {
+  it("supabase: DELETE on the object's path with the service key; a missing object is already gone", async () => {
+    useSupabase();
+    fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+    await deleteObject("requests/po-1/invoice/1-si.pdf");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://proj.supabase.co/storage/v1/object/documents/requests/po-1/invoice/1-si.pdf");
+    expect(init.method).toBe("DELETE");
+    expect(init.headers.apikey).toBe("service-key");
+
+    fetchMock.mockResolvedValue(new Response("{}", { status: 404 }));
+    await expect(deleteObject("a/b.pdf")).resolves.toBeUndefined();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ statusCode: "404", error: "not_found" }), { status: 400 }));
+    await expect(deleteObject("a/b.pdf")).resolves.toBeUndefined();
+    fetchMock.mockResolvedValue(new Response("boom", { status: 500 }));
+    await expect(deleteObject("a/b.pdf")).rejects.toThrow(/500/);
+  });
+
+  it.each(BAD_PATHS)("delete of %j throws without calling fetch", async (p) => {
+    useSupabase();
+    await expect(deleteObject(p)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("local driver", () => {
+    let dir: string;
+    beforeEach(async () => {
+      dir = await mkdtemp(path.join(tmpdir(), "storage-delete-test-"));
+      vi.spyOn(process, "cwd").mockReturnValue(dir);
+    });
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("removes the file under uploads/; a missing file is fine", async () => {
+      await writeObject("requests/po-1/a.pdf", Buffer.from("x"), "application/pdf");
+      await deleteObject("requests/po-1/a.pdf");
+      await expect(readFile(path.join(dir, "uploads", "requests", "po-1", "a.pdf"))).rejects.toThrow();
+      await expect(deleteObject("requests/po-1/a.pdf")).resolves.toBeUndefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });

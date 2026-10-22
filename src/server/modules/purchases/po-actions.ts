@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { Prisma, type AssetClass, type Role, type Team } from "@prisma/client";
+import { Prisma, type AssetClass, type PaidBy, type Role, type Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
@@ -13,8 +13,16 @@ import { lockPo } from "./po-lock";
 import { diffOf, type AuditDiff } from "@/lib/audit-diff";
 import { cleanReason } from "@/lib/reason";
 import { GROUP_ARCHIVED } from "@/lib/groups";
-import { canEditField, MONEY_FIELDS, poMoneyStage, reasonError, teamOfRole, type IntakeStage } from "@/lib/intake-rules";
+import {
+  canEditField, MONEY_FIELDS, PO_TOTALS_KEY, poMoneyStage, reasonError, teamOfRole, type IntakeStage,
+} from "@/lib/intake-rules";
 import { lineProgress, PO_WRITE_ROLES, poRefNo, poStateFor, stateAfterSave, type PoState } from "@/lib/po-flow";
+import { parseMoney, TOTAL_KEYS, totalsConsistency, type TotalKey } from "@/lib/po-totals";
+import { unitSchema } from "@/lib/po-units";
+import { PO_DOCUMENT_SLOTS, type PoDocumentSlot } from "@/lib/documents";
+import { uniqueTarget } from "@/server/prisma-errors";
+import { validateUpload } from "@/server/uploads";
+import { storePoFiles, type PoFile, type StoredFile } from "./po-files";
 import { moneyForAsset } from "@/lib/po-money";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
 import { returnOne, undoOne } from "@/server/modules/finance/review-writes";
@@ -75,6 +83,10 @@ const FIELD_WORDS: Record<string, string> = {
   invoiceRef: "SI number", receiptRef: "OR number",
   "doc:invoice": "sales invoice", "doc:official-receipt": "official receipt", "doc:delivery-receipt": "delivery receipt",
   other: "something else",
+  // Migration 39 (spec §5b.4): the PO's own money fields, and the send-back's one key for the seven totals
+  poNumber: "PO number", paidBy: "paid by", [PO_TOTALS_KEY]: "invoice totals",
+  totalSales: "total sales", lessVat: "less VAT", netOfVat: "amount net of VAT", discount: "discount",
+  amountDue: "amount due", addVat: "add VAT", totalAmountDue: "total amount due",
 };
 
 /** "a", "a and b", "a, b and c". */
@@ -87,13 +99,103 @@ const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Prices are Decimal(12,2): .multipleOf(0.01) keeps a third decimal from being silently rounded by Postgres. */
 const price = z
-  .number()
+  .number({ error: "Enter the unit price" })
   .min(0, "A price can't be negative")
   .max(99_999_999.99)
   .multipleOf(0.01, "Prices go to centavos — two decimal places at most");
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
+const dateStr = z.string({ error: "Enter the date" }).regex(/^\d{4}-\d{2}-\d{2}$/, "Use the date picker");
 const toDate = (s: string) => new Date(`${s}T00:00:00Z`);
 const optionalReason = z.string().overwrite(cleanReason).optional();
+
+// ---- migration 39: PO number, paid by, the typed totals (PO form redesign, spec §2.5, §2.9, §4, §5b) ----------------
+
+const PAID_BY = ["CREDIT_CARD", "DEBIT_CARD"] as const satisfies readonly PaidBy[];
+const PO_NUMBER_MAX = 40;
+/** What a PO from the new form can't be saved without (spec §5b.2); the server's own words for each. */
+const NEEDED = {
+  poNumber: "Enter the purchase order number",
+  paidBy: "Pick how it was paid",
+  totalAmountDue: "Enter the total amount due",
+  invoice: "Attach the sales invoice",
+} as const;
+const TOTALS_SELECT = {
+  totalSales: true, lessVat: true, netOfVat: true, discount: true, amountDue: true, addVat: true, totalAmountDue: true,
+} as const satisfies Record<TotalKey, true>;
+
+/**
+ * The save's optional fields, three ways: left out (`undefined`) an edit leaves the field as it is; blank or null
+ * clears it; anything else is checked. So a legacy PO saved without them keeps its nulls (spec §5b.3).
+ */
+const poNumberField = z
+  .string()
+  .trim()
+  .max(PO_NUMBER_MAX, `Keep the PO number to ${PO_NUMBER_MAX} characters or fewer`)
+  .nullable()
+  .optional()
+  .transform((v) => (v === undefined ? undefined : v ? v : null));
+const paidByField = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v, ctx): PaidBy | null | undefined => {
+    if (v === undefined) return undefined;
+    if (!v) return null;
+    if (!(PAID_BY as readonly string[]).includes(v)) {
+      ctx.addIssue({ code: "custom", message: "Pick credit card or debit card" });
+      return z.NEVER;
+    }
+    return v as PaidBy;
+  });
+/** A total as typed ("9,100.00", "₱9,100", or a number): parseMoney, then the column's limits (Decimal(12,2), >= 0). */
+const moneyText = z
+  .union([z.string(), z.number()])
+  .nullable()
+  .optional()
+  .transform((v, ctx): number | null | undefined => {
+    if (v === undefined) return undefined;
+    const n = parseMoney(v);
+    if (n === null) return null;
+    const refuse = (message: string) => {
+      ctx.addIssue({ code: "custom", message });
+      return z.NEVER;
+    };
+    if (!Number.isFinite(n)) return refuse("Type an amount, like 9,100.00");
+    if (n < 0) return refuse("An amount can't be negative");
+    if (n > 99_999_999.99) return refuse("That's more than ₱99,999,999.99");
+    if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-6) return refuse("Amounts go to centavos — two decimal places at most");
+    return n;
+  });
+const totalsSchema = z.object({
+  totalSales: moneyText, lessVat: moneyText, netOfVat: moneyText, discount: moneyText,
+  amountDue: moneyText, addVat: moneyText, totalAmountDue: moneyText,
+}).strict();
+
+/** All seven totals, a key left out as null. */
+const totalsOf = (t: Partial<Record<TotalKey, number | null | undefined>>): Record<TotalKey, number | null> =>
+  Object.fromEntries(TOTAL_KEYS.map((k) => [k, t[k] ?? null])) as Record<TotalKey, number | null>;
+/** A PO row's totals (Decimals) as numbers. */
+const rowTotals = (row: Partial<Record<TotalKey, unknown>>): Record<TotalKey, number | null> =>
+  Object.fromEntries(TOTAL_KEYS.map((k) => [k, row[k] === null || row[k] === undefined ? null : Number(row[k])])) as Record<TotalKey, number | null>;
+
+/**
+ * Which live PO already has this number: the partial unique index's own test (migration 39,
+ * "PurchaseRequest_poNumber_live_key" ON lower(btrim("poNumber")) WHERE not CANCELLED), leaving out `exceptId`.
+ */
+async function poNumberOwner(poNumber: string, exceptId: string | null): Promise<{ id: string; refNo: string } | null> {
+  const rows = await prisma.$queryRaw<Array<{ id: string; refNo: string }>>`
+    SELECT "id", "refNo" FROM "PurchaseRequest"
+    WHERE lower(btrim("poNumber")) = lower(btrim(${poNumber})) AND "poNumber" IS NOT NULL AND "state" <> 'CANCELLED'
+      AND "id" <> ${exceptId ?? ""}
+    LIMIT 1`;
+  return rows[0] ?? null;
+}
+const usedOn = (poNumber: string, refNo: string | null) =>
+  `PO ${poNumber} is already used on ${refNo ?? "another purchase order"}`;
+/** The partial unique index refused a PO number: another save took it after the pre-check. */
+const isPoNumberClash = (err: unknown) => uniqueTarget(err).some((t) => t.includes("poNumber"));
+async function poNumberRefusal(poNumber: string, exceptId: string | null): Promise<string> {
+  return usedOn(poNumber, (await poNumberOwner(poNumber, exceptId))?.refNo ?? null);
+}
 
 /** What an asset from a PO carries of its money (moneyForAsset's fields), plus its review state. */
 const ASSET_SELECT = {
@@ -202,20 +304,28 @@ const lineSchema = z.object({
   id: z.string().min(1).optional(), // present = an existing line
   description: z.string().trim().min(2, "Say what this is").max(200),
   specs: z.string().trim().max(500).optional(),
-  categoryId: z.string().min(1, "Pick a category"),
-  qty: z.number().int().min(1, "At least one").max(999),
+  categoryId: z.string({ error: "Pick a category" }).min(1, "Pick a category"),
+  qty: z.number({ error: "Enter a quantity" }).int().min(1, "At least one").max(999),
+  unit: unitSchema,
   unitPrice: price,
 });
 
+/**
+ * The save object (the JSON `payload` of the form's FormData, or a plain object). `fees` is no longer taken: the new
+ * form has no fees field (spec §4), so an edit leaves a legacy PO's fees as they are.
+ */
 const saveSchema = z.object({
   id: z.string().min(1).optional(),
-  vendorId: z.string().min(1, "Pick the supplier"),
-  invoiceRef: z.string().trim().min(1, "Enter the SI number").max(60),
+  vendorId: z.string({ error: "Pick the supplier" }).min(1, "Pick the supplier"),
+  poNumber: poNumberField,
+  invoiceRef: z.string({ error: "Enter the SI number" }).trim().min(1, "Enter the SI number").max(60),
   receiptRef: z.string().trim().max(60).optional(),
   purchasedAt: dateStr,
+  paidBy: paidByField,
   departmentId: z.string().optional(),
-  fees: price.nullable().optional(),
-  lines: z.array(lineSchema).min(1, "A purchase order needs at least one line").max(50),
+  lines: z.array(lineSchema, { error: "A purchase order needs at least one line" })
+    .min(1, "A purchase order needs at least one line").max(50),
+  totals: totalsSchema.optional(),
   reply: optionalReason,
 });
 
@@ -249,19 +359,99 @@ const summarize = (lines: Array<{ qty: number; unitPrice: unknown }>) => ({
  *   un-returned. Every asset from the PO is re-copied with the saved money (`moneyForAsset`), so a PO's assets
  *   always share one SI number, supplier and date.
  */
-export async function savePurchaseOrder(input: unknown): Promise<ActionResult<Saved>> {
+export async function savePurchaseOrder(input: FormData | unknown): Promise<ActionResult<Saved>> {
   return asActionResult(() => saveImpl(input));
 }
 
+const FORM_GARBLED = "The form didn't arrive whole — reload the page and try again.";
+
+/**
+ * The new form sends FormData: a JSON `payload` (the save object) and the files `doc:<slot>` (PO_DOCUMENT_SLOTS).
+ * Anything else is a plain save object with no files (the old form, and tests). An empty file input is no file.
+ */
+function unpackSave(input: unknown): { payload: unknown; files: Partial<Record<PoDocumentSlot, FormDataEntryValue>> } | null {
+  if (!(input instanceof FormData)) return { payload: input, files: {} };
+  const raw = input.get("payload");
+  if (typeof raw !== "string") return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const files: Partial<Record<PoDocumentSlot, FormDataEntryValue>> = {};
+  for (const slot of PO_DOCUMENT_SLOTS) {
+    const value = input.get(`doc:${slot}`);
+    if (value === null || (value instanceof File && value.size === 0 && value.name === "")) continue;
+    files[slot] = value;
+  }
+  return { payload, files };
+}
+
+/**
+ * Spec §5b.2: on a PO from the new form, what is blank of the fields the save object may leave out. Read off the raw
+ * payload, so a save missing everything hears about everything at once (alongside the schema's own errors).
+ */
+function missingOnV2(raw: unknown): Record<string, string> {
+  const p = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const totals = (p.totals && typeof p.totals === "object" ? p.totals : {}) as Record<string, unknown>;
+  const blank = (v: unknown) => v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+  const tad = totals.totalAmountDue;
+  const out: Record<string, string> = {};
+  if (blank(p.poNumber)) out.poNumber = NEEDED.poNumber;
+  if (blank(p.paidBy)) out.paidBy = NEEDED.paidBy;
+  if (blank(tad) || ((typeof tad === "string" || typeof tad === "number") && parseMoney(tad) === null)) {
+    out["totals.totalAmountDue"] = NEEDED.totalAmountDue;
+  }
+  return out;
+}
+
+/**
+ * Every refusal comes before the files are stored, except the ones only the PO row (read under its lock) can decide.
+ * Then: the files go to storage (po-files.ts), the PO and its document rows are written in one transaction, and if
+ * that refuses or throws, `cleanup()` removes the stored files — no PO, no document row, no orphan file
+ * (Review Focus 2). A PO number taken in between (the partial unique index's P2002) is refused on its field.
+ */
 async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
-  const parsed = saveSchema.safeParse(input);
-  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const d = parsed.data;
+  const unpacked = unpackSave(input);
+  if (!unpacked) return validationError({ payload: FORM_GARBLED });
 
   const user = await actionRole(...PO_WRITE_ROLES);
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+
+  const raw = unpacked.payload;
+  const rawId = raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+  // A PO from the new form keeps its required fields on every edit; a legacy one doesn't (spec §5b.3). formV2 never
+  // changes after the create, so reading it before the lock is safe.
+  const existing = rawId
+    ? await prisma.purchaseOrder.findUnique({ where: { id: rawId }, select: { formV2: true } })
+    : null;
+  const v2 = rawId ? existing?.formV2 === true : true;
+
+  const errors: Record<string, string> = {};
+  const parsed = saveSchema.safeParse(raw);
+  if (!parsed.success) Object.assign(errors, zodFieldErrors(parsed.error));
+  const files: PoFile[] = [];
+  for (const kind of PO_DOCUMENT_SLOTS) {
+    const value = unpacked.files[kind];
+    if (value === undefined) continue;
+    const checked = validateUpload(value);
+    if (checked.ok) files.push({ kind, file: checked.file });
+    else errors[`doc:${kind}`] = checked.error;
+  }
+  if (v2) {
+    for (const [k, message] of Object.entries(missingOnV2(raw))) errors[k] ??= message;
+    if (!errors["doc:invoice"] && !files.some((f) => f.kind === "invoice")) {
+      const onFile = rawId
+        ? await prisma.requestDocument.count({ where: { orderId: rawId, kind: "invoice", supersededAt: null } })
+        : 0;
+      if (onFile === 0) errors["doc:invoice"] = NEEDED.invoice;
+    }
+  }
+  if (!parsed.success || Object.keys(errors).length > 0) return validationError(errors);
+  const d = parsed.data;
 
   const vendor = await prisma.vendor.findUnique({ where: { id: d.vendorId }, select: { id: true, archivedAt: true } });
   if (!vendor) return validationError({ vendorId: "Unknown supplier" });
@@ -278,45 +468,87 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
   const lineCls = d.lines.map((l) => clsOf.get(l.categoryId) ?? null);
 
   const archived = { vendor: vendor.archivedAt !== null, dept: dept?.archivedAt != null };
-  return d.id ? editPo(d.id, d, user, lineCls, archived) : createPo(d, user, lineCls, archived);
+  if (!d.id) {
+    // Phase 37 (spec §2.1): a new order never names an archived department or supplier.
+    if (archived.vendor) return validationError({ vendorId: "That supplier is archived" });
+    if (archived.dept) return validationError({ departmentId: GROUP_ARCHIVED });
+  }
+  if (d.poNumber) {
+    const owner = await poNumberOwner(d.poNumber, d.id ?? null);
+    if (owner) return validationError({ poNumber: usedOn(d.poNumber, owner.refNo) });
+  }
+
+  let store: Awaited<ReturnType<typeof storePoFiles>>;
+  try {
+    store = await storePoFiles(d.id ?? `new-${randomUUID()}`, files);
+  } catch {
+    return conflict("Could not store the documents — nothing was saved. Try again.");
+  }
+  try {
+    const result = d.id ? await editPo(d.id, d, user, lineCls, archived, store.stored) : await createPo(d, user, lineCls, store.stored);
+    if (!result.ok) await store.cleanup();
+    return result;
+  } catch (err) {
+    await store.cleanup();
+    if (d.poNumber && isPoNumberClash(err)) return validationError({ poNumber: await poNumberRefusal(d.poNumber, d.id ?? null) });
+    throw err;
+  }
 }
 
 type Actor = { id: string; name: string; role: Role };
 
+/** The header fields every save writes (fees are no longer among them: spec §4). */
 function header(d: SaveInput) {
   return {
     vendorId: d.vendorId,
     invoiceRef: d.invoiceRef,
     receiptRef: d.receiptRef ? d.receiptRef : null,
     purchasedAt: toDate(d.purchasedAt),
-    fees: d.fees ?? null,
     departmentId: d.departmentId ? d.departmentId : null,
   };
 }
 
+/** The document rows of the files a save stored, each with its own `document.uploaded` entry. */
+async function writeStoredDocs(tx: Prisma.TransactionClient, orderId: string, stored: readonly StoredFile[], user: Actor) {
+  for (const s of stored) {
+    const doc = await tx.requestDocument.create({
+      data: { orderId, kind: s.kind, fileName: s.fileName, path: s.relPath, checksum: s.checksum, uploadedById: user.id },
+      select: { fileName: true },
+    });
+    await writeAudit(tx, {
+      actorId: user.id, actorLabel: user.name, entityType: ENTITY, entityId: orderId, action: "document.uploaded",
+      diff: { document: { from: null, to: doc.fileName } }, source: "web",
+    });
+  }
+}
+
+/** Every new PO is from the new form (formV2): saveImpl has refused it unless its required fields are all there. */
 async function createPo(
-  d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, archived: { vendor: boolean; dept: boolean },
+  d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, stored: readonly StoredFile[],
 ): Promise<ActionResult<Saved>> {
-  // Phase 37 (spec §2.1): a new order never names an archived department or supplier.
-  if (archived.vendor) return validationError({ vendorId: "That supplier is archived" });
-  if (archived.dept) return validationError({ departmentId: GROUP_ARCHIVED });
   const state = stateAfterSave(lineCls.map((cls) => ({ cls })));
-  const head = header(d);
+  const totals = totalsOf(d.totals ?? {});
+  const head = {
+    ...header(d), poNumber: d.poNumber ?? null, paidBy: d.paidBy ?? null, ...totals,
+    totalsConsistent: totalsConsistency(d.lines, totals),
+  };
 
   const saved = await prisma.$transaction(async (tx) => {
     const [{ nextval }] = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('purchase_request_ref_seq')`;
     const refNo = poRefNo(Number(nextval));
     const created = await tx.purchaseOrder.create({
       data: {
-        refNo, state, requestedById: user.id, ...head,
+        refNo, state, requestedById: user.id, formV2: true, ...head,
         lines: {
           create: d.lines.map((l) => ({
-            description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unitPrice: l.unitPrice,
+            description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unit: l.unit,
+            unitPrice: l.unitPrice,
           })),
         },
       },
       select: { id: true },
     });
+    await writeStoredDocs(tx, created.id, stored, user);
     await tx.noteEntry.create({
       data: {
         orderId: created.id, authorId: user.id, kind: "PO_SAVED",
@@ -343,8 +575,16 @@ async function createPo(
 
 async function editPo(
   id: string, d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, archived: { vendor: boolean; dept: boolean },
+  stored: readonly StoredFile[],
 ): Promise<ActionResult<Saved>> {
-  const head = header(d);
+  // The new fields only when the save names them: left out, an edit keeps what the PO has (spec §5b.3).
+  const head: ReturnType<typeof header> & Partial<{ poNumber: string | null; paidBy: PaidBy | null; totalsConsistent: boolean | null }>
+    & Partial<Record<TotalKey, number | null>> = {
+      ...header(d),
+      ...(d.poNumber !== undefined ? { poNumber: d.poNumber } : {}),
+      ...(d.paidBy !== undefined ? { paidBy: d.paidBy } : {}),
+      ...(d.totals ? totalsOf(d.totals) : {}),
+    };
   let out: Saved | null = null;
   let failure: ActionResult<Saved> | null = null;
   let touchedAssets = false;
@@ -356,13 +596,14 @@ async function editPo(
       select: {
         id: true, refNo: true, state: true, sentBackBy: true,
         vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true, departmentId: true,
+        poNumber: true, paidBy: true, totalsConsistent: true, ...TOTALS_SELECT,
       },
     });
     if (!po) { failure = conflict("That purchase order no longer exists."); return; }
     if (po.state === "CANCELLED") { failure = conflict(`${po.refNo} is cancelled.`); return; }
     const lines = await tx.purchaseOrderLine.findMany({
       where: { orderId: id },
-      select: { id: true, description: true, specs: true, categoryId: true, qty: true, unitPrice: true, closedShort: true },
+      select: { id: true, description: true, specs: true, categoryId: true, qty: true, unit: true, unitPrice: true, closedShort: true },
     });
     const assets = await tx.asset.findMany({ where: { purchaseOrderId: id }, select: ASSET_SELECT });
 
@@ -431,6 +672,11 @@ async function editPo(
       })),
       itRegistered: assets.some((a) => a.cls === "IT"),
     });
+    // Spec §5b.4: whether the typed totals add up, over the saved lines and the totals the PO will have.
+    head.totalsConsistent = totalsConsistency(
+      d.lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, closedShort: l.id ? known.get(l.id)!.closedShort : 0 })),
+      d.totals ? totalsOf(d.totals) : rowTotals(po),
+    );
     const diff: AuditDiff = {
       ...(state !== po.state ? { state: { from: po.state, to: state } } : {}),
       ...diffOf(po, head),
@@ -440,11 +686,11 @@ async function editPo(
       if (!l.id) return true;
       const old = known.get(l.id)!;
       return Object.keys(diffOf(
-        { description: old.description, specs: old.specs, categoryId: old.categoryId, qty: old.qty, unitPrice: old.unitPrice },
-        { description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unitPrice: l.unitPrice },
+        { description: old.description, specs: old.specs, categoryId: old.categoryId, qty: old.qty, unit: old.unit, unitPrice: old.unitPrice },
+        { description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unit: l.unit, unitPrice: l.unitPrice },
       )).length > 0;
     });
-    if (!resubmitTo && Object.keys(diff).length === 0 && !lineChanged) {
+    if (!resubmitTo && Object.keys(diff).length === 0 && !lineChanged && stored.length === 0) {
       out = { id, refNo: po.refNo, state: po.state }; // nothing to save: no audit, no note, no bell
       return;
     }
@@ -466,17 +712,22 @@ async function editPo(
     for (const l of d.lines.filter((x) => x.id)) {
       await tx.purchaseOrderLine.update({
         where: { id: l.id },
-        data: { description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unitPrice: l.unitPrice },
+        data: {
+          description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unit: l.unit,
+          unitPrice: l.unitPrice,
+        },
       });
     }
     const fresh = d.lines.filter((l) => !l.id);
     if (fresh.length) {
       await tx.purchaseOrderLine.createMany({
         data: fresh.map((l) => ({
-          orderId: id, description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unitPrice: l.unitPrice,
+          orderId: id, description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty,
+          unit: l.unit, unitPrice: l.unitPrice,
         })),
       });
     }
+    await writeStoredDocs(tx, id, stored, user);
 
     // Every asset from the PO, and its registrations, carry the saved money. On Finance's resubmit only the assets
     // returned to Purchasing are un-returned: one Finance returned to IT (a serial, say) stays with IT.
@@ -548,7 +799,10 @@ async function editPo(
 
 // ---- send back -----------------------------------------------------------------------------------------------------
 
-const SEND_BACK_KEYS = [...MONEY_FIELDS, "doc:invoice", "doc:official-receipt", "doc:delivery-receipt", "other"] as const;
+/** PO_SEND_BACK_FIELDS' keys: the money fields, the PO's own (spec §5b.4: PO number, paid by, the invoice totals), the money documents. */
+const SEND_BACK_KEYS = [
+  ...MONEY_FIELDS, "poNumber", "paidBy", PO_TOTALS_KEY, "doc:invoice", "doc:official-receipt", "doc:delivery-receipt", "other",
+] as const;
 
 const sendBackSchema = z.object({
   id: z.string().min(1),
@@ -749,22 +1003,27 @@ async function undoSendBackImpl(input: unknown): Promise<ActionResult<{ refNo: s
 /**
  * Money fields only (`.strict()`): a device field such as a serial is a schema error, never a silent drop. A PO has
  * no cost of its own — the unit price of a line is the cost of every asset registered from it, so `cost` is fixed
- * through `lines`.
+ * through `lines`. Migration 39 (spec §5b.4): the PO number, paid by and each of the seven totals are money fields
+ * too (PO_MONEY_FIELDS); the PO number and paid by can be corrected, not cleared.
  */
 const fixSchema = z.object({
   id: z.string().min(1),
   patch: z.object({
     vendorId: z.string().min(1, "Pick the supplier").optional(),
+    poNumber: z.string().trim().min(1, NEEDED.poNumber).max(PO_NUMBER_MAX, `Keep the PO number to ${PO_NUMBER_MAX} characters or fewer`).optional(),
     invoiceRef: z.string().trim().min(1, "Enter the SI number").max(60).optional(),
     receiptRef: z.string().trim().max(60).optional(),
     purchasedAt: dateStr.optional(),
+    paidBy: z.enum(PAID_BY, { error: "Pick credit card or debit card" }).optional(),
     fees: price.nullable().optional(),
+    totalSales: moneyText, lessVat: moneyText, netOfVat: moneyText, discount: moneyText,
+    amountDue: moneyText, addVat: moneyText, totalAmountDue: moneyText,
     lines: z.array(z.object({ id: z.string().min(1), unitPrice: price }).strict()).min(1).max(50).optional(),
   }).strict(),
   reason: optionalReason,
 });
 
-const HEADER_KEYS = ["vendorId", "invoiceRef", "receiptRef", "purchasedAt", "fees"] as const;
+const HEADER_KEYS = ["vendorId", "poNumber", "invoiceRef", "receiptRef", "purchasedAt", "paidBy", "fees", ...TOTAL_KEYS] as const;
 /** The PO facts an asset (and a registration's PurchaseRecord) copies; fees stay on the PO. */
 const COPIED_KEYS = ["vendorId", "invoiceRef", "receiptRef", "purchasedAt"] as const;
 
@@ -797,7 +1056,26 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
     ? await prisma.vendor.findUnique({ where: { id: patch.vendorId }, select: { id: true, archivedAt: true } })
     : null;
   if (patch.vendorId && !vendor) return validationError({ "patch.vendorId": "Unknown supplier" });
+  if (patch.poNumber) {
+    const owner = await poNumberOwner(patch.poNumber, id);
+    if (owner) return validationError({ "patch.poNumber": usedOn(patch.poNumber, owner.refNo) });
+  }
 
+  try {
+    return await fixWrite(id, patch, keys, reason, user, vendor);
+  } catch (err) {
+    // Another PO took the number between the pre-check and the write: the partial unique index refused it.
+    if (patch.poNumber && isPoNumberClash(err)) return validationError({ "patch.poNumber": await poNumberRefusal(patch.poNumber, id) });
+    throw err;
+  }
+}
+
+type FixPatch = z.infer<typeof fixSchema>["patch"];
+
+async function fixWrite(
+  id: string, patch: FixPatch, keys: Array<keyof FixPatch>, reason: string | null, user: Actor,
+  vendor: { id: string; archivedAt: Date | null } | null,
+): Promise<ActionResult<{ refNo: string; changed: string[] }>> {
   type Out = { refNo: string; changed: string[] };
   let out: Out | null = null;
   let failure: ActionResult<Out> | null = null;
@@ -807,11 +1085,16 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
     await lockPo(tx, id);
     const po = await tx.purchaseOrder.findUnique({
       where: { id },
-      select: { id: true, refNo: true, state: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true },
+      select: {
+        id: true, refNo: true, state: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
+        poNumber: true, paidBy: true, formV2: true, totalsConsistent: true, ...TOTALS_SELECT,
+      },
     });
     if (!po) { failure = conflict("That purchase order no longer exists."); return; }
     if (po.state === "CANCELLED") { failure = conflict(`${po.refNo} is cancelled.`); return; }
-    const lines = await tx.purchaseOrderLine.findMany({ where: { orderId: id }, select: { id: true, description: true, unitPrice: true } });
+    const lines = await tx.purchaseOrderLine.findMany({
+      where: { orderId: id }, select: { id: true, description: true, qty: true, closedShort: true, unitPrice: true },
+    });
     const assets = await tx.asset.findMany({ where: { purchaseOrderId: id }, select: ASSET_SELECT });
     const stage = poMoneyStage({ state: po.state, ...counts(assets) });
 
@@ -826,6 +1109,8 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
       if (err) { failure = validationError({ reason: err }); return; }
     }
     if (vendor?.archivedAt && vendor.id !== po.vendorId) { failure = validationError({ "patch.vendorId": "That supplier is archived" }); return; }
+    // A PO from the new form can't lose its total amount due (spec §5b.2).
+    if (po.formV2 && patch.totalAmountDue === null) { failure = validationError({ "patch.totalAmountDue": NEEDED.totalAmountDue }); return; }
     const lineById = new Map(lines.map((l, i) => [l.id, { ...l, index: i + 1 }]));
     if (patch.lines?.some((l) => !lineById.has(l.id))) {
       failure = conflict("This purchase order changed elsewhere — reload and try again.");
@@ -839,6 +1124,9 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
     if (patch.receiptRef !== undefined) after.receiptRef = patch.receiptRef ? patch.receiptRef : null;
     if (patch.purchasedAt !== undefined) after.purchasedAt = toDate(patch.purchasedAt);
     if (patch.fees !== undefined) after.fees = patch.fees;
+    if (patch.poNumber !== undefined) after.poNumber = patch.poNumber;
+    if (patch.paidBy !== undefined) after.paidBy = patch.paidBy;
+    for (const k of TOTAL_KEYS) if (patch[k] !== undefined) after[k] = patch[k];
     const headDiff = diffOf(po, after);
     const newPrice = new Map<string, number>();
     const lineDiff: AuditDiff = {};
@@ -855,10 +1143,27 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
     ];
     if (changed.length === 0) { failure = validationError({ patch: "Nothing changed — these are the values it already has." }); return; }
 
+    // Spec §5b.4: a fix to a price or a total re-checks whether the totals add up.
+    const consistency: AuditDiff = {};
+    if (newPrice.size > 0 || TOTAL_KEYS.some((k) => k in headDiff)) {
+      const totals = { ...rowTotals(po), ...Object.fromEntries(TOTAL_KEYS.filter((k) => k in headDiff).map((k) => [k, after[k]])) };
+      const next = totalsConsistency(
+        lines.map((l) => ({
+          qty: l.qty, closedShort: l.closedShort,
+          unitPrice: newPrice.get(l.id) ?? (l.unitPrice === null ? null : Number(l.unitPrice)),
+        })),
+        totals,
+      );
+      if (next !== (po.totalsConsistent ?? null)) consistency.totalsConsistent = { from: po.totalsConsistent ?? null, to: next };
+    }
+
     // ---- writes (every refusal is above this line) ----
     const now = new Date();
     const headChanges = Object.fromEntries(Object.keys(headDiff).map((k) => [k, after[k]]));
-    const hit = await tx.purchaseOrder.updateMany({ where: { id, state: po.state }, data: { ...headChanges, updatedAt: now } });
+    const hit = await tx.purchaseOrder.updateMany({
+      where: { id, state: po.state },
+      data: { ...headChanges, ...(consistency.totalsConsistent ? { totalsConsistent: consistency.totalsConsistent.to as boolean | null } : {}), updatedAt: now },
+    });
     if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
     for (const [lineId, unitPrice] of newPrice) {
       await tx.purchaseOrderLine.update({ where: { id: lineId }, data: { unitPrice } });
@@ -888,7 +1193,7 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
     const words = fieldPhrase(changed);
     await writeAudit(tx, {
       actorId: user.id, actorLabel: user.name, entityType: ENTITY, entityId: id, action: "po.fix",
-      diff: { ...headDiff, ...lineDiff }, reason, source: "web",
+      diff: { ...headDiff, ...lineDiff, ...consistency }, reason, source: "web",
     });
     await tx.noteEntry.create({
       data: { orderId: id, authorId: user.id, kind: "PO_FIXED", text: reason ? `Fixed the ${words}: ${reason}` : `Fixed the ${words}.` },
@@ -948,7 +1253,9 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
 
   await prisma.$transaction(async (tx) => {
     await lockPo(tx, id);
-    const po = await tx.purchaseOrder.findUnique({ where: { id }, select: { id: true, refNo: true, state: true } });
+    const po = await tx.purchaseOrder.findUnique({
+      where: { id }, select: { id: true, refNo: true, state: true, totalsConsistent: true, ...TOTALS_SELECT },
+    });
     if (!po) { failure = conflict("That purchase order no longer exists."); return; }
     if (po.state === "CANCELLED") { failure = conflict(`${po.refNo} is cancelled.`); return; }
     const line = await tx.purchaseOrderLine.findUnique({
@@ -967,10 +1274,30 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
     const closedShort = line.closedShort + qty;
     const state = po.state as PoState;
     const next = state === "WITH_IT" ? await stateAfterClose(tx, id, lineId, closedShort) : state;
+    // Spec §5b.4: units closed short leave the items, so the typed totals are checked again (totalsConsistency).
+    const allLines = await tx.purchaseOrderLine.findMany({
+      where: { orderId: id }, select: { id: true, qty: true, closedShort: true, unitPrice: true },
+    });
+    const wasConsistent = po.totalsConsistent ?? null;
+    const consistent = totalsConsistency(
+      allLines.map((l) => ({
+        qty: l.qty, closedShort: l.id === lineId ? closedShort : l.closedShort,
+        unitPrice: l.unitPrice === null ? null : Number(l.unitPrice),
+      })),
+      rowTotals(po),
+    );
+    const poWrite = next !== state || consistent !== wasConsistent;
 
-    // ---- writes (every refusal is above this line; the PO's guarded move comes first, so a miss writes nothing) ----
-    if (next !== state) {
-      const moved = await tx.purchaseOrder.updateMany({ where: { id, state }, data: { state: next, updatedAt: new Date() } });
+    // ---- writes (every refusal is above this line; the PO's guarded write comes first, so a miss writes nothing) ----
+    if (poWrite) {
+      const moved = await tx.purchaseOrder.updateMany({
+        where: { id, state },
+        data: {
+          ...(next !== state ? { state: next } : {}),
+          ...(consistent !== wasConsistent ? { totalsConsistent: consistent } : {}),
+          updatedAt: new Date(),
+        },
+      });
       if (moved.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
     }
     const hit = await tx.purchaseOrderLine.updateMany({
@@ -978,7 +1305,7 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
       data: { closedShort, closedShortReason: reason },
     });
     if (hit.count === 0) {
-      if (next !== state) throw new Error(`${po.refNo}: line changed under the PO row lock`); // rolls the move back
+      if (poWrite) throw new Error(`${po.refNo}: line changed under the PO row lock`); // rolls the PO's write back
       failure = conflict("Someone else changed this line first — reload and try again.");
       return;
     }
@@ -990,6 +1317,7 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
       diff: {
         ...(next !== state ? { state: { from: state, to: next } } : {}),
         line: { from: null, to: line.description }, closedShort: { from: line.closedShort, to: closedShort },
+        ...(consistent !== wasConsistent ? { totalsConsistent: { from: wasConsistent, to: consistent } } : {}),
       },
       reason, source: "web",
     });

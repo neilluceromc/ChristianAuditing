@@ -18,7 +18,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "lifecycle.return executed": "Returned (approved request)",
   "lifecycle.change-status executed": "Status changed (approved request)",
   "reservation.placed": "Hold placed", "reservation.released": "Hold released",
-  "document.uploaded": "Document attached", "document.signed": "Document signed",
+  "document.uploaded": "Document attached", "document.signed": "Document signed", "document.superseded": "Document removed",
   // Phase 47: the shared asset notes and attachments
   "note.posted": "Note posted", "note.replied": "Note reply", "note.resolved": "Note resolved", "note.reopened": "Note reopened",
   "attachment.uploaded": "Attachment added",
@@ -568,6 +568,11 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
     case "document.uploaded": {
       const doc = String(diff?.document?.to ?? "a document");
       return omitEntity ? `${actor}attached ${doc}` : `${actor}attached ${doc} to ${entry.entityLabel}`;
+    }
+    case "document.superseded": {
+      // PO form redesign: Remove marks a PO's document superseded (it stays on record, out of its slot)
+      const doc = String(diff?.document?.from ?? "a document");
+      return omitEntity ? `${actor}removed ${doc}` : `${actor}removed ${doc} from ${entry.entityLabel}`;
     }
     case "document.signed": {
       // the writer (inventory/document-actions.ts) keys this diff by the file name alone

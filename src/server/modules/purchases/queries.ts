@@ -1,9 +1,10 @@
-import type { AssetClass, Prisma, PurchaseOrderState, Team } from "@prisma/client";
+import type { AssetClass, PaidBy, Prisma, PurchaseOrderState, Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
 import { derivePoProgress, lineProgress, type poProgress } from "@/lib/po-flow";
+import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
 import { LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
 
@@ -34,6 +35,8 @@ export interface PurchaseUnitView {
   categoryName: string | null;
   cls: AssetClass | null;
   qty: number;
+  /** Migration 39: the line's unit ("pc" on every line before it). */
+  unit: string;
   /** number, never a Prisma.Decimal: this crosses into client components */
   unitPrice: number | null;
   price: string;
@@ -68,12 +71,23 @@ export interface PurchaseDetail {
   totalValue: number;
   department: { id: string; name: string } | null;
   supplier: { id: string; name: string; archived: boolean } | null;
+  /** The PO's documents still in their slots, newest first: a removed (superseded) one is left out… */
   documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
+  /** …and counted here: it stays on record (append-only). */
+  supersededCount: number;
   /** Migration 38: the PO's money (purchasedAt as YYYY-MM-DD for the date input; fees as a number). */
   invoiceRef: string | null;
   receiptRef: string | null;
   purchasedAt: string | null;
   fees: number | null;
+  /** Migration 39 (PO form redesign): the PO number, how it was paid, and the seven totals typed off the sales invoice
+   *  (numbers, never Decimals), with whether they added up at the last write (null when none is typed). All null on a
+   *  legacy PO; `formV2` is true for a PO from the new form, whose required fields apply on edit. */
+  poNumber: string | null;
+  paidBy: PaidBy | null;
+  totals: Record<TotalKey, number | null>;
+  totalsConsistent: boolean | null;
+  formV2: boolean;
   /** The open send-back, if any. */
   sentBack: { by: Team | null; byName: string | null; at: Date | null; note: string | null; fields: string[] } | null;
   /** Assets registered from it (all of them, through a line or not): editing and cancelling stop once there are any. */
@@ -200,6 +214,8 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       id: true, refNo: true, state: true, createdAt: true, submittedAt: true, reviewedAt: true,
       completedAt: true, cancelledAt: true, cancelReason: true, requestedById: true,
       invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
+      poNumber: true, paidBy: true, totalsConsistent: true, formV2: true,
+      totalSales: true, lessVat: true, netOfVat: true, discount: true, amountDue: true, addVat: true, totalAmountDue: true,
       sentBackBy: true, sentBackNote: true, sentBackFields: true, sentBackAt: true,
       sentBackByUser: { select: { name: true } },
       _count: { select: { assets: true } },
@@ -241,6 +257,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       categoryName: u.category?.name ?? null,
       cls: u.category?.cls ?? null,
       qty: u.qty,
+      unit: u.unit,
       unitPrice: u.unitPrice === null ? null : price,
       price: u.unitPrice === null ? "—" : fmtMoney(price),
       lineTotal: u.unitPrice === null ? "—" : fmtMoney(price * u.qty),
@@ -276,14 +293,20 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
     totalValue,
     department: r.department ? { id: r.department.id, name: r.department.name } : null,
     supplier: r.vendor ? { id: r.vendor.id, name: r.vendor.name, archived: r.vendor.archivedAt !== null } : null,
-    documents: r.documents.map((d) => ({
+    documents: r.documents.filter((d) => d.supersededAt === null).map((d) => ({
       id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
       at: fmtDate(d.createdAt), downloadHref: `/purchases/${r.id}/documents/${d.id}/download`,
     })),
+    supersededCount: r.documents.filter((d) => d.supersededAt !== null).length,
     invoiceRef: r.invoiceRef,
     receiptRef: r.receiptRef,
     purchasedAt: r.purchasedAt ? r.purchasedAt.toISOString().slice(0, 10) : null,
     fees: r.fees === null ? null : Number(r.fees),
+    poNumber: r.poNumber,
+    paidBy: r.paidBy,
+    totals: Object.fromEntries(TOTAL_KEYS.map((k) => [k, r[k] === null ? null : Number(r[k])])) as Record<TotalKey, number | null>,
+    totalsConsistent: r.totalsConsistent,
+    formV2: r.formV2,
     sentBack: r.state === "SENT_BACK"
       ? { by: r.sentBackBy, byName: r.sentBackByUser?.name ?? null, at: r.sentBackAt, note: r.sentBackNote, fields: r.sentBackFields }
       : null,

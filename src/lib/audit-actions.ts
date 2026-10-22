@@ -14,6 +14,8 @@ export const AUDIT_ACTIONS = [
   "lifecycle.assign", "lifecycle.return", "lifecycle.change-status", "lifecycle.replace", "lifecycle.triage",
   "lifecycle.transfer", "loan.due-changed", "reservation.placed", "reservation.released",
   "document.uploaded", "document.signed", "secret.created", "SECRET_READ",
+  // PO form redesign (spec §5b.1): a PO's document removed — marked superseded, never deleted (document-actions.ts)
+  "document.superseded",
   // Phase 47: the shared asset notes and attachments (src/server/modules/assets)
   "note.posted", "note.replied", "note.resolved", "note.reopened", "attachment.uploaded",
   // approvals: the queue's transitions and the worker

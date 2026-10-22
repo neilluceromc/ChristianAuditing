@@ -291,7 +291,7 @@ export function undoState(asset: UndoAsset, entries: readonly UndoEntry[], userI
 // ---- a PO's send-back (Task 6 fix round 1, spec §5: "the new send-backs", one action each) ---------------------------
 
 /** PO entries that never block an undo: a comment or a document changes nothing the undo puts back. */
-const PO_QUIET: readonly string[] = ["comment", "document.uploaded"];
+const PO_QUIET: readonly string[] = ["comment", "document.uploaded", "document.superseded"];
 
 export interface PoSendBackUndoItem {
   assetId: string;
