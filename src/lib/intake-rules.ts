@@ -1,5 +1,6 @@
 import type { AssetClass, Role } from "@prisma/client";
 import type { PoState } from "./po-flow";
+import { TOTAL_KEYS } from "./po-totals";
 import type { RegFieldKey } from "./registration";
 
 /**
@@ -22,6 +23,14 @@ export const DEVICE_FIELDS = ["brand", "model", "categoryId", "serial", "warrant
 export type MoneyField = (typeof MONEY_FIELDS)[number];
 export type DeviceField = (typeof DEVICE_FIELDS)[number];
 export type IntakeField = MoneyField | DeviceField;
+
+/**
+ * Migration 39 (spec §5b.4): a PO's money fields — the asset-level ones plus the PO number, how it was paid and the
+ * seven typed totals. All Purchasing's; `canEditField` holds them to the money rules. MONEY_FIELDS stays as it was,
+ * so asset-level code is untouched.
+ */
+export const PO_MONEY_FIELDS = [...MONEY_FIELDS, "poNumber", "paidBy", ...TOTAL_KEYS] as const;
+export type PoMoneyField = (typeof PO_MONEY_FIELDS)[number];
 
 /** A field key as the registration form and a send-back name it. "other" has no owner: the sender picks the team. */
 export type OwnedKey = IntakeField | Exclude<RegFieldKey, "other">;
@@ -61,12 +70,13 @@ const OK = { ok: true, reasonRequired: false } as const;
 const OK_REASON = { ok: true, reasonRequired: true } as const;
 const no = (why: string): EditVerdict => ({ ok: false, why });
 
-export function canEditField(role: Role, field: IntakeField, cls: AssetClass, stage: IntakeStage): EditVerdict {
+/** A device field follows the class; anything else (MONEY_FIELDS, PO_MONEY_FIELDS) is money, held by the stage. */
+export function canEditField(role: Role, field: IntakeField | PoMoneyField, cls: AssetClass, stage: IntakeStage): EditVerdict {
   if (role === "viewer") return no("Viewers cannot edit");
 
   if ((DEVICE_FIELDS as readonly string[]).includes(field)) {
     if (role === "admin") return OK;
-    const owner = fieldOwner(field, cls);
+    const owner = fieldOwner(field as DeviceField, cls);
     if (role === "finance_staff") return no(owner === "IT" ? "Send it back to IT" : "Send it back to Purchasing");
     return teamOfRole(role) === owner ? OK : no(owner === "IT" ? "IT owns this field" : "Purchasing owns this field");
   }

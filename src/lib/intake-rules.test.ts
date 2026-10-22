@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AssetClass, Role } from "@prisma/client";
 import {
-  DEVICE_FIELDS, EDIT_REASON, MONEY_FIELDS, assetMoneyStage, canEditField, fieldOwner, poMoneyStage,
+  DEVICE_FIELDS, EDIT_REASON, MONEY_FIELDS, PO_MONEY_FIELDS, assetMoneyStage, canEditField, fieldOwner, poMoneyStage,
   reasonError, returnTeamFor, teamOfRole, type IntakeField, type IntakeStage,
 } from "./intake-rules";
+import { TOTAL_KEYS } from "./po-totals";
 
 const CLASSES: AssetClass[] = ["IT", "PURCHASING"];
 
@@ -120,6 +121,35 @@ describe("canEditField — money fields", () => {
       for (const who of ["purchasing", "it", "finance", "admin"] as const) {
         it(`${cls} / ${row.stage} / ${who}`, () => {
           for (const f of MONEY_FIELDS) {
+            expectCell(canEditField(ROLE_OF[who], f, cls, row.stage), row[who], who === "admin" ? undefined : row.why[who]);
+          }
+        });
+      }
+    }
+  }
+});
+
+describe("PO_MONEY_FIELDS (migration 39)", () => {
+  it("is the money fields plus PO number, paid by and the seven totals; MONEY_FIELDS is unchanged", () => {
+    expect(MONEY_FIELDS).toEqual(["cost", "fees", "purchasedAt", "vendorId", "invoiceRef", "receiptRef"]);
+    expect(PO_MONEY_FIELDS).toEqual([...MONEY_FIELDS, "poNumber", "paidBy", ...TOTAL_KEYS]);
+  });
+
+  it("Finance may fix a typed total with a reason while it's with Finance", () => {
+    expect(canEditField("finance_staff", "totalAmountDue", "PURCHASING", "with-finance")).toEqual({ ok: true, reasonRequired: true });
+  });
+
+  it("Purchasing is refused the PO number once approved", () => {
+    expect(canEditField("purchasing_staff", "poNumber", "PURCHASING", "approved")).toEqual({
+      ok: false, why: "Approved: only Finance can change it",
+    });
+  });
+
+  for (const cls of CLASSES) {
+    for (const row of MONEY_TABLE) {
+      for (const who of ["purchasing", "it", "finance", "admin"] as const) {
+        it(`follows the money table: ${cls} / ${row.stage} / ${who}`, () => {
+          for (const f of PO_MONEY_FIELDS) {
             expectCell(canEditField(ROLE_OF[who], f, cls, row.stage), row[who], who === "admin" ? undefined : row.why[who]);
           }
         });

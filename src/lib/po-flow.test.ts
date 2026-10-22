@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PO_STATE_LABEL, canRegisterLine, legacyPoState, lineProgress, poProgress, poRefNo, poStateFor, stateAfterSave,
+  PAID_BY_LABEL, PO_STATE_LABEL, canRegisterLine, legacyPoState, lineProgress, poProgress, poRefNo, poStateFor, stateAfterSave,
   poRefSearch, derivePoProgress,
 } from "./po-flow";
 
@@ -102,6 +102,9 @@ describe("legacyPoState", () => {
 describe("labels and refs", () => {
   it("labels every state", () => {
     expect(PO_STATE_LABEL).toEqual({ WITH_IT: "With IT", SENT_BACK: "Sent back to Purchasing", READY: "Ready to register", CANCELLED: "Cancelled" });
+  });
+  it("labels the two ways a PO is paid", () => {
+    expect(PAID_BY_LABEL).toEqual({ CREDIT_CARD: "Credit card", DEBIT_CARD: "Debit card" });
   });
   it("pads the PO number to four digits", () => {
     expect(poRefNo(188)).toBe("PO-0188");

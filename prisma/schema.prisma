@@ -68,6 +68,12 @@ enum NotificationKind {
   CHANGED
 }
 
+/// Migration 39 (PO form redesign, spec §4): how a purchase order was paid. Labels: PAID_BY_LABEL in src/lib/po-flow.ts.
+enum PaidBy {
+  CREDIT_CARD
+  DEBIT_CARD
+}
+
 enum PurchaseUnitState {
   PENDING
   APPROVED
@@ -206,6 +212,7 @@ model User {
   assetNotesAuthored       AssetNote[]             @relation("assetNoteAuthor")
   notificationsActed       Notification[]          @relation("notificationActor")
   notificationReads        NotificationRead[]
+  categoriesCreated        AssetCategory[]         @relation("categoriesCreated")
 }
 
 model UserPreference {
@@ -257,6 +264,11 @@ model AssetCategory {
   /// Phase 35 (spec §5.3): Finance's straight-line policy for the category; life null = no policy.
   depreciationLifeMonths     Int?
   depreciationSalvagePercent Decimal?    @db.Decimal(5, 2)
+  /// Migration 39 (spec §5): null = an IT category Purchasing created from a PO that IT hasn't confirmed yet
+  /// (usable on PO forms only). Existing categories were backfilled as confirmed.
+  confirmedAt DateTime?
+  createdById String?
+  createdBy   User?       @relation("categoriesCreated", fields: [createdById], references: [id], onDelete: SetNull)
   types     AssetType[]
   assets    Asset[]
   poLines   PurchaseOrderLine[]
@@ -363,6 +375,9 @@ model RequestDocument {
   uploadedById String?
   uploadedBy   User?         @relation("requestDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
   createdAt    DateTime      @default(now())
+  /// Migration 39 (spec §5b.1): Remove marks a document superseded instead of deleting it (append-only).
+  supersededAt   DateTime?
+  supersededById String?
 
   @@index([orderId])
 }
@@ -691,6 +706,22 @@ model PurchaseOrder {
   receiptRef    String?
   purchasedAt   DateTime?
   fees          Decimal?           @db.Decimal(12, 2)
+  /// Migration 39 (PO form redesign, spec §4): the vendor's PO number (unique case- and space-insensitively among
+  /// POs that aren't CANCELLED — a partial unique index in SQL only), how it was paid, and the seven totals typed
+  /// off the sales invoice (never computed; checkTotals in src/lib/po-totals.ts). NULL on legacy rows.
+  poNumber         String?
+  paidBy           PaidBy?
+  totalSales       Decimal?        @db.Decimal(12, 2)
+  lessVat          Decimal?        @db.Decimal(12, 2)
+  netOfVat         Decimal?        @db.Decimal(12, 2)
+  discount         Decimal?        @db.Decimal(12, 2)
+  amountDue        Decimal?        @db.Decimal(12, 2)
+  addVat           Decimal?        @db.Decimal(12, 2)
+  totalAmountDue   Decimal?        @db.Decimal(12, 2)
+  /// Whether the typed totals added up at the last write. Never blocks a save.
+  totalsConsistent Boolean?
+  /// True for POs created on the new form: its required fields apply. Legacy POs stay false.
+  formV2           Boolean         @default(false)
   /// Migration 38 (spec §7): the open send-back — when, who, which team, which fields, why. Cleared on resubmit.
   sentBackAt     DateTime?
   sentBackById   String?
@@ -730,6 +761,8 @@ model PurchaseOrderLine {
   specs        String?
   qty          Int               @default(1)
   unitPrice    Decimal?          @db.Decimal(12, 2)
+  /// Migration 39: free text, 1–12 characters (unitSchema in src/lib/po-units.ts).
+  unit         String            @default("pc") @db.VarChar(12)
   /// Spec §3: the line's class comes from this category. NULL on legacy lines (class picked at Register).
   categoryId   String?
   category     AssetCategory?    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
