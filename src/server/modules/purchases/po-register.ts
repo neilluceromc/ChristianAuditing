@@ -52,7 +52,23 @@ const lineSchema = z.object({
   warrantyCoveredBy: z.union([z.literal(""), z.enum(WARRANTY_COVERED_BY)]).optional(),
   warrantyContact: z.string().trim().max(160).optional(),
   units: z.array(unitSchema).min(1, "Register at least one unit").max(MAX_BATCH),
+  /**
+   * PO form redesign (spec §5, §5b.5): IT's answer to a new IT category Purchasing created on the PO form — keep it, or
+   * swap in a confirmed IT category. Only while the category is unconfirmed and nothing on the line is registered;
+   * registering with no answer confirms it.
+   */
+  categoryAction: z.union([z.literal("confirm"), z.object({ replaceWith: z.string().min(1) })]).optional(),
 });
+
+const REPLACE_IT_ONLY = "Choose a confirmed IT category. If this isn't IT gear, send the PO back to Purchasing with Category ticked.";
+
+type Cat = { id: string; name: string; cls: AssetClass; confirmedAt: Date | null };
+type LinePlan = {
+  categoryId: string;
+  cls: AssetClass;
+  /** The line's unconfirmed category IT replaced with `categoryId`, or null. */
+  replaced: Cat | null;
+};
 
 const registerSchema = z.object({
   poId: z.string().min(1),
@@ -99,6 +115,7 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
 
   let out: Registered | null = null;
   let failure: ActionResult<Registered> | null = null;
+  let categoriesChanged = false;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -117,9 +134,11 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
       }
 
       // Every line of the PO, not only the submitted ones: whether the PO leaves IT's queue depends on all of them.
+      // In the PO page's order: the line number in a bell ("PO-0215 line 1") is the one the PO page shows.
       const allLines = await tx.purchaseOrderLine.findMany({
         where: { orderId: po.id },
         select: { id: true, description: true, categoryId: true, qty: true, unitPrice: true, closedShort: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       });
       const lineById = new Map(allLines.map((l) => [l.id, l]));
       if (lineIds.some((id) => !lineById.has(id))) {
@@ -127,27 +146,53 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
         return;
       }
 
-      // ---- category and class per line: the line's own, or (an old unit) the one picked here ----
+      // ---- what is already registered on each line, read under the lock ----
+      const done = await tx.asset.groupBy({
+        by: ["purchaseOrderLineId"], where: { purchaseOrderLineId: { in: allLines.map((l) => l.id) } }, _count: { _all: true },
+      });
+      const registeredOn = new Map(done.map((g) => [g.purchaseOrderLineId, g._count._all]));
+
+      // ---- category and class per line: the line's own (or IT's replacement for it), or (an old unit) the one picked here ----
       const catIds = [...new Set([
         ...allLines.map((l) => l.categoryId),
         ...d.lines.map((l) => l.categoryId),
+        ...d.lines.map((l) => (typeof l.categoryAction === "object" ? l.categoryAction.replaceWith : null)),
       ].filter((x): x is string => !!x))];
-      const cats = await tx.assetCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true, cls: true } });
+      const cats: Cat[] = await tx.assetCategory.findMany({
+        where: { id: { in: catIds } }, select: { id: true, name: true, cls: true, confirmedAt: true },
+      });
       const catById = new Map(cats.map((c) => [c.id, c]));
-      const plan: Array<{ categoryId: string; cls: AssetClass } | null> = d.lines.map((l, i) => {
+      const plan: Array<LinePlan | null> = d.lines.map((l, i) => {
         const line = lineById.get(l.lineId)!;
         const own = line.categoryId ? catById.get(line.categoryId) : undefined;
-        if (line.categoryId && l.categoryId && l.categoryId !== line.categoryId) {
-          errors[`lines.${i}.categoryId`] = `This line is ${own?.name ?? "another category"}`;
+
+        // Spec §5b.5: IT swaps a new IT category for a confirmed IT one — only while it is new and nothing is registered.
+        let replaceWith: Cat | undefined;
+        if (typeof l.categoryAction === "object") {
+          const key = `lines.${i}.categoryAction`;
+          if (!own) { errors[key] = "This line has no category to replace — pick one"; return null; }
+          if ((registeredOn.get(line.id) ?? 0) > 0) {
+            errors[key] = `Units on this line are already registered as ${own.name} — its category can't change now.`;
+            return null;
+          }
+          if (own.confirmedAt !== null) { errors[key] = `${own.name} is already confirmed — reload to see it.`; return null; }
+          const target = catById.get(l.categoryAction.replaceWith);
+          if (!target || target.cls !== "IT" || target.confirmedAt === null) { errors[key] = REPLACE_IT_ONLY; return null; }
+          replaceWith = target;
+        }
+
+        const lineCategory = replaceWith?.id ?? line.categoryId;
+        if (lineCategory && l.categoryId && l.categoryId !== lineCategory) {
+          errors[`lines.${i}.categoryId`] = `This line is ${(replaceWith ?? own)?.name ?? "another category"}`;
           return null;
         }
-        const id = line.categoryId ?? l.categoryId;
+        const id = lineCategory ?? l.categoryId;
         if (!id) { errors[`lines.${i}.categoryId`] = "Pick a category"; return null; }
         const cat = catById.get(id);
         if (!cat) { errors[`lines.${i}.categoryId`] = "Unknown category"; return null; }
         const v = canRegisterLine(user.role, cat.cls, state);
         if (!v.ok) { errors[`lines.${i}`] = v.why; return null; }
-        return { categoryId: cat.id, cls: cat.cls };
+        return { categoryId: cat.id, cls: cat.cls, replaced: replaceWith ? own! : null };
       });
       // One submit, one class — except for an admin, who is every party.
       const classes = new Set(plan.filter((p) => p !== null).map((p) => p.cls));
@@ -170,11 +215,7 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
         }
       }
 
-      // ---- what is left on each line, re-read under the lock ----
-      const done = await tx.asset.groupBy({
-        by: ["purchaseOrderLineId"], where: { purchaseOrderLineId: { in: allLines.map((l) => l.id) } }, _count: { _all: true },
-      });
-      const registeredOn = new Map(done.map((g) => [g.purchaseOrderLineId, g._count._all]));
+      // ---- what is left on each line (registeredOn was read under the lock above) ----
       for (const [i, l] of d.lines.entries()) {
         const line = lineById.get(l.lineId)!;
         const { remaining } = lineProgress({ qty: line.qty, registered: registeredOn.get(line.id) ?? 0, closedShort: line.closedShort });
@@ -229,6 +270,58 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
       const now = new Date();
       const hit = await tx.purchaseOrder.updateMany({ where: { id: po.id, state }, data: { state: next, updatedAt: now } });
       if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
+
+      // ---- new IT categories (spec §5, §5b.5–6): IT's replacements first, then whatever is still new is confirmed ----
+      for (const [i, l] of d.lines.entries()) {
+        const p = plan[i]!;
+        if (!p.replaced) continue;
+        const old = p.replaced;
+        const to = catById.get(p.categoryId)!;
+        const line = lineById.get(l.lineId)!;
+        const n = allLines.findIndex((x) => x.id === line.id) + 1;
+        await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { categoryId: to.id } });
+        // A replaced category goes only when nothing else uses it: another PO's line, an asset or a type.
+        const [onLines, onAssets, withTypes] = await Promise.all([
+          tx.purchaseOrderLine.count({ where: { categoryId: old.id } }),
+          tx.asset.count({ where: { categoryId: old.id } }),
+          tx.assetType.count({ where: { categoryId: old.id } }),
+        ]);
+        const remove = onLines + onAssets + withTypes === 0;
+        if (remove) await tx.assetCategory.delete({ where: { id: old.id } });
+        categoriesChanged = true;
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "purchase-order", entityId: po.id, action: "category.replace",
+          diff: {
+            line: { from: null, to: n },
+            category: { from: old.name, to: to.name },
+            ...(remove ? { removed: { from: null, to: old.name } } : {}),
+          },
+          source: "web",
+        });
+        await notify(tx, {
+          team: "PURCHASING", kind: "CHANGED",
+          title: `${user.role === "admin" ? "An admin" : "IT"} changed the category on ${po.refNo} line ${n} to ${to.name}`,
+          body: `${line.description} · was ${old.name}`,
+          href: `/purchases/${po.id}`, actorId: user.id, actorRole: user.role,
+          entityType: "purchase-order", entityId: po.id,
+        });
+      }
+      const confirmedHere = new Set<string>();
+      for (const p of plan) {
+        const cat = catById.get(p!.categoryId)!;
+        if (cat.confirmedAt !== null || confirmedHere.has(cat.id)) continue;
+        confirmedHere.add(cat.id);
+        const said = d.lines.some((x, j) => x.categoryAction === "confirm" && plan[j]!.categoryId === cat.id);
+        const set = await tx.assetCategory.updateMany({ where: { id: cat.id, confirmedAt: null }, data: { confirmedAt: now } });
+        if (set.count === 0) continue;
+        categoriesChanged = true;
+        await writeAudit(tx, {
+          actorId: user.id, actorLabel: user.name, entityType: "asset-category", entityId: cat.id, action: "category.confirm",
+          // Registering without a word confirms it too (spec §5b.5): the entry says which.
+          diff: { confirmed: { from: false, to: true }, ...(said ? {} : { implicit: { from: null, to: true } }) },
+          source: "web",
+        });
+      }
 
       // One registration group. Its class is the submit's (an admin's mixed submit files under IT, whose Labels
       // queue it lands in first); its unit cost is the line's price when one line is registered, as copyPoMoney keeps it.
@@ -327,6 +420,10 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
         ? "One of those serials was just registered. Reload and try again."
         : "One of those tags was just taken. Reload and try again.");
     }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
+      // A replaced category picked up by another PO between the usage check and its delete: the whole submit rolled back.
+      return conflict("That category was just used elsewhere — nothing was written. Try that again.");
+    }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2028") {
       return conflict("The database is busy right now — nothing was written. Try that again.");
     }
@@ -341,5 +438,6 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
   revalidatePath("/inventory/labels");
   revalidatePath("/finance/assets");
   revalidatePath("/audit");
+  if (categoriesChanged) revalidatePath("/admin/asset-categories");
   return ok(out!);
 }

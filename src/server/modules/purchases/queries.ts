@@ -34,6 +34,11 @@ export interface PurchaseUnitView {
   categoryId: string | null;
   categoryName: string | null;
   cls: AssetClass | null;
+  /**
+   * Migration 39 (spec §5): false while the line's category is IT gear Purchasing created on the PO form and IT hasn't
+   * confirmed it yet; true otherwise (and on a legacy line, which has no category to confirm).
+   */
+  categoryConfirmed: boolean;
   qty: number;
   /** Migration 39: the line's unit ("pc" on every line before it). */
   unit: string;
@@ -230,7 +235,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       // See the identical comment in listPurchases: units created in the
       // same batch tie on createdAt, so `unit.index` (unit-N anchors, the
       // bounce-back's "Jump to unit 02") needs a stable tiebreaker.
-      lines: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: { category: { select: { name: true, cls: true } } } },
+      lines: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: { category: { select: { name: true, cls: true, confirmedAt: true } } } },
       notes: {
         orderBy: { createdAt: "asc" },
         select: { id: true, kind: true, text: true, createdAt: true, author: { select: { name: true } } },
@@ -256,6 +261,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
       categoryId: u.categoryId,
       categoryName: u.category?.name ?? null,
       cls: u.category?.cls ?? null,
+      categoryConfirmed: u.category ? u.category.confirmedAt !== null : true,
       qty: u.qty,
       unit: u.unit,
       unitPrice: u.unitPrice === null ? null : price,

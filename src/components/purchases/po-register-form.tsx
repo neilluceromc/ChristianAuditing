@@ -34,6 +34,13 @@ export interface PoRegisterLine {
   categoryId: string | null;
   categoryName: string | null;
   cls: AssetClass | null;
+  /**
+   * PO form redesign (spec §5, §5b.5): false while the line's category is IT gear Purchasing created on the PO form and
+   * IT hasn't confirmed it. With nothing on the line registered yet, the card asks IT to confirm it or choose another.
+   */
+  categoryConfirmed: boolean;
+  /** Units already registered from this line: once one is, the category is settled. */
+  registered: number;
   price: string;
   remaining: number;
   progressLabel: string;
@@ -51,12 +58,18 @@ interface Draft {
   warrantyUntil: string;
   coveredBy: string;
   contact: string;
+  /** IT's answer to a new IT category: Confirm, or a confirmed IT category to use instead (spec §5b.5). */
+  confirm: boolean;
+  replaceWith: string;
 }
 
 const emptyDraft = (count: number): Draft => ({
   count: String(count), rows: resizeRows([], count), categoryId: "", typeId: "", model: "", brand: "",
-  warrantyUntil: "", coveredBy: "", contact: "",
+  warrantyUntil: "", coveredBy: "", contact: "", confirm: false, replaceWith: "",
 });
+
+/** The new-category prompt shows while the line's category is unconfirmed and nothing on it is registered (spec §5b.5). */
+const asksCategory = (l: PoRegisterLine) => !!l.categoryId && !l.categoryConfirmed && l.registered === 0;
 
 /** "0".."remaining" as a whole number, else null. */
 function countOf(text: string, remaining: number): number | null {
@@ -99,14 +112,15 @@ export function PoRegisterForm({ poId, refNo, lines, catalog }: {
   const [banner, setBanner] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
-  const categoryOf = (l: PoRegisterLine, d: Draft) => catalog.find((c) => c.id === (l.categoryId ?? d.categoryId));
+  const categoryOf = (l: PoRegisterLine, d: Draft) => catalog.find((c) => c.id === (d.replaceWith || l.categoryId || d.categoryId));
   const clsOf = (l: PoRegisterLine, d: Draft): AssetClass | null => l.cls ?? categoryOf(l, d)?.cls ?? null;
 
   function patch(id: string, p: Partial<Draft>) {
     setDrafts((all) => ({ ...all, [id]: { ...all[id], ...p } }));
     setErrors((all) => {
       if (!all[id]) return all;
-      const keys = Object.keys(p).flatMap((k) => (k === "rows" ? ["tags", "serials"] : [k]));
+      const keys = Object.keys(p).flatMap((k) =>
+        k === "rows" ? ["tags", "serials"] : k === "confirm" || k === "replaceWith" ? ["categoryAction"] : [k]);
       const mine = Object.fromEntries(Object.entries(all[id]).filter(([k]) => !keys.some((x) => k === x || k.startsWith(`${x}.`))));
       return { ...all, [id]: mine };
     });
@@ -166,6 +180,9 @@ export function PoRegisterForm({ poId, refNo, lines, catalog }: {
         warrantyCoveredBy: d.coveredBy || undefined,
         warrantyContact: d.contact || undefined,
         units: d.rows.map((r) => ({ tag: r.tag, serial: r.serial.trim() || undefined })),
+        categoryAction: !asksCategory(l) ? undefined
+          : d.replaceWith ? { replaceWith: d.replaceWith }
+          : d.confirm ? ("confirm" as const) : undefined,
       };
     });
     const firstCls = clsOf(chosen[0], drafts[chosen[0].id]);
@@ -245,7 +262,9 @@ function LineCard({ line, draft, errors, attempted, catalog, onChange, disabled 
   const base = useId();
   const titleId = `${base}-title`;
   const countId = `${base}-count`;
-  const category = catalog.find((c) => c.id === (line.categoryId ?? draft?.categoryId));
+  const category = catalog.find((c) => c.id === (draft?.replaceWith || line.categoryId || draft?.categoryId));
+  const replaceId = `${base}-replace`;
+  const askId = `${base}-ask`;
   const cls: AssetClass | null = line.cls ?? category?.cls ?? null;
   const rows = draft?.rows ?? [];
   const { hits, flush } = useIdentifierCheck(rows.map((r) => r.tag), rows.map((r) => r.serial), cls);
@@ -294,6 +313,35 @@ function LineCard({ line, draft, errors, attempted, catalog, onChange, disabled 
     <section aria-labelledby={titleId} className="flex flex-col gap-4 rounded-[14px] border border-border bg-surface p-4 sm:p-5">
       {head}
       {errors._line && <FormError>{errors._line}</FormError>}
+
+      {asksCategory(line) && (
+        <div role="group" aria-labelledby={askId} className="flex flex-col gap-2 rounded-[10px] border border-accent-soft-border bg-accent-soft p-3">
+          <p id={askId} className="text-[12.5px] font-medium text-fg">
+            New category &apos;{line.categoryName}&apos; — Confirm or choose another
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button" size="sm" variant={draft.confirm ? "primary" : "secondary"} aria-pressed={draft.confirm} disabled={disabled}
+              onClick={() => onChange({ confirm: !draft.confirm, replaceWith: "", typeId: "" })}
+            >
+              {draft.confirm ? "Confirmed" : "Confirm"}
+            </Button>
+            <span className="text-[11.5px] text-fg-muted">or</span>
+            <label htmlFor={replaceId} className="sr-only">Choose another IT category</label>
+            <Select
+              id={replaceId} value={draft.replaceWith} disabled={disabled} invalid={!!errors.categoryAction} className="w-auto py-1.5 text-xs"
+              onChange={(e) => onChange({ replaceWith: e.target.value, confirm: false, typeId: "" })}
+            >
+              <option value="">Choose another IT category…</option>
+              {catalog.filter((c) => c.cls === "IT").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </div>
+          <p className="text-[11px] text-fg-muted">
+            Registering without choosing confirms it. If it isn&apos;t IT gear, send the PO back to Purchasing with Category ticked.
+          </p>
+          <FormError>{errors.categoryAction}</FormError>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor={countId} className="text-xs font-medium text-fg">How many arrived now</label>

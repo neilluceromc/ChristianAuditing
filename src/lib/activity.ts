@@ -36,6 +36,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "po.fix": "Fixed the money details", "po.cancel": "Cancelled the purchase order", "po.line-closed": "Closed a line short",
   "po.register": "Registered from the purchase order", "po.send-back.undone": "Send-back undone",
   "asset.money.fixed": "Fixed the money details",
+  // PO form redesign (spec §5): categories made on the PO form, and IT's confirm or replace at Register
+  "category.create": "Category added from a PO", "category.confirm": "Category confirmed", "category.replace": "Category replaced",
   "employee.transferred": "Transferred", "offboarding.completed": "Offboarding completed",
   "acknowledgement.recorded": "Acknowledgement signed", "purchase.recorded": "Purchase recorded",
   "policy.exception.added": "Exception added", "policy.exception.waived": "Exception waived", "policy.exception.removed": "Exception removed",
@@ -360,6 +362,27 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       const n = diff?.registered?.to;
       const assets = typeof n === "number" && n > 0 ? plural(n, "asset") : "assets";
       return omitEntity ? `${actor}registered ${assets} from the purchase order` : `${actor}registered ${assets} from ${entry.entityLabel}`;
+    }
+    // PO form redesign (spec §5): on the category (entityLabel is its name; a replaced one may be gone, so the diff names it)
+    case "category.create": {
+      const name = String(diff?.name?.to ?? entry.entityLabel);
+      const kind = diff?.cls?.to === "IT" ? "IT gear" : diff?.cls?.to === "PURCHASING" ? "an office item" : "a category";
+      return `${actor}added ${name} as ${kind} from a purchase order`;
+    }
+    case "category.confirm": {
+      const how = diff?.implicit?.to === true ? " by registering it" : "";
+      return omitEntity ? `${actor}confirmed the category${how}` : `${actor}confirmed the category ${entry.entityLabel}${how}`;
+    }
+    // On the purchase order (entityLabel is the PO number)
+    case "category.replace": {
+      const line = diff?.line?.to;
+      const where = typeof line === "number" ? `line ${line}` : "a line";
+      const from = diff?.category?.from;
+      const to = diff?.category?.to;
+      const change = typeof from === "string" && typeof to === "string" ? ` from ${from} to ${to}` : "";
+      return omitEntity
+        ? `${actor}changed the category on ${where}${change}`
+        : `${actor}changed the category on ${entry.entityLabel} ${where}${change}`;
     }
     // Phase 20 (R5, ruling on Task 3's report): transferEmployee writes
     // `diff: { department: { from, to }, title: { from, to }, effectiveAt: {

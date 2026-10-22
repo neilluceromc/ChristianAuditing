@@ -25,7 +25,12 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
   if (!canEditAsset(user.role, asset)) redirect(`/inventory/${id}`);
 
   const [categories, types, vendors] = await Promise.all([
-    prisma.assetCategory.findMany({ where: { cls: asset.cls }, orderBy: { name: "asc" } }),
+    // PO form redesign (spec §5b.6): a new IT category from a PO is offered only once IT confirms it — never at the
+    // cost of blanking the asset's own.
+    prisma.assetCategory.findMany({
+      where: { cls: asset.cls, OR: [{ confirmedAt: { not: null } }, { id: asset.categoryId }] },
+      orderBy: { name: "asc" },
+    }),
     prisma.assetType.findMany({ where: { category: { cls: asset.cls } }, orderBy: { name: "asc" } }),
     // Spec §2.1: archived suppliers leave pickers, but never at the cost of
     // blanking a real value — same rule the request picker uses

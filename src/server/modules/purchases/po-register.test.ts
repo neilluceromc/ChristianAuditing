@@ -85,6 +85,11 @@ vi.mock("@/server/db/client", () => {
       for (const r of hit) Object.assign(r, data);
       return { count: hit.length };
     },
+    delete: async ({ where }: { where: R }) => {
+      const i = rows(name).findIndex((x) => matches(x, where));
+      if (i < 0) throw new Error(`no ${name} row`);
+      return structuredClone(rows(name).splice(i, 1)[0]);
+    },
   });
   const client = Object.fromEntries(
     ["purchaseOrder", "purchaseOrderLine", "asset", "purchaseRecord", "noteEntry", "auditEntry", "notification",
@@ -122,6 +127,7 @@ const ANA = { id: "u-ana", name: "Ana Cruz", role: "finance_staff" };
 const ADA = { id: "u-ada", name: "Ada Admin", role: "admin" };
 
 const BOUGHT = new Date("2026-10-15T00:00:00Z");
+const CONFIRMED = new Date("2026-01-01T00:00:00Z");
 
 const t = (name: string) => h.tables[name];
 const po = () => t("purchaseOrder").find((p) => p.id === "po1")!;
@@ -162,10 +168,11 @@ beforeEach(() => {
   h.revalidated = [];
   h.tables = {
     user: [PAT, IVAN, ANA, ADA].map((u) => ({ ...u })),
+    // Confirmed, as every category is unless Purchasing created it as IT gear from a PO (migration 39).
     assetCategory: [
-      { id: "cat-lt", name: "Laptops", cls: "IT" },
-      { id: "cat-ch", name: "Chairs", cls: "PURCHASING" },
-      { id: "cat-mon", name: "Monitors", cls: "IT" },
+      { id: "cat-lt", name: "Laptops", cls: "IT", confirmedAt: CONFIRMED },
+      { id: "cat-ch", name: "Chairs", cls: "PURCHASING", confirmedAt: CONFIRMED },
+      { id: "cat-mon", name: "Monitors", cls: "IT", confirmedAt: CONFIRMED },
     ],
     // Monitors has types: a monitor needs one picked (spec §8, Phase 36).
     assetType: [{ id: "type-24", name: "24-inch", categoryId: "cat-mon" }],
@@ -455,5 +462,139 @@ describe("registerFromPurchaseOrder", () => {
     const r = await expectNothingWritten(() =>
       registerFromPurchaseOrder({ poId: "po1", lines: [laptops(["BR-LT-0201"], { lineId: "lnX" })] }));
     expect(r).toMatchObject({ kind: "conflict", message: "This purchase order changed elsewhere — reload and try again." });
+  });
+});
+
+/*
+ * PO form redesign Task 3 (spec §5, §5b.5–6): a category Purchasing created as IT gear from the PO form is unconfirmed
+ * until IT registers the line. IT confirms it, swaps it for a confirmed IT category, or registers without a word —
+ * the first registration confirms it. The prompt applies only while nothing on the line is registered.
+ */
+describe("registerFromPurchaseOrder — a new IT category from the PO", () => {
+  const NEW = { id: "cat-new", name: "Network cable", cls: "IT", confirmedAt: null, createdById: PAT.id };
+  const SWITCH = { id: "cat-sw", name: "Switch", cls: "IT", confirmedAt: CONFIRMED };
+  const cat = (id: string) => t("assetCategory").find((c) => c.id === id);
+  const cables = (tags: string[], extra: Row = {}) => ({ lineId: "ln1", model: "Cat6 box", units: units(tags), ...extra });
+
+  beforeEach(() => {
+    t("assetCategory").push({ ...NEW }, { ...SWITCH });
+    seedPo({ refNo: "PO-0215" });
+    seedLine("ln1", { description: "network cables", categoryId: "cat-new", qty: 3, unitPrice: 900 });
+  });
+
+  it("register confirms explicitly and implicitly", async () => {
+    // Explicit: Confirm.
+    const r = await registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-NC-0001"], { categoryAction: "confirm" })] });
+    expect(r.ok).toBe(true);
+    expect(cat("cat-new")!.confirmedAt).toBeInstanceOf(Date);
+    expect(t("asset")[0]).toMatchObject({ categoryId: "cat-new", cls: "IT", purchaseOrderLineId: "ln1" });
+    expect(audits("category.confirm")).toHaveLength(1);
+    expect(audits("category.confirm")[0]).toMatchObject({
+      actorId: IVAN.id, entityType: "asset-category", entityId: "cat-new", source: "web",
+      diff: { confirmed: { from: false, to: true } },
+    });
+    expect(audits("category.confirm")[0].diff).not.toHaveProperty("implicit");
+    expect(t("purchaseOrderLine")[0].categoryId).toBe("cat-new");
+    // No bell for Purchasing: the category stayed.
+    expect(t("notification").map((n) => n.team)).toEqual(["FINANCE"]);
+
+    // A later Confirm on a confirmed category is nothing new: no second entry.
+    const again = await registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-NC-0002"], { categoryAction: "confirm" })] });
+    expect(again.ok).toBe(true);
+    expect(audits("category.confirm")).toHaveLength(1);
+
+    // Implicit: registering a line whose new category nobody confirmed confirms it.
+    t("assetCategory").push({ id: "cat-ap", name: "Access point", cls: "IT", confirmedAt: null });
+    seedLine("ln2", { description: "access points", categoryId: "cat-ap", qty: 2, unitPrice: 4000 });
+    const implicit = await registerFromPurchaseOrder({ poId: "po1", lines: [{ lineId: "ln2", model: "U6 Lite", units: units(["BR-AP-0001"]) }] });
+    expect(implicit.ok).toBe(true);
+    expect(cat("cat-ap")!.confirmedAt).toBeInstanceOf(Date);
+    expect(audits("category.confirm")).toHaveLength(2);
+    expect(audits("category.confirm")[1]).toMatchObject({
+      entityType: "asset-category", entityId: "cat-ap", source: "web",
+      diff: { confirmed: { from: false, to: true }, implicit: { from: null, to: true } },
+    });
+  });
+
+  it("replace moves the line, deletes the orphan, notifies Purchasing", async () => {
+    const r = await registerFromPurchaseOrder({
+      poId: "po1", lines: [cables(["BR-SW-0001", "BR-SW-0002"], { categoryAction: { replaceWith: "cat-sw" } })],
+    });
+    expect(r).toMatchObject({ ok: true, data: { created: 2 } });
+
+    // The line and its assets are Switch now; Network cable was used by nothing else, so it is gone.
+    expect(t("purchaseOrderLine")[0].categoryId).toBe("cat-sw");
+    expect(t("asset").map((a) => a.categoryId)).toEqual(["cat-sw", "cat-sw"]);
+    expect(cat("cat-new")).toBeUndefined();
+    expect(cat("cat-sw")).toMatchObject({ confirmedAt: CONFIRMED });
+
+    expect(audits("category.replace")).toHaveLength(1);
+    expect(audits("category.replace")[0]).toMatchObject({
+      actorId: IVAN.id, entityType: "purchase-order", entityId: "po1", source: "web",
+      diff: {
+        line: { from: null, to: 1 },
+        category: { from: "Network cable", to: "Switch" },
+        removed: { from: null, to: "Network cable" },
+      },
+    });
+    expect(audits("category.confirm")).toEqual([]);
+
+    const purchasing = t("notification").filter((n) => n.team === "PURCHASING");
+    expect(purchasing).toHaveLength(1);
+    expect(purchasing[0]).toMatchObject({
+      kind: "CHANGED", title: "IT changed the category on PO-0215 line 1 to Switch", href: "/purchases/po1",
+      actorId: IVAN.id, entityType: "purchase-order", entityId: "po1",
+    });
+    expect(t("notification").filter((n) => n.team === "FINANCE")).toHaveLength(1);
+  });
+
+  it("replace keeps the new category while another PO line still uses it, and numbers the line", async () => {
+    t("purchaseOrderLine").unshift({
+      id: "ln0", orderId: "po1", description: "laptops", specs: null, categoryId: "cat-lt", qty: 1, unitPrice: 50000,
+      closedShort: 0, closedShortReason: null,
+    });
+    t("purchaseOrderLine").push({
+      id: "lnOther", orderId: "po2", description: "cables", specs: null, categoryId: "cat-new", qty: 1, unitPrice: 1,
+      closedShort: 0, closedShortReason: null,
+    });
+    const r = await registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-SW-0001"], { categoryAction: { replaceWith: "cat-sw" } })] });
+    expect(r.ok).toBe(true);
+    expect(cat("cat-new")).toMatchObject({ confirmedAt: null });
+    expect(audits("category.replace")[0].diff).not.toHaveProperty("removed");
+    expect(audits("category.replace")[0].diff).toMatchObject({ line: { from: null, to: 2 } });
+    expect(t("notification").find((n) => n.team === "PURCHASING")!.title).toBe("IT changed the category on PO-0215 line 2 to Switch");
+  });
+
+  it("replace with an office category is refused", async () => {
+    const IT_ONLY = "Choose a confirmed IT category. If this isn't IT gear, send the PO back to Purchasing with Category ticked.";
+    const office = await expectNothingWritten(() =>
+      registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-SW-0001"], { categoryAction: { replaceWith: "cat-ch" } })] }));
+    expect(office).toMatchObject({ kind: "validation", fieldErrors: { "lines.0.categoryAction": IT_ONLY } });
+
+    // Nor with another unconfirmed IT category, or one that doesn't exist.
+    t("assetCategory").push({ id: "cat-ap", name: "Access point", cls: "IT", confirmedAt: null });
+    for (const replaceWith of ["cat-ap", "cat-gone"]) {
+      const r = await expectNothingWritten(() =>
+        registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-SW-0001"], { categoryAction: { replaceWith } })] }));
+      expect(r).toMatchObject({ kind: "validation", fieldErrors: { "lines.0.categoryAction": IT_ONLY } });
+    }
+
+    // Once a unit on the line is registered the category is settled: no replace.
+    expect((await registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-NC-0001"])] })).ok).toBe(true);
+    const late = await expectNothingWritten(() =>
+      registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-SW-0002"], { categoryAction: { replaceWith: "cat-sw" } })] }));
+    expect(late).toMatchObject({
+      kind: "validation",
+      fieldErrors: { "lines.0.categoryAction": "Units on this line are already registered as Network cable — its category can't change now." },
+    });
+  });
+
+  it("a replace on a category that is already confirmed is refused", async () => {
+    cat("cat-new")!.confirmedAt = CONFIRMED;
+    const r = await expectNothingWritten(() =>
+      registerFromPurchaseOrder({ poId: "po1", lines: [cables(["BR-SW-0001"], { categoryAction: { replaceWith: "cat-sw" } })] }));
+    expect(r).toMatchObject({
+      kind: "validation", fieldErrors: { "lines.0.categoryAction": "Network cable is already confirmed — reload to see it." },
+    });
   });
 });

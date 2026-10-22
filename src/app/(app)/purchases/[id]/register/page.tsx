@@ -36,7 +36,8 @@ export default async function RegisterFromPoPage({ params }: { params: Promise<{
   });
   if (!register) redirect(`/purchases/${id}`);
 
-  // Classes this person may register on this PO — what a legacy line's category may be picked from.
+  // Classes this person may register on this PO — what a legacy line's category may be picked from. Only confirmed
+  // categories (registerCatalog); a line's own new IT category comes with the line, and its replacements are the IT ones.
   const classes = (["IT", "PURCHASING"] as AssetClass[]).filter((c) => canRegisterLine(user.role, c, po.state).ok);
   const catalog = await registerCatalog(classes);
 
@@ -49,6 +50,7 @@ export default async function RegisterFromPoPage({ params }: { params: Promise<{
       return {
         id: u.id, index: u.index, description: u.description, specs: u.specs,
         categoryId: u.categoryId, categoryName: u.categoryName, cls: u.cls,
+        categoryConfirmed: u.categoryConfirmed, registered: u.registered,
         price: u.price, remaining: u.remaining, progressLabel: u.progressLabel,
         blocked: verdict.ok ? null : verdict.why,
       };

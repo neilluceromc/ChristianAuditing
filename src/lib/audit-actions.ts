@@ -32,6 +32,9 @@ export const AUDIT_ACTIONS = [
   "po.save", "po.resubmit", "po.send-back", "po.fix", "po.cancel", "po.line-closed", "asset.money.fixed", "po.register",
   // Task 6 fix round 1: the sender takes a PO's send-back back within 15 minutes (po-actions.ts undoPoSendBack)
   "po.send-back.undone",
+  // PO form redesign (spec §5): a category created from the PO form (category-actions.ts); IT confirming a new IT
+  // category, or replacing it on a line, at Register (po-register.ts)
+  "category.create", "category.confirm", "category.replace",
   // people
   "employee.transferred", "employee.setup", "offboarding.completed", "acknowledgement.recorded",
   "note.added", "note.edited", "note.deleted",

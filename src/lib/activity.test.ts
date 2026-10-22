@@ -671,3 +671,31 @@ describe("Task 8 (spec §6) — purchase orders and money fixes read as sentence
     }
   });
 });
+
+describe("PO form redesign (spec §5) — category create, confirm and replace read as sentences", () => {
+  const s = (action: string, diff: unknown, entityLabel: string, opts?: { omitEntity?: boolean }) =>
+    auditSentence({ actorLabel: "Pia (Purchasing)", action, diff, entityLabel }, opts);
+
+  it("category.create names the class it was added in", () => {
+    expect(s("category.create", { name: { from: null, to: "Switch" }, cls: { from: null, to: "IT" } }, "Switch"))
+      .toBe("Pia (Purchasing) added Switch as IT gear from a purchase order");
+    expect(s("category.create", { name: { from: null, to: "Whiteboard" }, cls: { from: null, to: "PURCHASING" } }, "Whiteboard"))
+      .toBe("Pia (Purchasing) added Whiteboard as an office item from a purchase order");
+  });
+  it("category.confirm says when registering confirmed it", () => {
+    expect(s("category.confirm", { confirmed: { from: false, to: true } }, "Switch")).toBe("Pia (Purchasing) confirmed the category Switch");
+    expect(s("category.confirm", { confirmed: { from: false, to: true }, implicit: { from: null, to: true } }, "Switch", { omitEntity: true }))
+      .toBe("Pia (Purchasing) confirmed the category by registering it");
+  });
+  it("category.replace names the line and both categories", () => {
+    const diff = { line: { from: null, to: 1 }, category: { from: "Network cable", to: "Switch" }, removed: { from: null, to: "Network cable" } };
+    expect(s("category.replace", diff, "PO-0215")).toBe("Pia (Purchasing) changed the category on PO-0215 line 1 from Network cable to Switch");
+    expect(s("category.replace", diff, "PO-0215", { omitEntity: true })).toBe("Pia (Purchasing) changed the category on line 1 from Network cable to Switch");
+  });
+  it("each has an Action facet label and never shows the raw code", () => {
+    for (const code of ["category.create", "category.confirm", "category.replace"]) {
+      expect(ACTION_LABELS[code], code).toBeTruthy();
+      expect(s(code, null, "X"), code).not.toContain(code);
+    }
+  });
+});
