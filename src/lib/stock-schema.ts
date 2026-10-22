@@ -78,6 +78,16 @@ export type SetLotCostInput = z.infer<typeof setLotCostSchema>;
 /** Spec §2.3/§4.3: the three kinds a `StockLotDocument` can be tagged with — same set `document-actions.ts`'s `uploadLotDocument` validates against. */
 export const LOT_DOCUMENT_KINDS = ["delivery-receipt", "invoice", "other"] as const;
 export type LotDocumentKind = (typeof LOT_DOCUMENT_KINDS)[number];
+/**
+ * Each lot document kind in words: the upload dialog's options, and lots-card.tsx's pills and Preview titles. It lives
+ * here, not in the Client Component lot-document-dialog.tsx: the Server Component lots-card.tsx sees a client module's
+ * constant only as a reference (undefined when indexed), and would show the raw kind.
+ */
+export const LOT_DOCUMENT_LABEL: Record<LotDocumentKind, string> = {
+  "delivery-receipt": "Delivery receipt",
+  invoice: "Invoice",
+  other: "Other",
+};
 
 export const issueSchema = z.object({
   itemId: z.string().min(1, "Pick an item"),

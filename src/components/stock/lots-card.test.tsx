@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // The manager actions' server actions reach for auth and the database; a markup test never presses them.
@@ -44,5 +45,21 @@ describe("LotsCard: a lot's documents", () => {
 
   it("no documents: no documents row", () => {
     expect(render([])).not.toContain("Uploaded");
+  });
+
+  it("a delivery receipt reads in words, on its pill and as the Preview dialog's name", () => {
+    const html = render([doc({ kind: "delivery-receipt" })]);
+    expect(text(html)).toContain("Delivery receipt");
+    expect(html).not.toContain(">delivery-receipt<");
+  });
+
+  // On the stock item page this card is a Server Component, which sees a Client Component module's constants only as
+  // references: a kind label imported from lot-document-dialog.tsx came out undefined, so the pill (and the Preview
+  // dialog's name) showed the raw "delivery-receipt". The words must come from a plain module.
+  it("takes the kind's words from a plain module, not from the Client Component's file", () => {
+    const source = readFileSync(new URL("./lots-card.tsx", import.meta.url), "utf8");
+    const fromDialog = /import\s*\{([^}]*)\}\s*from\s*"\.\/lot-document-dialog"/.exec(source)?.[1] ?? "";
+    expect(fromDialog.split(",").map((s) => s.trim()).filter(Boolean)).toEqual(["LotDocumentDialog"]);
+    expect(source).toMatch(/import\s*\{[^}]*\bLOT_DOCUMENT_LABEL\b[^}]*\}\s*from\s*"@\/lib\/stock-schema"/);
   });
 });

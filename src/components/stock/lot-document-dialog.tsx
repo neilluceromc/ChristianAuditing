@@ -7,16 +7,9 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
-import { LOT_DOCUMENT_KINDS, type LotDocumentKind } from "@/lib/stock-schema";
+import { LOT_DOCUMENT_KINDS, LOT_DOCUMENT_LABEL, type LotDocumentKind } from "@/lib/stock-schema";
 import { uploadLotDocument } from "@/server/modules/stock/document-actions";
 import { useStockRunner } from "./use-stock-runner";
-
-/** Shared with lots-card.tsx's document pills — mirrors documents.ts's REQUEST_DOCUMENT_LABEL convention. */
-export const LOT_DOCUMENT_LABEL: Record<LotDocumentKind, string> = {
-  "delivery-receipt": "Delivery receipt",
-  invoice: "Invoice",
-  other: "Other",
-};
 
 /** Spec §5.3/§6.4, mirrors request-documents-card.tsx's upload half inside a Dialog instead of an inline card. */
 export function LotDocumentDialog({ lotId }: { lotId: string }) {

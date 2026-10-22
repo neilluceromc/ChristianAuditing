@@ -4,11 +4,12 @@ import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { Pill } from "@/components/ui/pill";
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { uploadedLine } from "@/lib/file-preview";
+import { LOT_DOCUMENT_LABEL } from "@/lib/stock-schema";
 import { PreviewButton } from "@/components/files/file-preview-dialog";
 import type { ItemLots } from "@/server/modules/stock/queries";
 import { WriteOffDialog } from "./write-off-dialog";
 import { SetCostDialog } from "./set-cost-dialog";
-import { LotDocumentDialog, LOT_DOCUMENT_LABEL } from "./lot-document-dialog";
+import { LotDocumentDialog } from "./lot-document-dialog";
 
 /**
  * Spec §6.4: open lots in `itemLots`'s own consumption order (expired first),
