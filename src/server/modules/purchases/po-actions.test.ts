@@ -1103,3 +1103,37 @@ describe("PO form redesign (A3): save with documents, PO number, totals, legacy 
     expect(errorsOf(none)).toEqual({ "doc:invoice": "Attach the sales invoice" });
   });
 });
+
+describe("a category deleted while the form was open (Task 3 carried: IT replaced it at Register)", () => {
+  const GONE = "That category no longer exists — pick another";
+  const errorsOf = (r: { ok: boolean; fieldErrors?: Record<string, string> }) => (r.ok ? {} : r.fieldErrors ?? {});
+  const p2003 = (field: string) => new Prisma.PrismaClientKnownRequestError("Foreign key constraint violated", {
+    code: "P2003", clientVersion: "6", meta: { field_name: field },
+  });
+  const v2 = (extra: Row = {}) => order({
+    poNumber: "2025-0418", paidBy: "CREDIT_CARD", totals: { totalAmountDue: "9,100.00" },
+    lines: [line({ description: "Laptop", qty: 1, unitPrice: 9100 }), line({ description: "Network cable", categoryId: "cat-gone", qty: 1, unitPrice: 100 })],
+    ...extra,
+  });
+
+  it("is refused on that line's category, before anything is stored", async () => {
+    const r = await expectNothingWritten(() => savePurchaseOrder(form(v2())));
+    expect(r).toMatchObject({ kind: "validation" });
+    expect(errorsOf(r)).toEqual({ "lines.1.categoryId": GONE });
+    expect(stored()).toEqual([]);
+  });
+
+  it("deleted between the check and the write: the foreign key's refusal says the same, and the files are cleaned up", async () => {
+    h.failDoc = p2003("PurchaseUnit_categoryId_fkey (index)");
+    const r = await savePurchaseOrder(form(v2({ lines: [line({ description: "Laptop", qty: 1, unitPrice: 9100 })] })));
+    expect(r).toMatchObject({ kind: "validation", fieldErrors: { lines: GONE } });
+    expect(t("purchaseOrder")).toEqual([]);
+    expect(stored()).toEqual([]);
+
+    // any other foreign-key refusal is not laundered into a category message
+    h.failDoc = p2003("RequestDocument_uploadedById_fkey (index)");
+    await expect(savePurchaseOrder(form(v2({ lines: [line({ description: "Laptop", qty: 1, unitPrice: 9100 })] }))))
+      .rejects.toThrow("Foreign key constraint violated");
+    expect(stored()).toEqual([]);
+  });
+});

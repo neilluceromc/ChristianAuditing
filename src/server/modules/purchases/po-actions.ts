@@ -193,6 +193,12 @@ const usedOn = (poNumber: string, refNo: string | null) =>
   `PO ${poNumber} is already used on ${refNo ?? "another purchase order"}`;
 /** The partial unique index refused a PO number: another save took it after the pre-check. */
 const isPoNumberClash = (err: unknown) => uniqueTarget(err).some((t) => t.includes("poNumber"));
+/** A PO line's category that no longer exists (IT replaced a new one at Register, and nothing else used it). */
+const CATEGORY_GONE = "That category no longer exists — pick another";
+/** The line's category foreign key refused the write: the category went after the pre-check. */
+const isCategoryGone = (err: unknown) =>
+  err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003"
+  && String((err.meta as { field_name?: unknown } | undefined)?.field_name ?? "").includes("categoryId");
 async function poNumberRefusal(poNumber: string, exceptId: string | null): Promise<string> {
   return usedOn(poNumber, (await poNumberOwner(poNumber, exceptId))?.refNo ?? null);
 }
@@ -464,8 +470,12 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
 
   const catIds = [...new Set(d.lines.map((l) => l.categoryId))];
   const cats = await prisma.assetCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, cls: true } });
-  if (cats.length !== catIds.length) return validationError({ lines: "Unknown category" });
   const clsOf = new Map(cats.map((c) => [c.id, c.cls]));
+  if (cats.length !== catIds.length) {
+    // A form held open while IT replaced (and deleted) the line's new category at Register: say so on that line.
+    return validationError(Object.fromEntries(d.lines.flatMap((l, i) =>
+      clsOf.has(l.categoryId) ? [] : [[`lines.${i}.categoryId`, CATEGORY_GONE]])));
+  }
   const lineCls = d.lines.map((l) => clsOf.get(l.categoryId) ?? null);
 
   const archived = { vendor: vendor.archivedAt !== null, dept: dept?.archivedAt != null };
@@ -500,6 +510,8 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
     if (!commit.done && d.poNumber && isPoNumberClash(err)) {
       return validationError({ poNumber: await poNumberRefusal(d.poNumber, d.id ?? null) });
     }
+    // The category was deleted between the check above and the line write (the transaction rolled back).
+    if (!commit.done && isCategoryGone(err)) return validationError({ lines: CATEGORY_GONE });
     throw err;
   }
 }
