@@ -182,7 +182,7 @@ test.describe.serial("stock", () => {
     await expect(page.getByText("5 packs × 10 = 50 pieces")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByLabel(/^Quantity\b/)).toHaveValue("50");
 
-    const supplier = page.getByRole("main").getByLabel("Supplier");
+    const supplier = page.getByRole("main").getByLabel("Vendor");
     await pickFromCombo(supplier, "TechServe", /TechServe PH/);
     await expect(supplier).toHaveValue("TechServe PH");
     await page.getByLabel("Reference").fill("DR-9001");

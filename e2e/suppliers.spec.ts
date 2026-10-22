@@ -78,7 +78,7 @@ const VIEWER = "viewer@thebackroomop.com";
 const byside = () => db.vendor.findUniqueOrThrow({ where: { name: "Bayside Networks" } });
 
 test.describe.serial("suppliers", () => {
-  test("1. Purchasing creates a supplier and finds it by name and by contact", async ({ page }) => {
+  test("1. Purchasing creates a vendor and finds it by name and by contact", async ({ page }) => {
     // First hit of the suite for both /purchases/suppliers/new and
     // /purchases/suppliers: next dev JIT-compiles each route bundle on its
     // first request, which can outrun the default 30s test timeout on a
@@ -102,7 +102,7 @@ test.describe.serial("suppliers", () => {
     await page.getByLabel("Contract status").selectOption("ACTIVE");
     await page.getByLabel("Contract start").fill("2026-01-01");
     await page.getByLabel("Contract end").fill("2026-12-31");
-    await page.getByRole("button", { name: "Create supplier" }).click();
+    await page.getByRole("button", { name: "Create vendor" }).click();
     await expect(page.getByRole("heading", { name: "Bayside Networks", level: 1 })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Paolo Santos")).toBeVisible();
     await page.goto("/purchases/suppliers?q=paolo");
@@ -229,8 +229,8 @@ test.describe.serial("suppliers", () => {
     await login(page, VIEWER);
     await page.goto(`/purchases/suppliers/${vendor.id}`);
     await expect(page.getByRole("heading", { name: "Bayside Networks", level: 1 })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("button", { name: "Edit supplier" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Edit supplier" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit vendor" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Edit vendor" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add account" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
   });
@@ -265,7 +265,7 @@ test.describe.serial("suppliers", () => {
     await login(page, PURCHASING);
     const vendor = await byside();
     await page.goto(`/purchases/suppliers/${vendor.id}`);
-    const archiveBtn = page.getByRole("button", { name: "Archive supplier" });
+    const archiveBtn = page.getByRole("button", { name: "Archive vendor" });
     await waitForHydration(archiveBtn);
 
     await archiveBtn.click();
@@ -285,13 +285,13 @@ test.describe.serial("suppliers", () => {
     await expect(page.getByRole("heading", { name: "PO-0198" })).toBeVisible({ timeout: 10_000 });
     await page.getByRole("link", { name: "Edit", exact: true }).click();
     await page.waitForURL(/\/purchases\/[^/]+\/edit$/, { timeout: 20_000 });
-    await expect(page.getByRole("main").getByLabel("Supplier")).toBeVisible();
+    await expect(page.getByRole("main").getByLabel("Vendor")).toBeVisible();
     await expect(
-      page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Bayside Networks" }),
+      page.getByRole("main").getByLabel("Vendor").locator("option", { hasText: "Bayside Networks" }),
     ).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${vendor.id}`);
-    const restoreBtn = page.getByRole("button", { name: "Restore supplier" });
+    const restoreBtn = page.getByRole("button", { name: "Restore vendor" });
     await waitForHydration(restoreBtn);
     await restoreBtn.click();
     await expect(page.getByText("ARCHIVED")).toHaveCount(0, { timeout: 10_000 });
@@ -348,7 +348,7 @@ test.describe.serial("suppliers", () => {
     await spreadsheet.setInputFiles("e2e/fixtures/suppliers-bank.xlsx");
     await page.getByRole("button", { name: /^Validate/ }).click();
     await expect(
-      page.getByText(/Bank details are entered on the supplier's page, never imported/),
+      page.getByText(/Bank details are entered on the vendor's page, never imported/),
     ).toBeVisible({ timeout: 10_000 });
 
     expect(await db.vendor.count()).toBe(before);
@@ -360,13 +360,13 @@ test.describe.serial("suppliers", () => {
     const paletteTrigger = page.getByRole("button", { name: /Search assets, people, purchase orders/ });
     await waitForHydration(paletteTrigger);
     await paletteTrigger.click();
-    // Scoped to the palette dialog: "Suppliers" is ALSO the sidebar nav's
+    // Scoped to the palette dialog: "Vendors" is ALSO the sidebar nav's
     // link and this very page's own <h1> — both still on screen behind the
     // palette veil.
     const palette = page.getByRole("dialog", { name: "Command palette" });
     // Phase 40 (spec §4): the input is a combobox, and each result group is a listbox group named by its heading.
     await palette.getByRole("combobox", { name: "Search" }).fill("bayside");
-    await expect(palette.getByRole("group", { name: "Suppliers" })).toBeVisible({ timeout: 10_000 });
+    await expect(palette.getByRole("group", { name: "Vendors" })).toBeVisible({ timeout: 10_000 });
     await expect(palette.getByRole("option", { name: /Bayside Networks/ })).toBeVisible();
 
     await page.keyboard.press("Enter");
@@ -374,19 +374,19 @@ test.describe.serial("suppliers", () => {
     await expect(page).toHaveURL(new RegExp(`/purchases/suppliers/${vendor.id}$`));
   });
 
-  test("10. Creating a supplier named TechServe PH is refused as a duplicate", async ({ page }) => {
+  test("10. Creating a vendor named TechServe PH is refused as a duplicate", async ({ page }) => {
     await login(page, PURCHASING);
     await page.goto("/purchases/suppliers/new");
     const nameField = page.getByLabel(/^Name\b/);
     await waitForHydration(nameField);
     await nameField.fill("TechServe PH");
-    await page.getByRole("button", { name: "Create supplier" }).click();
-    await expect(page.getByText("A supplier with this name already exists")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Create vendor" }).click();
+    await expect(page.getByText("A vendor with this name already exists")).toBeVisible({ timeout: 10_000 });
 
     expect(await db.vendor.count({ where: { name: "TechServe PH" } })).toBe(1);
   });
 
-  test("11. No serious or critical axe violations on the suppliers list, profile, new, and import pages", async ({ page }) => {
+  test("11. No serious or critical axe violations on the vendors list, profile, new, and import pages", async ({ page }) => {
     test.setTimeout(60_000); // four full-page axe scans, each with its own settle wait
     await login(page, PURCHASING);
 
@@ -410,7 +410,7 @@ test.describe.serial("suppliers", () => {
    * "Bayside Networks" case 1 created and every later case carries. The refusal
    * writes nothing, so there is nothing to clean up and the form stays on /new.
    */
-  test("12. a supplier whose name differs only by case is refused, naming the existing supplier", async ({ page }) => {
+  test("12. a vendor whose name differs only by case is refused, naming the existing vendor", async ({ page }) => {
     await login(page, PURCHASING);
     await page.goto("/purchases/suppliers/new");
     const nameField = page.getByLabel(/^Name\b/);
@@ -420,8 +420,8 @@ test.describe.serial("suppliers", () => {
     await page.getByLabel("Category").fill("IT hardware");
     await page.getByLabel("Contact person").fill("Paolo Santos");
     await page.getByLabel("Email").fill("paolo@bayside.ph");
-    await page.getByRole("button", { name: "Create supplier" }).click();
-    await expect(page.locator('p[role="alert"]')).toHaveText('A supplier with this name already exists: "Bayside Networks"', { timeout: 10_000 });
+    await page.getByRole("button", { name: "Create vendor" }).click();
+    await expect(page.locator('p[role="alert"]')).toHaveText('A vendor with this name already exists: "Bayside Networks"', { timeout: 10_000 });
     await expect(page).toHaveURL(/\/purchases\/suppliers\/new$/);
     expect(await db.vendor.count({ where: { name: "bayside networks" } })).toBe(0);
   });

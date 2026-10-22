@@ -128,7 +128,7 @@ test.describe("the three-team intake on one mixed PO", () => {
     const form = page.getByRole("main");
     await waitForHydration(form.getByRole("button", { name: "Save", exact: true }));
 
-    await form.getByLabel("Supplier").selectOption({ label: "TechServe PH" });
+    await form.getByLabel("Vendor").selectOption({ label: "TechServe PH" });
     await form.getByLabel("SI number").fill("SI-77001");
     await form.getByLabel("Purchase date").fill("2026-10-20");
     await form.getByLabel("Line 1 description").fill("Laptops for the new analysts");

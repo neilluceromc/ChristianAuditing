@@ -174,7 +174,7 @@ test.describe("purchase orders — saving", () => {
     const save = page.getByRole("button", { name: "Save", exact: true });
     await waitForHydration(save);
 
-    await page.getByRole("main").getByLabel("Supplier").selectOption({ label: "TechServe PH" });
+    await page.getByRole("main").getByLabel("Vendor").selectOption({ label: "TechServe PH" });
     await page.getByRole("main").getByLabel("SI number").fill("SI-50001");
     await page.getByRole("main").getByLabel("Purchase date").fill("2026-10-19");
     await page.getByRole("main").getByLabel("Department").selectOption({ label: "IT" });

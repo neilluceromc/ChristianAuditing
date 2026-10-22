@@ -114,7 +114,7 @@ test.describe.serial("stock lots", () => {
     const quantityField = page.getByLabel(/^Quantity\b/);
     await waitForHydration(quantityField);
     await quantityField.fill("12");
-    const supplier = page.getByRole("main").getByLabel("Supplier");
+    const supplier = page.getByRole("main").getByLabel("Vendor");
     await pickFromCombo(supplier, "TechServe", /TechServe PH/);
     await expect(supplier).toHaveValue("TechServe PH");
     await page.getByLabel("Reference").fill("DR-9004");

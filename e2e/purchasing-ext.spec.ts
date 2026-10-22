@@ -113,7 +113,7 @@ test.describe.serial("purchasing extensions", () => {
 
     // Purchase orders (migration 38): the department is optional ("No department"); a non-IT line skips IT.
     await expect(main.getByLabel("Department")).toHaveValue("");
-    await main.getByLabel("Supplier").selectOption({ label: "Metro Office Supply" });
+    await main.getByLabel("Vendor").selectOption({ label: "Metro Office Supply" });
     await main.getByLabel("SI number").fill("SI-18001");
     await main.getByLabel("Purchase date").fill("2026-10-18");
     await main.getByLabel("Department").selectOption({ label: "HR" });
@@ -146,7 +146,7 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByRole("row", { name: /PO-0198/ })).toHaveCount(0);
   });
 
-  test("3. Purchasing sets PO-0198's supplier on its edit form; the PO, the list row, the audit log and the supplier profile agree", async ({ page }) => {
+  test("3. Purchasing sets PO-0198's vendor on its edit form; the PO, the list row, the audit log and the vendor profile agree", async ({ page }) => {
     test.setTimeout(60_000); // first hit of /purchases/suppliers/[id] in this file
     await login(page, PURCHASING);
     const po0198 = await reqByRef("PO-0198");
@@ -154,7 +154,7 @@ test.describe.serial("purchasing extensions", () => {
     // Purchase orders: the supplier is one of the PO's money fields, edited on Purchasing's own form (no reason while
     // the PO is with IT, spec §2).
     await page.goto(`/purchases/${po0198.id}/edit`);
-    const supplierSelect = page.getByRole("main").getByLabel("Supplier");
+    const supplierSelect = page.getByRole("main").getByLabel("Vendor");
     await waitForHydration(supplierSelect);
     await supplierSelect.selectOption({ label: "Quezon Furniture Works" });
     await savePo(page);
@@ -170,7 +170,7 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByRole("row", { name: /PO-0198/ })).toBeVisible({ timeout: 10_000 });
   });
 
-  test("4. an archived supplier is never offered, but a PO that already names one keeps showing it", async ({ page }) => {
+  test("4. an archived vendor is never offered, but a PO that already names one keeps showing it", async ({ page }) => {
     await login(page, PURCHASING);
     const po0198 = await reqByRef("PO-0198");
     const quezon = await vendorByName("Quezon Furniture Works");
@@ -180,15 +180,15 @@ test.describe.serial("purchasing extensions", () => {
     // Old Line Trading is archived in the seed itself and is not this PO's supplier — it must not appear at all.
     await page.goto(`/purchases/${po0198.id}/edit`);
     await expect(
-      page.getByRole("main").getByLabel("Supplier").locator("option", { hasText: "Old Line Trading" }),
+      page.getByRole("main").getByLabel("Vendor").locator("option", { hasText: "Old Line Trading" }),
     ).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${quezon.id}`);
-    const archiveBtn = page.getByRole("button", { name: "Archive supplier" });
+    const archiveBtn = page.getByRole("button", { name: "Archive vendor" });
     await waitForHydration(archiveBtn);
     await archiveBtn.click();
     await page.getByRole("dialog").getByRole("button", { name: "Archive" }).click();
-    // exact: the "Success: Supplier archived" toast also contains "archived".
+    // exact: the "Success: Vendor archived" toast also contains "archived".
     await expect(page.getByText("ARCHIVED", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // The PO page names it, marked archived; its edit form keeps it selected.
@@ -196,13 +196,13 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByRole("main")).toContainText("Quezon Furniture Works");
     await expect(page.getByRole("main").getByText("ARCHIVED", { exact: true })).toBeVisible();
     await page.goto(`/purchases/${po0198.id}/edit`);
-    const reopenedSelect = page.getByRole("main").getByLabel("Supplier");
+    const reopenedSelect = page.getByRole("main").getByLabel("Vendor");
     await expect(reopenedSelect).toBeVisible({ timeout: 10_000 });
     const selectedText = await reopenedSelect.evaluate((el: HTMLSelectElement) => el.options[el.selectedIndex]?.text);
     expect(selectedText).toBe("Quezon Furniture Works");
 
     await page.goto(`/purchases/suppliers/${quezon.id}`);
-    const restoreBtn = page.getByRole("button", { name: "Restore supplier" });
+    const restoreBtn = page.getByRole("button", { name: "Restore vendor" });
     await waitForHydration(restoreBtn);
     await restoreBtn.click();
     await expect(page.getByText("ARCHIVED", { exact: true })).toHaveCount(0, { timeout: 10_000 });
@@ -329,7 +329,7 @@ test.describe.serial("purchasing extensions", () => {
     for (const label of Object.values(PROVENANCE_LABEL)) expect(seen).toContain(label);
   });
 
-  test("7. a PO registration takes its money from the PO: supplier, SI and OR numbers, date and the line's price", async () => {
+  test("7. a PO registration takes its money from the PO: vendor, SI and OR numbers, date and the line's price", async () => {
     // Spec §4/§5: money lives on the PO and is copied onto each asset at Register (case 6 registered one from PO-0188).
     const po0188 = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0188" }, include: { lines: true } });
     const asset = await db.asset.findFirstOrThrow({

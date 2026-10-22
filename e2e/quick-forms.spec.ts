@@ -384,7 +384,7 @@ test.describe.serial("quick forms", () => {
     expect(await db.employee.count({ where: { employeeNo: "EMP-E2E-QF" } })).toBe(0);
   });
 
-  test("7. typing a seeded supplier's name warns in place, with a link to the record that already exists", async ({
+  test("7. typing a seeded vendor's name warns in place, with a link to the record that already exists", async ({
     page,
   }) => {
     test.setTimeout(60_000); // first hit of /purchases/suppliers/new in this file
@@ -398,18 +398,18 @@ test.describe.serial("quick forms", () => {
     await page.goto("/purchases/suppliers/new");
     const name = page.getByLabel(/^Name\b/);
     await waitForHydration(name);
-    await expect(page.getByText(/^A supplier named/)).toHaveCount(0);
+    await expect(page.getByText(/^A vendor named/)).toHaveCount(0);
 
     await name.fill(supplier.name);
     // 400 ms debounce, then the read-only check — a state-based wait, not a sleep.
-    const banner = page.getByText(`A supplier named "${supplier.name}" already exists`, { exact: true });
+    const banner = page.getByText(`A vendor named "${supplier.name}" already exists`, { exact: true });
     await expect(banner).toBeVisible({ timeout: 20_000 });
     const open = page.getByRole("link", { name: "Open it" });
     await expect(open).toBeVisible();
     await expect(open).toHaveAttribute("href", `/purchases/suppliers/${supplier.id}`);
 
     // §7: the warning is a nudge, not a gate — the form is still fillable.
-    await expect(page.getByRole("button", { name: "Create supplier" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Create vendor" })).toBeEnabled();
   });
 
   test("8. the write-off dialog offers its chips prefilled Expired, and a return dialog's chips follow the outcome", async ({
