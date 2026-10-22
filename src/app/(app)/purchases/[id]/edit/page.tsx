@@ -7,8 +7,17 @@ import { prisma } from "@/server/db/client";
 import { PO_WRITE_ROLES } from "@/lib/po-flow";
 import { poControls } from "@/lib/po-controls";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
+import { poCategories } from "@/server/modules/purchases/po-categories";
+import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
 import { PageHeader } from "@/components/ui/page-header";
-import { PoForm, type UnitDraft } from "@/components/purchases/po-form";
+import { PoForm, type InitialLine } from "@/components/purchases/po-form/po-form";
+
+/** What the PO form's vendor card shows: the seller block (spec §2.4). */
+const VENDOR_SELECT = { id: true, name: true, registeredName: true, registrationNo: true, address: true } as const;
+
+/** A stored amount as the form's inputs show it: "9,100.00"; "" for none. */
+const moneyText = (n: number | null) =>
+  n === null ? "" : n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -22,8 +31,11 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     getPurchase(id),
     policyLoadouts(),
     prisma.department.findMany({ select: { id: true, name: true, kind: true, archivedAt: true }, orderBy: { name: "asc" } }),
-    prisma.vendor.findMany({ where: { archivedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    prisma.assetCategory.findMany({ select: { id: true, name: true, cls: true }, orderBy: { name: "asc" } }),
+    // an edit keeps the current vendor even when it has since been archived
+    prisma.vendor.findMany({
+      where: { OR: [{ archivedAt: null }, { requests: { some: { id } } }] }, select: VENDOR_SELECT, orderBy: { name: "asc" },
+    }),
+    poCategories(),
   ]);
   if (!request) notFound();
   // The same rule as the Edit button (poControls mirrors savePurchaseOrder's stage check); this keeps the dead end off
@@ -34,19 +46,17 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
   });
   if (!edit) redirect(`/purchases/${id}`);
 
-  const units: UnitDraft[] = request.units.map((u) => ({
+  const lines: InitialLine[] = request.units.map((u) => ({
     id: u.id,
     description: u.description,
     specs: u.specs ?? "",
     categoryId: u.categoryId ?? "",
     qty: String(u.qty),
-    unitPrice: u.unitPrice === null ? "" : String(u.unitPrice),
+    unit: u.unit,
+    unitPrice: moneyText(u.unitPrice),
     locked: u.registered + u.closedShort,
   }));
-  // an edit keeps the current supplier even when it has since been archived
-  const supplierOptions = request.supplier?.archived
-    ? [...vendors, { id: request.supplier.id, name: request.supplier.name }]
-    : vendors;
+  const totals = Object.fromEntries(TOTAL_KEYS.map((k) => [k, moneyText(request.totals[k])])) as Record<TotalKey, string>;
 
   return (
     <>
@@ -61,12 +71,15 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
       <PoForm
         loadouts={loadouts}
         departments={departments}
-        vendors={supplierOptions}
+        vendors={vendors}
         categories={categories}
         initial={{
-          id: request.id, refNo: request.refNo, state: request.state, units,
+          id: request.id, refNo: request.refNo, state: request.state, lines,
           departmentId: request.department?.id ?? null, vendorId: request.supplier?.id ?? null,
-          invoiceRef: request.invoiceRef, receiptRef: request.receiptRef, purchasedAt: request.purchasedAt, fees: request.fees,
+          poNumber: request.poNumber, invoiceRef: request.invoiceRef, receiptRef: request.receiptRef,
+          purchasedAt: request.purchasedAt, paidBy: request.paidBy, totals,
+          invoiceOnFile: request.documents.some((d) => d.kind === "invoice"),
+          itRegistered: request.units.some((u) => u.cls === "IT" && u.registered > 0),
           sentBack: request.sentBack,
         }}
       />
