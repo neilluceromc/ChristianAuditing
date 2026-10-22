@@ -339,23 +339,25 @@ test.describe.serial("quick forms", () => {
 
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
-    const price1 = page.getByLabel("Line 1 unit price");
+    // The A3 form (PO form redesign): one item card per line, its price "Item N unit price in pesos".
+    const field = (name: string) => page.getByRole("textbox", { name, exact: true });
+    const price1 = field("Item 1 unit price in pesos");
     await waitForHydration(price1);
 
     // Spec §7: Enter in a line with an empty description adds nothing.
     await price1.press("Enter");
-    await expect(page.getByLabel("Line 2 description")).toHaveCount(0);
+    await expect(field("Item 2 description")).toHaveCount(0);
     await expect(page).toHaveURL(/\/purchases\/new$/); // preventDefault: the form never submits
 
-    await page.getByLabel("Line 1 description").fill("E2E quick-forms line");
+    await field("Item 1 description").fill("E2E quick-forms line");
     await price1.press("Enter");
-    const description2 = page.getByLabel("Line 2 description");
+    const description2 = field("Item 2 description");
     await expect(description2).toBeVisible({ timeout: 10_000 });
     await expect(description2).toBeFocused();
 
     // The new line is itself description-less, so Enter in it adds no third.
-    await page.getByLabel("Line 2 unit price").press("Enter");
-    await expect(page.getByLabel("Line 3 description")).toHaveCount(0);
+    await field("Item 2 unit price in pesos").press("Enter");
+    await expect(field("Item 3 description")).toHaveCount(0);
 
     // Purchase orders have no drafts or autosave (migration 38): nothing is saved until Save, so no new row.
     expect(await db.purchaseOrder.count()).toBe(draftsBefore);

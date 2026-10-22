@@ -342,7 +342,8 @@ test.describe.serial("stock", () => {
     await waitForHydration(itemCombo);
     await itemCombo.fill("TS-0001");
     await expect(page.getByRole("option", { name: /TS-0001/ })).toHaveCount(0);
-    await expect(page.getByRole("listbox").getByText("No matches.")).toBeVisible();
+    // the words follow the empty listbox, never sit in it (a listbox owns only options — Task 9's axe fix)
+    await expect(page.getByText("No matches.", { exact: true })).toBeVisible();
 
     await page.goto(`/stock/items/${item.id}`);
     const restoreBtn = page.getByRole("button", { name: "Restore item" });

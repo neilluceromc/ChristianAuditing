@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { readSheet } from "read-excel-file/node";
 import { PROVENANCE_LABEL } from "@/lib/provenance";
 import { login } from "./fixtures/login";
+import { fillMinimalPo, pickCombo, saveButton, vendorBox, waitForPoForm } from "./fixtures/po-form";
 
 /**
  * Phase 18, Task 9 — purchasing extensions (spec §8.2, 8 cases), carried over to purchase orders (migration 38,
@@ -94,7 +95,7 @@ const deptByName = (name: string) => db.department.findUniqueOrThrow({ where: { 
 
 /** Saves the open PO form (new or edit) and waits for its page; returns the PO's id. */
 async function savePo(page: Page): Promise<string> {
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await saveButton(page).click();
   await page.waitForURL(/\/purchases\/(?!new)[^/]+$/, { timeout: 30_000 });
   return new URL(page.url()).pathname.split("/").pop()!;
 }
@@ -107,20 +108,17 @@ test.describe.serial("purchasing extensions", () => {
     test.setTimeout(90_000); // first hit of /purchases/new and /purchases/[id] in this file
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
-    const main = page.getByRole("main");
-    const save = main.getByRole("button", { name: "Save", exact: true });
-    await waitForHydration(save);
+    await waitForPoForm(page);
 
-    // Purchase orders (migration 38): the department is optional ("No department"); a non-IT line skips IT.
-    await expect(main.getByLabel("Department")).toHaveValue("");
-    await main.getByLabel("Vendor").selectOption({ label: "Metro Office Supply" });
-    await main.getByLabel("SI number").fill("SI-18001");
-    await main.getByLabel("Purchase date").fill("2026-10-18");
-    await main.getByLabel("Department").selectOption({ label: "HR" });
-    await main.getByLabel("Line 1 description").fill("Ergonomic task chairs");
-    await main.getByLabel("Line 1 category").selectOption({ label: "Furniture" });
-    await main.getByLabel("Line 1 quantity").fill("2");
-    await main.getByLabel("Line 1 unit price").fill("9500");
+    // Purchase orders (migration 38): the department is optional ("Not for one department"); a non-IT line skips IT.
+    const department = page.getByRole("combobox", { name: /^For department/ });
+    await expect(department).toHaveValue("Not for one department");
+    await fillMinimalPo(page, {
+      vendor: "Metro Office Supply", poNumber: "2026-18001", si: "SI-18001", date: "2026-10-18",
+      items: [{ description: "Ergonomic task chairs", category: "Furniture", qty: 2, unitPrice: "9500" }],
+      totalAmountDue: "19,000.00",
+    });
+    await pickCombo(page, /^For department/, "HR", /^HR\b/);
     await savePo(page);
     newReqRef = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
     expect(newReqRef).toMatch(/^PO-\d{4}$/);
@@ -153,10 +151,10 @@ test.describe.serial("purchasing extensions", () => {
 
     // Purchase orders: the supplier is one of the PO's money fields, edited on Purchasing's own form (no reason while
     // the PO is with IT, spec §2).
+    // PO-0198 is a legacy PO (before the A3 form): its PO number, paid by, totals and sales invoice stay optional.
     await page.goto(`/purchases/${po0198.id}/edit`);
-    const supplierSelect = page.getByRole("main").getByLabel("Vendor");
-    await waitForHydration(supplierSelect);
-    await supplierSelect.selectOption({ label: "Quezon Furniture Works" });
+    await waitForPoForm(page);
+    await pickCombo(page, "Vendor", "Quezon Furniture Works");
     await savePo(page);
     await expect(page.getByRole("main")).toContainText("Quezon Furniture Works");
 
@@ -179,9 +177,11 @@ test.describe.serial("purchasing extensions", () => {
 
     // Old Line Trading is archived in the seed itself and is not this PO's supplier — it must not appear at all.
     await page.goto(`/purchases/${po0198.id}/edit`);
-    await expect(
-      page.getByRole("main").getByLabel("Vendor").locator("option", { hasText: "Old Line Trading" }),
-    ).toHaveCount(0);
+    await waitForPoForm(page);
+    await vendorBox(page).click();
+    await vendorBox(page).fill("Old Line");
+    await expect(page.getByText("No vendor matches.")).toBeVisible();
+    await expect(page.getByRole("option", { name: /Old Line Trading/ })).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${quezon.id}`);
     const archiveBtn = page.getByRole("button", { name: "Archive vendor" });
@@ -196,10 +196,7 @@ test.describe.serial("purchasing extensions", () => {
     await expect(page.getByRole("main")).toContainText("Quezon Furniture Works");
     await expect(page.getByRole("main").getByText("ARCHIVED", { exact: true })).toBeVisible();
     await page.goto(`/purchases/${po0198.id}/edit`);
-    const reopenedSelect = page.getByRole("main").getByLabel("Vendor");
-    await expect(reopenedSelect).toBeVisible({ timeout: 10_000 });
-    const selectedText = await reopenedSelect.evaluate((el: HTMLSelectElement) => el.options[el.selectedIndex]?.text);
-    expect(selectedText).toBe("Quezon Furniture Works");
+    await expect(vendorBox(page)).toHaveValue(/^Quezon Furniture Works · /, { timeout: 10_000 });
 
     await page.goto(`/purchases/suppliers/${quezon.id}`);
     const restoreBtn = page.getByRole("button", { name: "Restore vendor" });
@@ -221,22 +218,24 @@ test.describe.serial("purchasing extensions", () => {
     });
     await expect(page.getByRole("row", { name: /Quotation/ })).toBeVisible({ timeout: 10_000 });
 
-    // Spec §2: Purchasing, IT and Finance can all upload.
+    // Spec §2: Purchasing, IT and Finance can all upload. The sales invoice has its own slot now (PO form redesign
+    // §2.8): "Document kind" offers only the kinds the four slots don't.
     await login(page, FINANCE);
     await page.goto(`/purchases/${po0198.id}`);
-    const kindSelectFinance = page.getByLabel("Document kind");
-    await waitForHydration(kindSelectFinance);
-    await kindSelectFinance.selectOption("invoice");
-    await page.getByLabel("Document file").setInputFiles({
+    const invoiceSlot = page.locator('[data-po-field="doc:invoice"]');
+    await waitForHydration(page.getByLabel("Document kind"));
+    await expect(page.getByLabel("Document kind").locator("option", { hasText: "Sales invoice" })).toHaveCount(0);
+    await page.getByLabel("Sales invoice", { exact: true }).setInputFiles({
       name: "invoice.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%invoice"),
     });
-    await expect(page.getByRole("row", { name: /Sales invoice/ })).toBeVisible({ timeout: 10_000 });
+    await expect(invoiceSlot).toContainText("invoice.pdf", { timeout: 10_000 });
 
     await login(page, VIEWER);
     await page.goto(`/purchases/${po0198.id}`);
     await expect(page.getByRole("row", { name: /Quotation/ })).toBeVisible();
-    await expect(page.getByRole("row", { name: /Sales invoice/ })).toBeVisible();
+    await expect(invoiceSlot).toContainText("invoice.pdf");
     await expect(page.getByLabel("Document file")).toHaveCount(0);
+    await expect(page.getByLabel("Sales invoice", { exact: true })).toHaveCount(0);
     const downloadLinks = page.getByRole("link", { name: "Download" });
     await expect(downloadLinks.first()).toBeVisible();
     const href = await downloadLinks.first().getAttribute("href");
@@ -350,7 +349,7 @@ test.describe.serial("purchasing extensions", () => {
     const po0198 = await reqByRef("PO-0198");
     await page.goto(`/purchases/${po0198.id}`);
     await expect(page.getByRole("heading", { name: "Purchase", exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Documents", exact: true })).toBeVisible();
     await expectNoSeriousAxe(page);
 
     await page.goto("/inventory?provenance=HISTORICAL");

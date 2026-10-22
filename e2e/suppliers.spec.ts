@@ -285,10 +285,13 @@ test.describe.serial("suppliers", () => {
     await expect(page.getByRole("heading", { name: "PO-0198" })).toBeVisible({ timeout: 10_000 });
     await page.getByRole("link", { name: "Edit", exact: true }).click();
     await page.waitForURL(/\/purchases\/[^/]+\/edit$/, { timeout: 20_000 });
-    await expect(page.getByRole("main").getByLabel("Vendor")).toBeVisible();
-    await expect(
-      page.getByRole("main").getByLabel("Vendor").locator("option", { hasText: "Bayside Networks" }),
-    ).toHaveCount(0);
+    // the A3 form's vendor picker is a combobox: typing the name finds nothing
+    const vendorBox = page.getByRole("combobox", { name: "Vendor", exact: true });
+    await waitForHydration(vendorBox);
+    await vendorBox.click();
+    await vendorBox.fill("Bayside");
+    await expect(page.getByText("No vendor matches.")).toBeVisible();
+    await expect(page.getByRole("option", { name: /Bayside Networks/ })).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${vendor.id}`);
     const restoreBtn = page.getByRole("button", { name: "Restore vendor" });

@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { login } from "./fixtures/login";
+import { fillMinimalPo, saveButton, savePo, waitForPoForm } from "./fixtures/po-form";
 
 /**
  * Purchase orders and the three-team intake (spec docs/superpowers/specs/2026-10-21-purchase-orders-intake-design.md),
@@ -125,28 +126,17 @@ test.describe("the three-team intake on one mixed PO", () => {
     test.setTimeout(120_000);
     await login(page, PURCHASING);
     await page.goto("/purchases/new");
-    const form = page.getByRole("main");
-    await waitForHydration(form.getByRole("button", { name: "Save", exact: true }));
-
-    await form.getByLabel("Vendor").selectOption({ label: "TechServe PH" });
-    await form.getByLabel("SI number").fill("SI-77001");
-    await form.getByLabel("Purchase date").fill("2026-10-20");
-    await form.getByLabel("Line 1 description").fill("Laptops for the new analysts");
-    await form.getByLabel("Line 1 category").selectOption({ label: "Laptop" });
-    await form.getByLabel("Line 1 quantity").fill("5");
-    await form.getByLabel("Line 1 unit price").fill("5200");
-    await form.getByRole("button", { name: "Add line" }).click();
-    await form.getByLabel("Line 2 description").fill("Office chairs");
-    await form.getByLabel("Line 2 category").selectOption({ label: "Furniture" });
-    await form.getByLabel("Line 2 quantity").fill("2");
-    await form.getByLabel("Line 2 unit price").fill("8500");
-    await form.getByRole("button", { name: "Save", exact: true }).click();
-
-    await page.waitForURL(/\/purchases\/(?!new)[^/]+$/, { timeout: 30_000 });
-    po.id = new URL(page.url()).pathname.split("/").pop()!;
-    const heading = page.getByRole("heading", { level: 1 });
-    await expect(heading).toHaveText(/^PO-\d{4}$/);
-    po.refNo = (await heading.textContent())!.trim();
+    await fillMinimalPo(page, {
+      vendor: "TechServe PH", poNumber: "2026-77001", si: "SI-77001", date: "2026-10-20",
+      items: [
+        { description: "Laptops for the new analysts", category: "Laptop", qty: 5, unitPrice: "5200" },
+        { description: "Office chairs", category: "Furniture", qty: 2, unitPrice: "8500" },
+      ],
+      totals: { totalSales: "43,000.00" },
+      totalAmountDue: "43,000.00",
+    });
+    await expect(saveButton(page)).toHaveText("Save and send to IT");
+    Object.assign(po, await savePo(page));
     await expect(page.locator("main header").first()).toContainText("With IT");
 
     // a fresh seed has no notifications: this save is IT's first, and it is one for the whole PO
@@ -190,13 +180,12 @@ test.describe("the three-team intake on one mixed PO", () => {
     await page.goto(`/purchases/${po.id}`);
     await page.getByRole("link", { name: "Fix and reply" }).click();
     await page.waitForURL(new RegExp(`/purchases/${po.id}/edit$`));
-    const save = page.getByRole("button", { name: "Save", exact: true });
-    await waitForHydration(save);
+    await waitForPoForm(page);
     // the flagged field is said in words, not colour alone
     await expect(page.getByRole("main")).toContainText("Flagged: Unit price");
-    await page.getByLabel("Line 1 unit price").fill("52000");
-    await page.getByLabel("What did you fix?").fill("Unit price is per laptop now: 52,000 each");
-    await save.click();
+    await page.getByRole("textbox", { name: "Item 1 unit price in pesos", exact: true }).fill("52000");
+    await page.getByRole("textbox", { name: "What did you fix?", exact: true }).fill("Unit price is per laptop now: 52,000 each");
+    await saveButton(page).click();
     await page.waitForURL(new RegExp(`/purchases/${po.id}$`), { timeout: 30_000 });
     await expect(page.locator("main header").first()).toContainText("With IT");
     await expect(page.locator("#thread")).toContainText("Unit price is per laptop now: 52,000 each");
