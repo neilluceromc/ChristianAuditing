@@ -145,14 +145,6 @@ export function fmtFileSize(bytes: number | null | undefined): string {
   return `${Number((bytes / 1_000_000).toFixed(1))} MB`;
 }
 
-/** How a file previews inline (the download route's `?inline=1` serves exactly these): a frame, an image, or not at all. */
-export function previewKind(fileName: string): "pdf" | "image" | null {
-  const ext = fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
-  if (ext === "pdf") return "pdf";
-  if (ext === "png" || ext === "jpg" || ext === "jpeg") return "image";
-  return null;
-}
-
 /** The asset document download route (Task 4): `inline` previews a PDF or an image in the page. */
 export function assetDocHref(assetId: string, docId: string, inline = false): string {
   return `/inventory/${encodeURIComponent(assetId)}/documents/${encodeURIComponent(docId)}/download${inline ? "?inline=1" : ""}`;

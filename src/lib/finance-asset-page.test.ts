@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ASSET_PAGE_STATE, assetHistory, assetPageHref, fmtFileSize, historyCsv, lifeSummary, noScheduleReason, parseAssetPageState,
-  previewKind, shortMonthLabel,
+  shortMonthLabel,
 } from "./finance-asset-page";
 import type { AuditRow, HistoryRow } from "./finance-history";
 import type { DepResult } from "./depreciation";
@@ -97,14 +97,6 @@ describe("small formatters", () => {
     expect(fmtFileSize(2_048)).toBe("2 KB");
     expect(fmtFileSize(1_536_000)).toBe("1.5 MB");
     expect(fmtFileSize(4_000_000)).toBe("4 MB");
-  });
-  it("previewKind: PDFs in a frame, PNG and JPG as images, anything else downloads", () => {
-    expect(previewKind("a.PDF")).toBe("pdf");
-    expect(previewKind("b.png")).toBe("image");
-    expect(previewKind("c.jpeg")).toBe("image");
-    expect(previewKind("d.JPG")).toBe("image");
-    expect(previewKind("e.docx")).toBeNull();
-    expect(previewKind("noext")).toBeNull();
   });
 });
 

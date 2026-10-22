@@ -58,7 +58,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
   const onFile: PoFormInitial["onFile"] = {};
   for (const kind of PO_DOCUMENT_SLOTS) {
     const doc = request.documents.find((d) => d.kind === kind);
-    if (doc) onFile[kind] = { fileName: doc.fileName, href: doc.downloadHref };
+    if (doc) onFile[kind] = { fileName: doc.fileName, href: doc.downloadHref, uploadedAt: doc.uploadedAt, uploadedBy: doc.uploadedBy };
   }
 
   return (

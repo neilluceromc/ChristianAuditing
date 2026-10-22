@@ -9,13 +9,12 @@ import { fmtDate, fmtMoneyExact } from "@/lib/format";
 import { fieldLabels } from "@/lib/registration";
 import { poControls } from "@/lib/po-controls";
 import { PAID_BY_LABEL } from "@/lib/po-flow";
-import { previewKind } from "@/lib/finance-asset-page";
 import { toSearchParams } from "@/lib/url-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DescriptionList } from "@/components/ui/description-list";
-import { ButtonLink } from "@/components/ui/button-link";
-import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
+import { DocumentsTable } from "@/components/files/documents-table";
+import { ReviewDocViewer } from "@/components/finance/review-doc-viewer";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
 import { TotalsLadder } from "@/components/purchases/totals-ladder";
 import { FixMoneyButton } from "@/components/finance/fix-money-dialog";
@@ -179,7 +178,7 @@ export default async function GroupReviewPage({
               // a PO from the new form needs its sales invoice: the empty slot says Required, as on the PO page
               invoiceRequired={g.po.formV2}
               si={g.money.invoiceRef}
-              docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy ?? "Unknown", at: d.at, downloadHref: d.downloadHref }))}
+              docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedAt: d.uploadedAt, uploadedBy: d.uploadedBy, downloadHref: d.downloadHref }))}
             />
           ) : (
             <Card>
@@ -210,51 +209,9 @@ export default async function GroupReviewPage({
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
-          {openDoc?.previewHref && (
-            <Card className="overflow-hidden">
-              <div className="flex flex-wrap items-center gap-2 border-b border-border-faint px-4 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] text-fg-muted">{openDoc.label}</p>
-                  <p className="truncate text-[13px] font-medium text-fg" title={openDoc.fileName}>{openDoc.fileName}</p>
-                </div>
-                <ButtonLink native size="sm" href={openDoc.downloadHref}>Download</ButtonLink>
-                <ButtonLink size="sm" variant="ghost" href={base}>Close<span className="sr-only"> the preview</span></ButtonLink>
-              </div>
-              {previewKind(openDoc.fileName) === "pdf" ? (
-                <iframe title={`Preview of ${openDoc.fileName}`} src={openDoc.previewHref} className="block h-[520px] w-full bg-surface-subtle" />
-              ) : (
-                <div className="flex justify-center bg-surface-subtle p-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- an authenticated route's bytes, not a static asset */}
-                  <img src={openDoc.previewHref} alt={openDoc.fileName} className="max-h-[520px] max-w-full object-contain" />
-                </div>
-              )}
-            </Card>
-          )}
+          {openDoc?.previewHref && <ReviewDocViewer doc={{ ...openDoc, previewHref: openDoc.previewHref }} closeHref={base} />}
 
-          {!g.po && g.docs.length > 0 && (
-            <Table>
-              <THead>
-                <Tr>
-                  <Th>Kind</Th>
-                  <Th>File</Th>
-                  <Th>Uploaded by</Th>
-                  <Th>Date</Th>
-                  <Th aria-label="Download" />
-                </Tr>
-              </THead>
-              <TBody>
-                {g.docs.map((d) => (
-                  <Tr key={d.id}>
-                    <Td>{d.label}</Td>
-                    <Td><span className="block max-w-[16rem] truncate" title={d.fileName}>{d.fileName}</span></Td>
-                    <Td>{d.uploadedBy ?? "Unknown"}</Td>
-                    <Td mono>{d.at}</Td>
-                    <Td align="right"><a href={d.downloadHref} className="text-accent hover:underline">Download</a></Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
-          )}
+          {!g.po && g.docs.length > 0 && <DocumentsTable rows={g.docs} />}
 
           <GroupReview
             recordId={recordId}

@@ -17,9 +17,10 @@ export interface SupplierDocumentRow {
   id: string;
   kind: string;
   fileName: string;
-  /** Null for a row nobody uploaded (system or import); rendered as "system" here, as before. */
+  /** When it was uploaded (ISO), shown to the minute. */
+  uploadedAt: string;
+  /** Null for a row nobody uploaded (system or import): a dash. */
   uploadedBy: string | null;
-  at: string;
   downloadHref: string;
 }
 

@@ -14,6 +14,8 @@ const props = (extra: Partial<DocumentsCardProps> = {}): DocumentsCardProps => (
 const render = (extra: Partial<DocumentsCardProps> = {}) => renderToStaticMarkup(<DocumentsCard {...props(extra)} />);
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const button = (label: string) => new RegExp(`<button[^>]*><span[^>]*>${label}</span></button>`);
+/** Preview names its file for a screen reader: "Preview <file>". */
+const preview = (file: string) => new RegExp(`<button[^>]*><span[^>]*>Preview<span class="sr-only"> ${file.replace(".", "\\.")}</span></span></button>`);
 const pdf = (name: string, bytes: number) => new File([new Uint8Array(bytes)], name, { type: "application/pdf" });
 
 describe("DocumentsCard", () => {
@@ -52,21 +54,35 @@ describe("DocumentsCard", () => {
     const t = text(html);
     expect(t).toContain("1 of 4 attached");
     expect(t).toContain("Attached");
-    expect(t).toContain("si-44511.pdf · 0.8 MB");
-    expect(html).toMatch(button("Preview"));
+    expect(t).toContain("si-44511.pdf 0.8 MB");
+    // a held file previews in the dialog (its object URL is made only when that opens)
+    expect(html).toMatch(preview("si-44511.pdf"));
+    expect(html).not.toContain("blob:");
     expect(html).toMatch(button("Replace"));
     expect(html).toContain('aria-label="Remove sales invoice"');
     // the other three are still drop zones
     expect(t.match(/Drop a file or browse/g)).toHaveLength(3);
   });
 
-  it("an edit: the document on file previews in place and can be replaced, not removed here", () => {
-    const html = render({ onFile: { invoice: { fileName: "si.pdf", href: "/purchases/po1/documents/d1/download" } } });
-    expect(text(html)).toContain("si.pdf · on file");
-    expect(html).toContain('href="/purchases/po1/documents/d1/download?inline=1"');
+  it("an edit: the document on file says when and by whom it was uploaded, previews in the dialog, and can be replaced, not removed here", () => {
+    const html = render({
+      onFile: { invoice: { fileName: "si.pdf", href: "/purchases/po1/documents/d1/download", uploadedAt: "2026-10-22T01:41:00.000Z", uploadedBy: "Ana Cruz" } },
+    });
+    expect(text(html)).toContain("si.pdf Uploaded 22 Oct 2026 09:41 · Ana Cruz");
+    expect(html).toMatch(preview("si.pdf"));
+    expect(html).not.toContain('target="_blank"');
     expect(html).toMatch(button("Replace"));
     expect(html).not.toContain('aria-label="Remove sales invoice"');
     expect(text(html)).toContain("1 of 4 attached");
+    // a stored image's thumbnail is its inline route
+    const img = render({ onFile: { invoice: { fileName: "si.jpg", href: "/purchases/po1/documents/d2/download", uploadedAt: "2026-10-22T01:41:00.000Z", uploadedBy: null } } });
+    expect(img).toMatch(/<img[^>]*src="\/purchases\/po1\/documents\/d2\/download\?inline=1"/);
+    expect(text(img)).toContain("si.jpg Uploaded 22 Oct 2026 09:41 Preview");
+  });
+
+  it("an edit's document without an upload time (older data) still says it is on file", () => {
+    const html = render({ onFile: { invoice: { fileName: "si.pdf", href: "/purchases/po1/documents/d1/download" } } });
+    expect(text(html)).toContain("si.pdf on file");
   });
 
   it("a slot's error, its mark for a failed save, and a flagged slot", () => {

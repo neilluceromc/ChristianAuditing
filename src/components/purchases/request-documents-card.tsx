@@ -8,20 +8,22 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { DocumentsTable } from "@/components/files/documents-table";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { removePoDocument, replacePoDocument, uploadPoDocument } from "@/server/modules/purchases/document-actions";
 import { PO_DOCUMENT_SLOTS, REQUEST_DOCUMENT_KINDS, REQUEST_DOCUMENT_LABEL, type PoDocumentSlot } from "@/lib/documents";
+import { uploadedLine } from "@/lib/file-preview";
 import { ACCEPT, DocSlot, SLOT_COPY } from "@/components/purchases/po-form/documents-card";
 
 export interface RequestDocumentRow {
   id: string;
   kind: string;
   fileName: string;
-  /** Null for a row nobody uploaded (system or import); rendered as "system" here, as before. */
+  /** When it was uploaded (ISO): "Uploaded 22 Oct 2026 09:41". */
+  uploadedAt: string;
+  /** Null for a row nobody uploaded (system or import): the line gives the time alone. */
   uploadedBy: string | null;
-  at: string;
   downloadHref: string;
 }
 
@@ -169,7 +171,11 @@ export function RequestDocumentsCard({
             return (
               <DocSlot
                 key={slot} kind={slot} required={invoiceRequired && slot === "invoice"} si={si ?? ""}
-                shown={doc ? { fileName: doc.fileName, detail: `${doc.uploadedBy ?? "system"} · ${doc.at}`, preview: `${doc.downloadHref}?inline=1` } : null}
+                shown={doc ? {
+                  fileName: doc.fileName,
+                  detail: uploadedLine(doc.uploadedAt, doc.uploadedBy) ?? "",
+                  preview: { href: doc.downloadHref, inlineHref: `${doc.downloadHref}?inline=1`, uploadedAt: doc.uploadedAt, uploadedBy: doc.uploadedBy },
+                } : null}
                 onPick={canUpload ? (file) => storeInSlot(slot, file) : undefined}
                 onRemove={canUpload && doc ? () => setRemoving({ slot, doc }) : undefined}
                 error={slotErrors[slot]} busy={busy.has(slot)}
@@ -185,28 +191,7 @@ export function RequestDocumentsCard({
           {others.length === 0 ? (
             <p className="py-2 text-center text-xs text-fg-muted">No other documents.</p>
           ) : (
-            <Table>
-              <THead>
-                <Tr>
-                  <Th>Kind</Th>
-                  <Th>File</Th>
-                  <Th>Uploaded by</Th>
-                  <Th>Date</Th>
-                  <Th aria-label="Download" />
-                </Tr>
-              </THead>
-              <TBody>
-                {others.map((d) => (
-                  <Tr key={d.id}>
-                    <Td>{d.label}</Td>
-                    <Td><span className="block max-w-[16rem] truncate" title={d.fileName}>{d.fileName}</span></Td>
-                    <Td>{d.uploadedBy ?? "system"}</Td>
-                    <Td mono>{d.at}</Td>
-                    <Td align="right"><a href={d.downloadHref} className="text-accent hover:underline">Download</a></Td>
-                  </Tr>
-                ))}
-              </TBody>
-            </Table>
+            <DocumentsTable rows={others} />
           )}
 
           {canUpload && (

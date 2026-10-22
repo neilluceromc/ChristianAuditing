@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
-import { fmtDate } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format";
 import { fmtFileSize } from "@/lib/finance-asset-page";
 import { ATTACHMENT_KINDS, ATTACHMENT_KIND_LABELS, type AssetAttachmentView, type AttachmentKind } from "@/lib/asset-notes";
 import { Card } from "@/components/ui/card";
@@ -103,9 +103,13 @@ export function AttachmentsTab({ assetId, attachments, canUpload, kind, selected
                           <span className="flex flex-wrap gap-x-2 text-[11.5px] text-fg-muted">
                             <span>{ATTACHMENT_KIND_LABELS[a.kind]}</span>
                             <span aria-hidden>·</span>
-                            <span>{a.uploadedBy ?? "Unknown"}</span>
-                            <span aria-hidden>·</span>
-                            <span>{fmtDate(a.createdAt)}</span>
+                            {a.uploadedBy && (
+                              <>
+                                <span>{a.uploadedBy}</span>
+                                <span aria-hidden>·</span>
+                              </>
+                            )}
+                            <span className="font-mono">{fmtDateTime(a.uploadedAt)}</span>
                             <span aria-hidden>·</span>
                             <span className="font-mono">{fmtFileSize(a.size)}</span>
                           </span>
@@ -122,6 +126,8 @@ export function AttachmentsTab({ assetId, attachments, canUpload, kind, selected
                 doc={{ id: selected.id, fileName: selected.fileName, size: selected.size }}
                 title={ATTACHMENT_KIND_LABELS[selected.kind]}
                 closeHref={hrefFor({ att: null })}
+                uploadedAt={selected.uploadedAt}
+                uploadedBy={selected.uploadedBy}
               />
             ) : (
               <Card className="hidden xl:block">
