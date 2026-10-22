@@ -54,7 +54,7 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ movem
   }
   if (d.supplierId) {
     const v = await prisma.vendor.findUnique({ where: { id: d.supplierId }, select: { archivedAt: true } });
-    if (!v || v.archivedAt) return conflict("That supplier is archived — restore it first.");
+    if (!v || v.archivedAt) return conflict("That vendor is archived — restore it first.");
   }
   const occurredAt = new Date(`${d.occurredAt || todayStr()}T00:00:00Z`);
 

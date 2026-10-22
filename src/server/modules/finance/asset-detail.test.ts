@@ -179,13 +179,13 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
     expect(decAt).toBeLessThan(confirmAt);
   });
 
-  it("resolves the supplier ids in the diffs to names; the chip never shows an id", async () => {
+  it("resolves the vendor ids in the diffs to names; the chip never shows an id", async () => {
     const d = (await financeAssetDetail("a1", NOW))!;
     expect(d.historyNames).toMatchObject({ "ven-old": "Octagon", "ven-new": "Acme Trading" });
     expect(h.nameReads).toEqual(["vendor"]);
     const rows = buildHistory(d.audit, d.depLines, { pageSize: 1000 }, { assetTag: d.tag, names: d.historyNames }).rows;
-    const r = rows.find((x) => x.changes.some((c) => c.field === "supplier"))!;
-    expect(r.changes).toEqual([{ field: "supplier", from: "Octagon", to: "Acme Trading" }]);
+    const r = rows.find((x) => x.changes.some((c) => c.field === "vendor"))!;
+    expect(r.changes).toEqual([{ field: "vendor", from: "Octagon", to: "Acme Trading" }]);
     expect(JSON.stringify(rows)).not.toContain("ven-");
   });
 });

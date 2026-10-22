@@ -38,7 +38,7 @@ export default async function RegisterFromPoPage({ params }: { params: Promise<{
   const { lines, catalog } = await poRegisterModel(po, user.role);
 
   const facts = [
-    po.supplier?.name ?? "no supplier",
+    po.supplier?.name ?? "no vendor",
     po.invoiceRef ? `SI ${po.invoiceRef}` : "no SI number yet",
     po.purchasedAt ? `bought ${fmtDate(`${po.purchasedAt}T00:00:00Z`)}` : null,
   ].filter(Boolean).join(" · ");

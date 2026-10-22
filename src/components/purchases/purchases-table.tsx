@@ -21,7 +21,7 @@ export function PurchasesTable({ rows }: { rows: PurchaseListRow[] }) {
           <Th width={124} align="right">Value</Th>
           {/* the department sits under the requester's name: one column, so State fits at 1280 px */}
           <Th width={150}>Requested by</Th>
-          <Th width={150}>Supplier</Th>
+          <Th width={150}>Vendor</Th>
           <Th width={168}>State</Th>
         </Tr>
       </THead>

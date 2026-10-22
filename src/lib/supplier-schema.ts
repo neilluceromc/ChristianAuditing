@@ -22,7 +22,7 @@ const text = (max: number) => z.string().trim().max(max).optional().default("");
 export const emailSchema = z.string().trim().email("That is not an email address");
 
 export const supplierSchema = z.object({
-  name: z.string().trim().min(1, "Name the supplier").max(120),
+  name: z.string().trim().min(1, "Name the vendor").max(120),
   registeredName: text(160),
   category: text(60),
   contactPerson: text(120),

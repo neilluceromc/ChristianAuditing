@@ -5,7 +5,7 @@ import { supplierCategories } from "@/server/modules/suppliers/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { SupplierForm } from "@/components/suppliers/supplier-form";
 
-export const metadata: Metadata = { title: pageTitle("New supplier") };
+export const metadata: Metadata = { title: pageTitle("New vendor") };
 
 export default async function NewSupplierPage() {
   await requireRole("admin", "purchasing_staff");
@@ -14,10 +14,10 @@ export default async function NewSupplierPage() {
   return (
     <>
       <PageHeader
-        title="New supplier"
+        title="New vendor"
         breadcrumb={[
           { label: "Purchase orders", href: "/purchases" },
-          { label: "Suppliers", href: "/purchases/suppliers" },
+          { label: "Vendors", href: "/purchases/suppliers" },
           { label: "New" },
         ]}
       />

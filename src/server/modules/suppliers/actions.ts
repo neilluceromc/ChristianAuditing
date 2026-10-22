@@ -13,7 +13,7 @@ import { supplierSchema, toSupplierData } from "@/lib/supplier-schema";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { findSameSupplierName } from "@/server/modules/suppliers/queries";
 
-const DUPLICATE = { name: "A supplier with this name already exists" };
+const DUPLICATE = { name: "A vendor with this name already exists" };
 const idSchema = z.object({ id: z.string().min(1) });
 
 function revalidate(id?: string) {
@@ -33,7 +33,7 @@ export async function createSupplier(input: unknown): Promise<ActionResult<{ id:
   try {
     const created = await prisma.$transaction(async (tx) => {
       const clash = await tx.vendor.findFirst({ where: { name: { equals: data.name, mode: "insensitive" } }, select: { name: true } });
-      if (clash) return validationError({ name: `A supplier with this name already exists: "${clash.name}"` });
+      if (clash) return validationError({ name: `A vendor with this name already exists: "${clash.name}"` });
       const v = await tx.vendor.create({ data });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "vendor", entityId: v.id,
@@ -74,7 +74,7 @@ export async function updateSupplier(input: unknown): Promise<ActionResult<{ id:
   const data = toSupplierData(dataParsed.data);
 
   const before = await prisma.vendor.findUnique({ where: { id } });
-  if (!before) return conflict("That supplier no longer exists.");
+  if (!before) return conflict("That vendor no longer exists.");
 
   const diff = diffOf(before, data);
   if (Object.keys(diff).length === 0) return ok({ id });
@@ -84,7 +84,7 @@ export async function updateSupplier(input: unknown): Promise<ActionResult<{ id:
       const clash = await tx.vendor.findFirst({
         where: { id: { not: id }, name: { equals: data.name, mode: "insensitive" } }, select: { name: true },
       });
-      if (clash) return validationError({ name: `A supplier with this name already exists: "${clash.name}"` });
+      if (clash) return validationError({ name: `A vendor with this name already exists: "${clash.name}"` });
       await tx.vendor.update({ where: { id }, data });
       await writeAudit(tx, {
         actorId: user.id, actorLabel: user.name, entityType: "vendor", entityId: id,
@@ -111,7 +111,7 @@ export async function archiveSupplier(input: unknown): Promise<ActionResult<null
   const { id } = parsed.data;
 
   const before = await prisma.vendor.findUnique({ where: { id } });
-  if (!before) return conflict("That supplier no longer exists.");
+  if (!before) return conflict("That vendor no longer exists.");
   if (before.archivedAt !== null) return ok(null);
 
   await prisma.$transaction(async (tx) => {
@@ -151,7 +151,7 @@ export async function restoreSupplier(input: unknown): Promise<ActionResult<null
   const { id } = parsed.data;
 
   const before = await prisma.vendor.findUnique({ where: { id } });
-  if (!before) return conflict("That supplier no longer exists.");
+  if (!before) return conflict("That vendor no longer exists.");
   if (before.archivedAt === null) return ok(null);
 
   await prisma.$transaction(async (tx) => {

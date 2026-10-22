@@ -153,7 +153,7 @@ export async function paletteSearch(query: unknown): Promise<PaletteResults> {
     }),
     requests: requests.map((r) => ({ label: r.refNo, sub: PO_STATE_LABEL[r.state], href: `/purchases/${r.id}` })),
     suppliers: suppliers.map((v) => ({
-      label: v.name, sub: v.category ?? v.contactPerson ?? "supplier", href: `/purchases/suppliers/${v.id}`,
+      label: v.name, sub: v.category ?? v.contactPerson ?? "vendor", href: `/purchases/suppliers/${v.id}`,
     })),
     stock: stock.map((s) => ({ label: s.code, sub: s.name, href: `/stock/items/${s.id}` })),
   };

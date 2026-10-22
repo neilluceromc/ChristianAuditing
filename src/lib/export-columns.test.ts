@@ -269,7 +269,7 @@ describe("CONSUMPTION_EXPORT_COLUMNS (Phase 22 spec §4.4)", () => {
 describe("EXPIRY_EXPORT_COLUMNS (Phase 22 spec §4.4)", () => {
   it("carries the eleven columns in this exact order", () => {
     expect(EXPIRY_EXPORT_COLUMNS.map((c) => c.label)).toEqual([
-      "Status", "Code", "Item", "Lot date", "Reference", "Supplier", "Expires", "Days", "Remaining",
+      "Status", "Code", "Item", "Lot date", "Reference", "Vendor", "Expires", "Days", "Remaining",
       "Unit cost", "Value at risk",
     ]);
   });

@@ -211,9 +211,9 @@ describe("purchasingOverview", () => {
       ["Cancelled", 6, "/purchases?state=CANCELLED"],
     ]);
     // from the one spend read, this Manila month only: Bolt's Sep 30 23:30 (Manila) completion is September's
-    expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Acme", value: 1050.1 }, { label: "No supplier", value: 500 }] });
+    expect(o.breakdown).toMatchObject({ money: true, rows: [{ label: "Acme", value: 1050.1 }, { label: "No vendor", value: 500 }] });
     expect(o.breakdown.rows).toHaveLength(2);
-    expect(o.breakdown.rows.every((r) => r.href === undefined)).toBe(true); // ruling: supplier rows are not links
+    expect(o.breakdown.rows.every((r) => r.href === undefined)).toBe(true); // ruling: vendor rows are not links
   });
 });
 

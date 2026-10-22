@@ -31,7 +31,7 @@ export interface SupplierPlanResult {
  * trail can tell an operator's edit apart from a spreadsheet row.
  */
 const SUPPLIER_ROW_SUBJECT: RowErrorSubject = {
-  unique: "a supplier name already on file",
+  unique: "a vendor name already on file",
   fk: "a reference that no longer exists",
 };
 
@@ -65,7 +65,7 @@ export async function planSupplierImport(form: FormData): Promise<ActionResult<S
   const bank = findBankColumns(read.header);
   if (bank.length) {
     return conflict(
-      `This sheet carries a bank column (${bank.join(", ")}). Bank details are entered on the supplier's ` +
+      `This sheet carries a bank column (${bank.join(", ")}). Bank details are entered on the vendor's ` +
         "page, never imported. Remove the column and re-upload.",
     );
   }
@@ -148,7 +148,7 @@ export async function applySupplierImport(
         }
 
         const before = await tx.vendor.findUnique({ where: { id: row.vendorId } });
-        if (!before) throw new RowWriteError("that supplier no longer exists");
+        if (!before) throw new RowWriteError("that vendor no longer exists");
 
         const { diff, changed } = supplierChanges(before as unknown as Record<string, unknown>, row.data);
 

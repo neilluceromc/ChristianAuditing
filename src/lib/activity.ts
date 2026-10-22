@@ -26,7 +26,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "approval.requested": "Change requested", comment: "Comment", "unit-update": "Units updated",
   submit: "Submitted", "it-review": "IT review", "it-reject": "Returned by IT", "request-info": "Info requested",
   cancel: "Cancelled", complete: "Completed", "finance.confirm": "Finance confirmed", "it.verify": "IT verified",
-  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Supplier set",
+  "finance.return": "Returned by Finance", "finance.resubmit": "Resubmitted", "finance.reopened": "Back to Finance", "supplier-set": "Vendor set",
   "depreciation.policy": "Depreciation policy", "depreciation.override": "Custom depreciation", "depreciation.override.cleared": "Custom depreciation cleared",
   // Finance follow-up (spec §3): undo within 15 minutes, and an admin's reopen
   "finance.confirm.undone": "Approval undone", "asset.return.undone": "Send-back undone",
@@ -55,8 +55,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "stock.category.created": "Stock category added", "stock.category.updated": "Stock category updated",
   "stock.category.archived": "Stock category archived", "stock.category.restored": "Stock category restored",
   "stocktake.opened": "Stocktake started", "stocktake.posted": "Stocktake posted", "stocktake.cancelled": "Stocktake cancelled",
-  "supplier.created": "Supplier added", "supplier.updated": "Supplier updated",
-  "supplier.archived": "Supplier archived", "supplier.restored": "Supplier restored",
+  "supplier.created": "Vendor added", "supplier.updated": "Vendor updated",
+  "supplier.archived": "Vendor archived", "supplier.restored": "Vendor restored",
   "supplier.bank.added": "Bank details added", "supplier.bank.removed": "Bank details removed", "supplier.bank.revealed": "Bank details viewed",
   signup: "Signed up", bootstrap: "First admin set up", "role-change": "Role changed",
   disable: "Account disabled", enable: "Account enabled",
@@ -70,13 +70,13 @@ export function actionLabel(action: string): string { return ACTION_LABELS[actio
 /** Phase 27 (spec §3.5): raw diff keys → words, shared by the `update` and `import-update` sentences. */
 export const FIELD_LABELS: Record<string, string> = {
   name: "name", model: "model", serial: "serial", cost: "cost", location: "location", notes: "notes",
-  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", assignee: "holder", vendorId: "supplier",
+  categoryId: "category", typeId: "type", departmentId: "department", assigneeId: "holder", assignee: "holder", vendorId: "vendor",
   purchasedAt: "purchase date", warrantyUntil: "warranty end", loanDueAt: "loan due date",
   employeeNo: "employee number", email: "email", title: "title", employment: "employment", joinedAt: "join date",
   offboardingAt: "offboarding start", offboardingDueAt: "complete-by date",
   registeredName: "registered name", contactPerson: "contact person", phone: "phone", address: "address",
   invoiceRef: "SI number", receiptRef: "OR number",
-  registrationNo: "registration number", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
+  registrationNo: "VAT REG. TIN", contractStatus: "contract status", contractStart: "contract start", contractEnd: "contract end",
   unit: "unit", packSize: "pack size", reorderLevel: "reorder level", expiresAt: "expiry",
   // Phase 40 §8: triage records Dispose/Donate's `reason` apart from Keep/Repair's optional `note`
   reason: "reason", note: "note",
@@ -113,7 +113,7 @@ const reasonTail = (reason: unknown) => (typeof reason === "string" && reason.tr
 const MONEY_FIX_FIELDS = ["vendorId", "invoiceRef", "receiptRef", "purchasedAt", "fees", "cost"] as const;
 type MoneyFixField = (typeof MONEY_FIX_FIELDS)[number];
 const MONEY_FIX_LABEL: Record<MoneyFixField, string> = {
-  vendorId: "supplier", invoiceRef: "SI number", receiptRef: "OR number", purchasedAt: "purchase date", fees: "fees", cost: "unit price",
+  vendorId: "vendor", invoiceRef: "SI number", receiptRef: "OR number", purchasedAt: "purchase date", fees: "fees", cost: "unit price",
 };
 /** A fix's diff key as a money field: a PO's per-line `line2.unitPrice` and a record's `unitCost` are the unit price too. */
 function moneyFixField(key: string): MoneyFixField | null {
@@ -134,7 +134,7 @@ export function moneyFixFields(diff: unknown): string {
   const labels = MONEY_FIX_FIELDS.filter((f) => found.has(f)).map((f) => MONEY_FIX_LABEL[f]);
   return labels.length ? wordList(labels) : "money details";
 }
-/** What an asset's fix changed, with the old and the new value: "the SI number from 0012 to 0021". A supplier is an id, so it is named only. */
+/** What an asset's fix changed, with the old and the new value: "the SI number from 0012 to 0021". A vendor is an id, so it is named only. */
 export function moneyFixChanges(diff: unknown): string {
   const d = (diff && typeof diff === "object" ? diff : {}) as Record<string, { from?: unknown; to?: unknown }>;
   const parts: string[] = [];
@@ -640,9 +640,9 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
     case "supplier-set": {
       const to = diff?.supplier?.to;
       if (to) {
-        return omitEntity ? `${actor}set ${String(to)} as the supplier` : `${actor}set ${String(to)} as the supplier on ${entry.entityLabel}`;
+        return omitEntity ? `${actor}set ${String(to)} as the vendor` : `${actor}set ${String(to)} as the vendor on ${entry.entityLabel}`;
       }
-      return omitEntity ? `${actor}cleared the supplier` : `${actor}cleared the supplier on ${entry.entityLabel}`;
+      return omitEntity ? `${actor}cleared the vendor` : `${actor}cleared the vendor on ${entry.entityLabel}`;
     }
     // Phase 37 (spec §4.5, §4.6): notes and IT setup are written on the employee; the diff keeps the text / label.
     case "note.added":

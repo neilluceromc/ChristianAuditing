@@ -266,7 +266,7 @@ export default async function FinanceAssetPage({
                           : "Not recorded",
                       },
                       { label: "Requested by", value: text(d.purchase.requestedBy) },
-                      { label: "Supplier", value: text(d.purchase.supplier) },
+                      { label: "Vendor", value: text(d.purchase.supplier) },
                       { label: "Invoice no.", value: text(d.purchase.invoiceRef) },
                       { label: "OR no.", value: text(d.purchase.receiptRef) },
                       { label: "Purchase date", value: d.purchase.purchasedAt ? fmtDate(d.purchase.purchasedAt) : "Not recorded" },

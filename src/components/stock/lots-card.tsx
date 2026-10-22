@@ -40,7 +40,7 @@ export function LotsCard({
                 <Th>Lot date</Th>
                 <Th>Expires</Th>
                 <Th>Reference</Th>
-                <Th>Supplier</Th>
+                <Th>Vendor</Th>
                 <Th align="right">Remaining</Th>
                 <Th align="right">Unit cost</Th>
                 <Th align="right">Value</Th>

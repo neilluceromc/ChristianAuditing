@@ -19,13 +19,13 @@ export async function uploadSupplierDocument(formData: FormData): Promise<Action
 
   const vendorId = String(formData.get("vendorId") ?? "");
   const kind = String(formData.get("kind") ?? "");
-  if (!vendorId) return conflict("Missing supplier.");
+  if (!vendorId) return conflict("Missing vendor.");
   if (!(SUPPLIER_DOCUMENT_KINDS as readonly string[]).includes(kind)) return validationError({ kind: "Pick a document kind" });
   const checked = validateUpload(formData.get("file"));
   if (!checked.ok) return validationError({ file: checked.error });
 
   const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
-  if (!vendor) return conflict("That supplier no longer exists.");
+  if (!vendor) return conflict("That vendor no longer exists.");
 
   let stored: Awaited<ReturnType<typeof storeUpload>>;
   try {

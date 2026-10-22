@@ -22,9 +22,8 @@ import { ListNavigationProvider, ListPendingRegion, NavLink } from "@/components
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import type { FacetOptionLike } from "@/components/patterns/facet-dropdown";
 
-// Phase 27 (P-10): "vendor" is what the table is called; "Supplier" is what the operator calls it.
-const ENTITY_LABEL_OVERRIDE: Record<string, string> = { vendor: "Supplier" };
-const humanize = (s: string) => ENTITY_LABEL_OVERRIDE[s] ?? s.charAt(0).toUpperCase() + s.slice(1).replaceAll("-", " ");
+// Phase 27 (P-10) showed the `vendor` table as "Supplier" here; spec §2.2 made "Vendor" the word everywhere, so it reads as itself.
+const humanize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replaceAll("-", " ");
 
 export const metadata: Metadata = { title: pageTitle("Audit log") };
 

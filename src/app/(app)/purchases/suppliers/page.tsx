@@ -16,7 +16,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { SuppliersToolbar } from "@/components/suppliers/suppliers-toolbar";
 import { SuppliersTable } from "@/components/suppliers/suppliers-table";
 
-export const metadata: Metadata = { title: pageTitle("Suppliers") };
+export const metadata: Metadata = { title: pageTitle("Vendors") };
 
 export default async function SuppliersPage({
   searchParams,
@@ -34,16 +34,16 @@ export default async function SuppliersPage({
 
   const actions = manage ? (
     <>
-      <ButtonLink href="/purchases/suppliers/new" variant="primary">New supplier</ButtonLink>
-      <ButtonLink href="/purchases/suppliers/import">Import suppliers</ButtonLink>
+      <ButtonLink href="/purchases/suppliers/new" variant="primary">New vendor</ButtonLink>
+      <ButtonLink href="/purchases/suppliers/import">Import vendors</ButtonLink>
     </>
   ) : undefined;
 
   return (
     <>
       <PageHeader
-        title="Suppliers"
-        breadcrumb={[{ label: "Purchase orders", href: "/purchases" }, { label: "Suppliers" }]}
+        title="Vendors"
+        breadcrumb={[{ label: "Purchase orders", href: "/purchases" }, { label: "Vendors" }]}
         badge={user.role === "viewer" ? <Pill>READ-ONLY · VIEWER</Pill> : undefined}
         actions={actions}
       />
@@ -63,7 +63,7 @@ export default async function SuppliersPage({
           </>
         ) : (
           <EmptyState
-            title={filtered ? "No suppliers match" : "No suppliers yet"}
+            title={filtered ? "No vendors match" : "No vendors yet"}
             description={
               filtered
                 ? "Try a different search, or clear the filters."

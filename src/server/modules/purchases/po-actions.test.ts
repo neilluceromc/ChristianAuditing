@@ -460,6 +460,14 @@ describe("fixPurchaseOrder", () => {
     expect(h.ops.indexOf("lock:po1")).toBeLessThan(h.ops.indexOf("read:asset"));
   });
 
+  it("a fix's notification names the vendor and the invoice date in the words the send-back checklist uses (Task 8)", async () => {
+    partlyApproved();
+    h.user = ANA;
+    const r = await fixPurchaseOrder({ id: "po1", patch: { vendorId: "v2", purchasedAt: "2026-10-01" }, reason: "wrong invoice" });
+    expect(r.ok).toBe(true);
+    expect(t("notification")[0]).toMatchObject({ title: "Finance changed the vendor and invoice date on PO-0214" });
+  });
+
   it("a line price fix flows to that line's assets as their cost", async () => {
     partlyApproved();
     h.user = ANA;

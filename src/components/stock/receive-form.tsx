@@ -180,14 +180,14 @@ export function ReceiveForm({
               )}
             </FormField>
           ) : null}
-          <FormField label="Supplier" error={fieldErrors.supplierId}>
+          <FormField label="Vendor" error={fieldErrors.supplierId}>
             {(p) => (
               <EntityCombobox
                 id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
                 // value "" is the clear sentinel — one per combobox, EntityCombobox keys it as "none"
-                options={[{ value: "", label: "No supplier" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} recent={recentVendors}
+                options={[{ value: "", label: "No vendor" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} recent={recentVendors}
                 value={form.supplierId || null} onChange={(id) => set("supplierId", id ?? "")}
-                placeholder="Type a supplier name…"
+                placeholder="Type a vendor name…"
               />
             )}
           </FormField>

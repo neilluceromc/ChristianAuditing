@@ -79,7 +79,7 @@ const TEAM_NAME: Record<Team, string> = { IT: "IT", PURCHASING: "Purchasing", FI
 
 /** Words for the fields a send-back or a fix names (notification titles and thread notes). */
 const FIELD_WORDS: Record<string, string> = {
-  cost: "unit price", fees: "fees", purchasedAt: "purchase date", vendorId: "supplier",
+  cost: "unit price", fees: "fees", purchasedAt: "invoice date", vendorId: "vendor",
   invoiceRef: "SI number", receiptRef: "OR number",
   "doc:invoice": "sales invoice", "doc:official-receipt": "official receipt", "doc:delivery-receipt": "delivery receipt",
   other: "something else",
@@ -322,7 +322,7 @@ const lineSchema = z.object({
  */
 const saveSchema = z.object({
   id: z.string().min(1).optional(),
-  vendorId: z.string({ error: "Pick the supplier" }).min(1, "Pick the supplier"),
+  vendorId: z.string({ error: "Pick the vendor" }).min(1, "Pick the vendor"),
   poNumber: poNumberField,
   invoiceRef: z.string({ error: "Enter the SI number" }).trim().min(1, "Enter the SI number").max(60),
   receiptRef: z.string().trim().max(60).optional(),
@@ -461,7 +461,7 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
   const d = parsed.data;
 
   const vendor = await prisma.vendor.findUnique({ where: { id: d.vendorId }, select: { id: true, archivedAt: true } });
-  if (!vendor) return validationError({ vendorId: "Unknown supplier" });
+  if (!vendor) return validationError({ vendorId: "Unknown vendor" });
   const departmentId = d.departmentId ? d.departmentId : null;
   const dept = departmentId
     ? await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, archivedAt: true } })
@@ -481,7 +481,7 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
   const archived = { vendor: vendor.archivedAt !== null, dept: dept?.archivedAt != null };
   if (!d.id) {
     // Phase 37 (spec §2.1): a new order never names an archived department or supplier.
-    if (archived.vendor) return validationError({ vendorId: "That supplier is archived" });
+    if (archived.vendor) return validationError({ vendorId: "That vendor is archived" });
     if (archived.dept) return validationError({ departmentId: GROUP_ARCHIVED });
   }
   if (d.poNumber) {
@@ -647,7 +647,7 @@ async function editPo(
       if (err) { failure = validationError({ reply: err }); return; }
     }
     // An edit keeps the current archived supplier or department, and refuses any other archived one.
-    if (archived.vendor && po.vendorId !== head.vendorId) { failure = validationError({ vendorId: "That supplier is archived" }); return; }
+    if (archived.vendor && po.vendorId !== head.vendorId) { failure = validationError({ vendorId: "That vendor is archived" }); return; }
     if (archived.dept && po.departmentId !== head.departmentId) { failure = validationError({ departmentId: GROUP_ARCHIVED }); return; }
 
     // The lines: known ids only; a line with assets registered from it stays as IT registered it.
@@ -1029,7 +1029,7 @@ async function undoSendBackImpl(input: unknown): Promise<ActionResult<{ refNo: s
 const fixSchema = z.object({
   id: z.string().min(1),
   patch: z.object({
-    vendorId: z.string().min(1, "Pick the supplier").optional(),
+    vendorId: z.string().min(1, "Pick the vendor").optional(),
     poNumber: z.string().trim().min(1, NEEDED.poNumber).max(PO_NUMBER_MAX, `Keep the PO number to ${PO_NUMBER_MAX} characters or fewer`).optional(),
     invoiceRef: z.string().trim().min(1, "Enter the SI number").max(60).optional(),
     receiptRef: z.string().trim().max(60).optional(),
@@ -1075,7 +1075,7 @@ async function fixImpl(input: unknown): Promise<ActionResult<{ refNo: string; ch
   const vendor = patch.vendorId
     ? await prisma.vendor.findUnique({ where: { id: patch.vendorId }, select: { id: true, archivedAt: true } })
     : null;
-  if (patch.vendorId && !vendor) return validationError({ "patch.vendorId": "Unknown supplier" });
+  if (patch.vendorId && !vendor) return validationError({ "patch.vendorId": "Unknown vendor" });
   if (patch.poNumber) {
     const owner = await poNumberOwner(patch.poNumber, id);
     if (owner) return validationError({ "patch.poNumber": usedOn(patch.poNumber, owner.refNo) });
@@ -1128,7 +1128,7 @@ async function fixWrite(
       const err = reasonError(reason ?? undefined);
       if (err) { failure = validationError({ reason: err }); return; }
     }
-    if (vendor?.archivedAt && vendor.id !== po.vendorId) { failure = validationError({ "patch.vendorId": "That supplier is archived" }); return; }
+    if (vendor?.archivedAt && vendor.id !== po.vendorId) { failure = validationError({ "patch.vendorId": "That vendor is archived" }); return; }
     // A PO from the new form can't lose its total amount due (spec §5b.2).
     if (po.formV2 && patch.totalAmountDue === null) { failure = validationError({ "patch.totalAmountDue": NEEDED.totalAmountDue }); return; }
     const lineById = new Map(lines.map((l, i) => [l.id, { ...l, index: i + 1 }]));
