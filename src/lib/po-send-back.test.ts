@@ -15,6 +15,8 @@ describe("the PO send-back checklist", () => {
   });
   it("words the fields the way a person says them (SI, OR, unit price)", () => {
     expect(poFieldWords(["invoiceRef", "cost"])).toEqual(["SI number", "Unit price"]);
-    expect(poFieldWords(["vendorId", "doc:official-receipt", "nope"])).toEqual(["Supplier", "Official receipt", "nope"]);
+    expect(poFieldWords(["vendorId", "doc:official-receipt", "nope"])).toEqual(["Vendor", "Official receipt", "nope"]);
+    // the PO form redesign's words (spec §2.2, §2.5): a vendor, and the date on the invoice
+    expect(poFieldWords(["purchasedAt"])).toEqual(["Invoice date"]);
   });
 });

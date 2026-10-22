@@ -5,12 +5,12 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { getPurchase } from "@/server/modules/purchases/queries";
-import { PO_STATE_LABEL } from "@/lib/po-flow";
+import { PAID_BY_LABEL, PO_STATE_LABEL } from "@/lib/po-flow";
 import { poControls } from "@/lib/po-controls";
 import { poFieldWords } from "@/lib/po-send-back";
 import { bounceBack, stepperModel } from "@/lib/purchase-thread";
 import { canAttachToRequest } from "@/lib/supplier-access";
-import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -25,6 +25,7 @@ import { NoteThread } from "@/components/purchases/note-thread";
 import { PoActionsBar } from "@/components/purchases/po-actions-bar";
 import { CloseShortButton } from "@/components/purchases/close-short-dialog";
 import { RequestDocumentsCard } from "@/components/purchases/request-documents-card";
+import { TotalsLadder } from "@/components/purchases/totals-ladder";
 import { PoSendBackUndoBanner } from "@/components/finance/po-undo-banner";
 import { poSendBackUndoBanner } from "@/server/modules/purchases/po-undo";
 
@@ -57,6 +58,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
     ? await poSendBackUndoBanner(prisma, po.id, user.id, new Date())
     : null;
 
+  const notRecorded = <span className="text-fg-muted">Not recorded</span>;
+
   // The Fix dialog's supplier list: live suppliers, plus this order's own even if it has since been archived.
   const vendors = controls.fix
     ? await prisma.vendor.findMany({ where: { archivedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } })
@@ -84,6 +87,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
               po={{
                 id: po.id, refNo: po.refNo, vendorId: po.supplier?.id ?? null, invoiceRef: po.invoiceRef,
                 receiptRef: po.receiptRef, purchasedAt: po.purchasedAt, fees: po.fees,
+                poNumber: po.poNumber, paidBy: po.paidBy, totals: po.totals, formV2: po.formV2,
               }}
               controls={controls}
               lines={po.units.map((u) => ({ id: u.id, index: u.index, description: u.description, unitPrice: u.unitPrice }))}
@@ -149,27 +153,37 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
 
         <Card>
           <CardHeader title="Purchase" />
-          <CardBody>
+          <CardBody className="flex flex-col gap-4">
             <DescriptionList
               items={[
+                { label: "PO number", value: po.poNumber ?? notRecorded, mono: !!po.poNumber },
                 {
-                  label: "Supplier",
+                  label: "Vendor",
                   value: po.supplier ? (
                     <span className="inline-flex items-center gap-2">
                       {po.supplier.name}
                       {po.supplier.archived && <Pill>ARCHIVED</Pill>}
                     </span>
                   ) : (
-                    <span className="text-fg-muted">Not recorded</span>
+                    notRecorded
                   ),
                 },
-                { label: "SI number", value: po.invoiceRef ?? <span className="text-fg-muted">Not recorded</span>, mono: !!po.invoiceRef },
+                { label: "SI number", value: po.invoiceRef ?? notRecorded, mono: !!po.invoiceRef },
                 { label: "OR number", value: po.receiptRef ?? <span className="text-fg-muted">—</span>, mono: !!po.receiptRef },
-                { label: "Purchase date", value: po.purchasedAt ? fmtDate(`${po.purchasedAt}T00:00:00Z`) : <span className="text-fg-muted">Not recorded</span> },
-                { label: "Fees", value: po.fees === null ? <span className="text-fg-muted">—</span> : fmtMoney(po.fees), mono: po.fees !== null },
-                { label: "Total", value: po.total, mono: true },
+                { label: "Invoice date", value: po.purchasedAt ? fmtDate(`${po.purchasedAt}T00:00:00Z`) : notRecorded },
+                { label: "Paid by", value: po.paidBy ? PAID_BY_LABEL[po.paidBy] : notRecorded },
               ]}
             />
+            {/* Spec §6: the totals Purchasing typed off the sales invoice; a legacy PO with none shows its Fees and Total. */}
+            <section aria-labelledby="po-invoice-totals" className="flex max-w-[420px] flex-col gap-2 border-t border-border-faint pt-3">
+              <h3 id="po-invoice-totals" className="text-[11px] font-medium uppercase tracking-[0.06em] text-fg-muted">Invoice totals</h3>
+              <TotalsLadder
+                totals={po.totals}
+                totalsConsistent={po.totalsConsistent}
+                lines={po.units.map((u) => ({ qty: u.qty, unitPrice: u.unitPrice }))}
+                legacy={{ fees: po.fees, total: po.totalValue }}
+              />
+            </section>
           </CardBody>
         </Card>
 
@@ -190,6 +204,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                     <Th width={40}>#</Th>
                     <Th>Line</Th>
                     <Th width={60} align="right">Qty</Th>
+                    <Th width={60}>Unit</Th>
                     <Th width={120} align="right">Unit price</Th>
                     <Th width={120} align="right">Line total</Th>
                     <Th width={220}>Registered</Th>
@@ -220,6 +235,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                           </div>
                         </Td>
                         <Td align="right" mono>{unit.qty}</Td>
+                        <Td mono>{unit.unit}</Td>
                         <Td align="right" mono>{unit.price}</Td>
                         <Td align="right" mono>{unit.lineTotal}</Td>
                         <Td wrap>

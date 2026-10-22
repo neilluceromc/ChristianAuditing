@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { pageTitle } from "@/lib/page-title";
+import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
 import { assetTagFor } from "@/server/page-titles";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/server/auth/guards";
@@ -78,6 +79,8 @@ export default async function FinanceAssetPage({
         purchaseOrder: {
           select: {
             id: true, refNo: true, state: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true, fees: true,
+            poNumber: true, paidBy: true, formV2: true,
+            totalSales: true, lessVat: true, netOfVat: true, discount: true, amountDue: true, addVat: true, totalAmountDue: true,
             lines: { orderBy: { createdAt: "asc" }, select: { id: true, description: true, unitPrice: true } },
           },
         },
@@ -132,7 +135,8 @@ export default async function FinanceAssetPage({
             kind: "po",
             po: {
               id: po.id, refNo: po.refNo, vendorId: po.vendorId, invoiceRef: po.invoiceRef, receiptRef: po.receiptRef,
-              purchasedAt: day(po.purchasedAt), fees: num(po.fees),
+              purchasedAt: day(po.purchasedAt), fees: num(po.fees), poNumber: po.poNumber, paidBy: po.paidBy, formV2: po.formV2,
+              totals: Object.fromEntries(TOTAL_KEYS.map((k) => [k, num(po[k])])) as Record<TotalKey, number | null>,
             },
             lines: po.lines.map((l, i) => ({ id: l.id, index: i + 1, description: l.description, unitPrice: num(l.unitPrice) })),
           }

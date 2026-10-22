@@ -7,6 +7,7 @@ import { DOCUMENT_KIND_LABEL, REQUEST_DOCUMENT_LABEL } from "@/lib/documents";
 import { fmtDate } from "@/lib/format";
 import { assetDocHref } from "@/lib/finance-asset-page";
 import type { PoState } from "@/lib/po-flow";
+import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
 
 /*
  * Task 6 (spec §5): Finance's To review queue lists GROUPS — a registration (one PurchaseRecord per Register submit,
@@ -165,6 +166,8 @@ export interface GroupDetail {
   refNo: string | null;
   po: {
     id: string; state: PoState; fees: number | null;
+    /** A PO from the new form (migration 39): its sales invoice is required, so its empty slot says so. */
+    formV2: boolean;
     lines: Array<{ id: string; description: string; qty: number; unitPrice: number | null }>;
     /** Every asset from the PO (all its registrations) and how many Finance approved: what the PO's controls read. */
     registeredCount: number; approvedCount: number;
@@ -177,6 +180,12 @@ export interface GroupDetail {
   money: {
     supplier: string | null; vendorId: string | null; invoiceRef: string | null; receiptRef: string | null;
     purchasedAt: Date | null; fees: number | null;
+    /**
+     * PO form redesign (spec §6): the PO's number, how it was paid, the seven totals typed off the sales invoice and
+     * whether they added up. Null (every total null) on a legacy PO and on a direct registration, which has no PO.
+     */
+    poNumber: string | null; paidBy: "CREDIT_CARD" | "DEBIT_CARD" | null;
+    totals: Record<TotalKey, number | null>; totalsConsistent: boolean | null;
   };
   /** Some asset's money differs from `money` (a direct group's assets fixed one by one since it was registered). */
   moneyVaries: boolean;
@@ -186,6 +195,8 @@ export interface GroupDetail {
 }
 
 const num = (d: Prisma.Decimal | null | undefined) => (d === null || d === undefined ? null : Number(d));
+const TOTALS_SELECT = Object.fromEntries(TOTAL_KEYS.map((k) => [k, true])) as Record<TotalKey, true>;
+const NO_TOTALS = Object.fromEntries(TOTAL_KEYS.map((k) => [k, null])) as Record<TotalKey, null>;
 const PREVIEWABLE = /\.(pdf|png|jpe?g)$/i;
 
 /**
@@ -203,6 +214,7 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
       purchaseOrder: {
         select: {
           id: true, refNo: true, state: true, fees: true, vendorId: true, invoiceRef: true, receiptRef: true, purchasedAt: true,
+          poNumber: true, paidBy: true, formV2: true, totalsConsistent: true, ...TOTALS_SELECT,
           vendor: { select: { name: true } },
           lines: { orderBy: { createdAt: "asc" }, select: { id: true, description: true, qty: true, unitPrice: true } },
           documents: {
@@ -288,7 +300,7 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
     refNo: po?.refNo ?? null,
     po: po
       ? {
-        id: po.id, state: po.state, fees: num(po.fees), registeredCount: poAssets, approvedCount: poApproved,
+        id: po.id, state: po.state, fees: num(po.fees), formV2: po.formV2, registeredCount: poAssets, approvedCount: poApproved,
         lines: po.lines.map((l) => ({ id: l.id, description: l.description, qty: l.qty, unitPrice: num(l.unitPrice) })),
       }
       : null,
@@ -298,8 +310,15 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
     team: registeringTeam(record.createdBy.role, record.cls),
     cls: record.cls,
     money: po
-      ? { supplier: po.vendor?.name ?? null, vendorId: po.vendorId, invoiceRef: po.invoiceRef, receiptRef: po.receiptRef, purchasedAt: po.purchasedAt, fees: num(po.fees) }
-      : { supplier: record.vendor?.name ?? null, vendorId: record.vendorId, invoiceRef: record.invoiceRef, receiptRef: record.receiptRef, purchasedAt: record.purchasedAt, fees: num(record.fees) },
+      ? {
+        supplier: po.vendor?.name ?? null, vendorId: po.vendorId, invoiceRef: po.invoiceRef, receiptRef: po.receiptRef, purchasedAt: po.purchasedAt, fees: num(po.fees),
+        poNumber: po.poNumber, paidBy: po.paidBy, totalsConsistent: po.totalsConsistent,
+        totals: Object.fromEntries(TOTAL_KEYS.map((k) => [k, num(po[k])])) as Record<TotalKey, number | null>,
+      }
+      : {
+        supplier: record.vendor?.name ?? null, vendorId: record.vendorId, invoiceRef: record.invoiceRef, receiptRef: record.receiptRef, purchasedAt: record.purchasedAt, fees: num(record.fees),
+        poNumber: null, paidBy: null, totals: { ...NO_TOTALS }, totalsConsistent: null,
+      },
     moneyVaries,
     docs,
     assets,
