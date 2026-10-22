@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  blankLine, checklist, emptyTotals, firstErrorTarget, initials, lineErrors, SECTIONS, saveLabel, sectionsDone, toPayload, totalsReview,
-  unitCounts, whenYouSave, unitChips, type DraftContext, type PoDraft,
+  blankLine, checklist, emptyTotals, fileSize, filesTooBig, firstErrorTarget, initials, invoiceAttached, lineErrors, SECTIONS, saveLabel,
+  sectionsDone, toFormData, toPayload, totalsReview, unitCounts, whenYouSave, unitChips, type DraftContext, type PoDraft,
 } from "./po-form-model";
 
 /*
@@ -189,12 +189,91 @@ describe("after a failed save, the field to focus", () => {
     expect(firstErrorTarget({ "lines.1.unit": "x", "lines.1.categoryId": "x" }, cardOf)).toBe("line:3:categoryId");
     expect(firstErrorTarget({ lines: "x", "lines.0.qty": "x" }, cardOf)).toBe("lines");
     expect(firstErrorTarget({ reply: "x", "totals.addVat": "x", "totals.totalSales": "x" }, cardOf)).toBe("totals.totalSales");
-    expect(firstErrorTarget({ reply: "x", "doc:invoice": "x" }, cardOf)).toBe("reply");
+    expect(firstErrorTarget({ reply: "x" }, cardOf)).toBe("reply");
+  });
+
+  it("the document slots come after the items and before the totals, in slot order", () => {
+    expect(firstErrorTarget({ "totals.totalAmountDue": "x", "doc:invoice": "Attach the sales invoice", reply: "x" }, [0])).toBe("doc:invoice");
+    expect(firstErrorTarget({ "doc:warranty-slip": "x", "doc:official-receipt": "x" }, [0])).toBe("doc:official-receipt");
+    expect(firstErrorTarget({ "doc:invoice": "x", "lines.0.qty": "x" }, [0])).toBe("line:0:qty");
+    // the files together too big for one save: the Documents card
+    expect(firstErrorTarget({ docs: "x", "totals.totalSales": "x" }, [0])).toBe("docs");
   });
 
   it("is none when no error is on a field the form shows: the banner takes focus", () => {
     expect(firstErrorTarget({}, [])).toBeNull();
-    expect(firstErrorTarget({ "doc:invoice": "Attach the sales invoice" }, [0])).toBeNull();
+    expect(firstErrorTarget({ payload: "The form didn't arrive whole" }, [0])).toBeNull();
     expect(firstErrorTarget({ "lines.4.qty": "x" }, [0])).toBeNull(); // a line the cards no longer map
+  });
+});
+
+describe("the documents", () => {
+  const pdf = (name: string, bytes = 10) => new File([new Uint8Array(bytes)], name, { type: "application/pdf" });
+
+  it("the sales invoice check and the Documents tick follow the invoice slot: a held file or one on file", () => {
+    const d = owner();
+    const check = (c: DraftContext) => checklist(d, c).find((x) => x.label === "Sales invoice attached")?.done;
+    expect(check(ctx({ invoiceAttached: invoiceAttached({}, {}) }))).toBe(false);
+    expect(check(ctx({ invoiceAttached: invoiceAttached({ "official-receipt": pdf("or.pdf") }, {}) }))).toBe(false);
+    expect(check(ctx({ invoiceAttached: invoiceAttached({ invoice: pdf("si.pdf") }, {}) }))).toBe(true);
+    expect(check(ctx({ invoiceAttached: invoiceAttached({}, { invoice: true }) }))).toBe(true);
+    expect(sectionsDone(d, ctx({ invoiceAttached: invoiceAttached({ invoice: pdf("si.pdf") }, {}) })).docs).toBe(true);
+  });
+
+  it("the save's FormData holds the payload and one file per filled slot", () => {
+    const { payload } = toPayload(owner(), {});
+    const si = pdf("si-44511.pdf");
+    const ws = new File([new Uint8Array(5)], "warranty.jpg", { type: "image/jpeg" });
+    const fd = toFormData(payload, { invoice: si, "warranty-slip": ws });
+    expect(JSON.parse(String(fd.get("payload")))).toEqual(payload);
+    expect([...fd.keys()].sort()).toEqual(["doc:invoice", "doc:warranty-slip", "payload"]);
+    expect((fd.get("doc:invoice") as File).name).toBe("si-44511.pdf");
+    expect((fd.get("doc:warranty-slip") as File).name).toBe("warranty.jpg");
+    expect([...toFormData(payload, {}).keys()]).toEqual(["payload"]);
+  });
+
+  it("refuses files that together are over what one save carries", () => {
+    expect(filesTooBig({ invoice: pdf("a.pdf", 3_000_000) })).toBeNull();
+    expect(filesTooBig({ invoice: pdf("a.pdf", 2_500_000), "official-receipt": pdf("b.pdf", 2_000_000) })).toBe(
+      "Together the files come to 4.5 MB, and one save carries 4 MB. Save with the sales invoice, then add the others on the purchase order's page.",
+    );
+  });
+
+  it("file sizes read in KB or MB", () => {
+    expect(fileSize(800)).toBe("1 KB");
+    expect(fileSize(120_400)).toBe("120 KB");
+    expect(fileSize(812_000)).toBe("0.8 MB");
+    expect(fileSize(3_960_000)).toBe("4.0 MB");
+  });
+});
+
+describe("a legacy PO (spec §5b.3)", () => {
+  const legacy = (extra: Partial<DraftContext> = {}) => ctx({ legacy: true, ...extra });
+
+  it("PO number, paid by and the sales invoice don't hold up the rail", () => {
+    const d = owner({ poNumber: "", paidBy: "" });
+    expect(sectionsDone(d, ctx()).invoice).toBe(false);
+    expect(sectionsDone(d, legacy()).invoice).toBe(true);
+    expect(sectionsDone(owner({ invoiceRef: "" }), legacy()).invoice).toBe(false); // the SI number is required on every PO
+    expect(sectionsDone(d, legacy({ invoiceAttached: false })).docs).toBe(true);
+    // the total amount due is optional too: blank totals are fine, totals that don't add up still aren't
+    expect(sectionsDone(owner({ totals: emptyTotals() }), legacy()).totals).toBe(true);
+    expect(sectionsDone(owner({ totals: { ...owner().totals, totalSales: "1.00" } }), legacy()).totals).toBe(false);
+  });
+
+  it("the checklist shows them as optional, done while blank", () => {
+    const d = owner({ poNumber: "", totals: emptyTotals() });
+    const items = checklist(d, legacy({ invoiceAttached: false }));
+    expect(items.map((c) => c.label)).toEqual(checklist(d, ctx()).map((c) => c.label));
+    const byLabel = Object.fromEntries(items.map((c) => [c.label, c]));
+    for (const label of ["Purchase order number", "Sales invoice attached", "Totals add up"]) {
+      expect(byLabel[label], label).toMatchObject({ done: true, optional: true });
+    }
+    expect(byLabel["SI number and date"]).toMatchObject({ done: true });
+    expect(byLabel["SI number and date"].optional).toBeFalsy();
+    // a new PO: required, so blank is not done
+    const strict = Object.fromEntries(checklist(d, ctx({ invoiceAttached: false })).map((c) => [c.label, c]));
+    expect(strict["Purchase order number"]).toMatchObject({ done: false });
+    expect(strict["Purchase order number"].optional).toBeFalsy();
   });
 });

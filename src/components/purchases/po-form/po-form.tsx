@@ -9,18 +9,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { fmtMoneyExact } from "@/lib/format";
+import type { PoDocumentSlot } from "@/lib/documents";
 import type { PickerGroup } from "@/lib/groups";
 import { PO_REASON_HINT, poFieldWords } from "@/lib/po-send-back";
 import type { TotalKey } from "@/lib/po-totals";
 import { savePurchaseOrder } from "@/server/modules/purchases/po-actions";
 import { createCategoryFromPo } from "@/server/modules/purchases/category-actions";
 import type { PolicyLoadout } from "@/server/modules/purchases/queries";
+import { DocumentsCard, type OnFileDoc } from "./documents-card";
 import { Field, SectionCard } from "./fields";
 import { InvoiceCard } from "./invoice-card";
 import { ItemCard, type CreateCategory, type PoCategoryChoice } from "./item-card";
 import {
-  blankLine, checklist, emptyTotals, firstErrorTarget, lineErrors, saveLabel, sectionsDone, toPayload, totalsReview, unitChips, unitCounts,
-  whenYouSave, type DraftContext, type LineDraft, type PaidByValue, type PoDraft,
+  blankLine, checklist, emptyTotals, filesTooBig, firstErrorTarget, invoiceAttached, lineErrors, saveLabel, sectionsDone, toFormData,
+  toPayload, totalsReview, unitChips, unitCounts, whenYouSave, type DraftContext, type HeldFiles, type LineDraft, type PaidByValue,
+  type PoDraft,
 } from "./po-form-model";
 import { SectionRail } from "./section-rail";
 import { TotalsCard } from "./totals-card";
@@ -43,8 +46,8 @@ export interface PoFormInitial {
   /** The seven totals as the inputs show them ("9,100.00"; "" for none). */
   totals: Record<TotalKey, string>;
   lines: InitialLine[];
-  /** A sales invoice is on file (the "Sales invoice attached" check). */
-  invoiceOnFile: boolean;
+  /** The newest document of each slot's kind already on the PO (the slots show it; the sales invoice check counts it). */
+  onFile: Partial<Record<PoDocumentSlot, OnFileDoc>>;
   /** From the new form (spec §5b.3): its PO number, paid by, total amount due and sales invoice are required. False on a legacy PO. */
   formV2: boolean;
   /** IT has registered a unit from this PO: saving it doesn't send it back to IT. */
@@ -99,6 +102,8 @@ export function PoForm({
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<PoDraft>(() => initialDraft(initial));
+  /** The document slots' files, held here until Save sends them with the PO (spec §5b.1). */
+  const [files, setFiles] = useState<HeldFiles>({});
   const [created, setCreated] = useState<PoCategoryChoice[]>([]);
   const [reply, setReply] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +113,7 @@ export function PoForm({
   /** Bumped on each failed save: the effect below then takes the user to what went wrong. */
   const [failures, setFailures] = useState(0);
   const bannerRef = useRef<HTMLDivElement>(null);
+  const rateRef = useRef<HTMLDivElement>(null);
   const nextKey = useRef(draft.lines.length);
   /** Set when "Add a new vendor" or "Edit vendor" opened a new tab. */
   const vendorTabOpen = useRef(false);
@@ -134,15 +140,17 @@ export function PoForm({
   }
 
   // After a failed save the error is wherever the field is, often far above the Save button: focus the first field
-  // with an error (centred on screen), or else the banner.
+  // with an error (centred on screen), or else the banner, or else (rate-limited) the notice. Inside a field's box the
+  // input comes first — a qty's box starts with its "−" button — then a button (a picker's trigger).
   useEffect(() => {
     if (failures === 0) return;
     const target = firstErrorTarget(fieldErrors, cardOf);
     const box = target ? document.querySelector<HTMLElement>(`[data-po-field="${target}"]`) : null;
-    const field = box?.matches("input, textarea, button")
+    const field = box?.matches("input, textarea, button, [tabindex]")
       ? box
-      : box?.querySelector<HTMLElement>("input:not([disabled]), textarea, button:not([disabled])");
-    const el = field ?? bannerRef.current;
+      : box?.querySelector<HTMLElement>('input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled])')
+        ?? box?.querySelector<HTMLElement>("button:not([disabled])");
+    const el = field ?? bannerRef.current ?? rateRef.current;
     if (!el) return;
     el.scrollIntoView({ block: "center" });
     el.focus({ preventScroll: true });
@@ -163,11 +171,13 @@ export function PoForm({
     [categories, created],
   );
   const vendor = vendors.find((v) => v.id === draft.vendorId) ?? null;
+  const onFile = initial?.onFile ?? {};
   const ctx: DraftContext = {
     vendorTin: vendor?.registrationNo ?? null,
     classes: Object.fromEntries(allCategories.map((c) => [c.id, c.cls])) as Record<string, AssetClass>,
-    invoiceAttached: initial?.invoiceOnFile ?? false,
+    invoiceAttached: invoiceAttached(files, onFile),
     itRegistered: initial?.itRegistered ?? false,
+    legacy: !strict,
   };
   const done = sectionsDone(draft, ctx);
   const review = totalsReview(draft);
@@ -225,13 +235,32 @@ export function PoForm({
     return { ok: false, error: (res.fieldErrors && Object.values(res.fieldErrors)[0]) ?? res.message };
   };
 
+  /** A slot's file picked, replaced or taken back: the last save's error on that slot (and on the total size) goes. */
+  function changeFiles(next: HeldFiles, slot: PoDocumentSlot) {
+    setFiles(next);
+    setFieldErrors((errors) => {
+      if (!errors[`doc:${slot}`] && !errors.docs) return errors;
+      const rest = { ...errors };
+      delete rest[`doc:${slot}`];
+      delete rest.docs;
+      return rest;
+    });
+  }
+
   function save() {
     const { payload, cardOf: map } = toPayload(draft, { id: initial?.id, reply });
     setError(null);
-    setFieldErrors({});
     setCardOf(map);
-    const fd = new FormData();
-    fd.set("payload", JSON.stringify(payload));
+    // Too big for one request: say so here, before the request fails without a word.
+    const tooBig = filesTooBig(files);
+    if (tooBig) {
+      setFieldErrors({ docs: tooBig });
+      setError(tooBig);
+      setFailures((n) => n + 1);
+      return;
+    }
+    setFieldErrors({});
+    const fd = toFormData(payload, files);
     startTransition(async () => {
       const res = await savePurchaseOrder(fd);
       if (res.ok) {
@@ -239,7 +268,11 @@ export function PoForm({
         router.push(`/purchases/${res.data.id}`);
         return;
       }
-      if (res.kind === "rate_limited") return setRetryAfter(res.retryAfterSec ?? 60);
+      if (res.kind === "rate_limited") {
+        setRetryAfter(res.retryAfterSec ?? 60);
+        setFailures((n) => n + 1);
+        return;
+      }
       setFieldErrors(res.fieldErrors ?? {});
       setError(res.fieldErrors ? Object.values(res.fieldErrors)[0] ?? res.message : res.message);
       setFailures((n) => n + 1);
@@ -274,7 +307,11 @@ export function PoForm({
       <p className="-mt-2 text-[13.5px] text-fg-secondary">
         Copy it from the sales invoice, top to bottom. Saving sends it on — nothing waits as a draft.
       </p>
-      {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
+      {retryAfter !== null && (
+        <div ref={rateRef} tabIndex={-1} className="scroll-mt-5 rounded-(--radius-card) focus:outline-none focus-visible:shadow-[0_0_0_3px_var(--focus-shadow)]">
+          <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />
+        </div>
+      )}
       {sentBack && (
         <Banner
           tone="fault"
@@ -362,19 +399,10 @@ export function PoForm({
               </div>
             </SectionCard>
 
-            {/* The four document slots come with the next step of the redesign (spec §2.8); the rail already links here. */}
-            <SectionCard
-              id="po-docs" icon="export" title="Documents"
-              sub="A clear phone photo is enough. IT and Finance check your numbers against these."
-            >
-              <p className="px-4 pb-5 pt-4 text-xs text-fg-muted sm:px-5">
-                {initial?.invoiceOnFile
-                  ? "The sales invoice is on file."
-                  : strict
-                    ? "The sales invoice is required; the official receipt, delivery receipt and warranty slip are optional."
-                    : "The sales invoice, official receipt, delivery receipt and warranty slip are all optional on this older purchase order."}
-              </p>
-            </SectionCard>
+            <DocumentsCard
+              files={files} onFiles={changeFiles} onFile={onFile} si={draft.invoiceRef} strict={strict}
+              errors={fieldErrors} flagged={flagged}
+            />
           </div>
 
           <TotalsCard

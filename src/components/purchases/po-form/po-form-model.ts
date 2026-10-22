@@ -1,5 +1,7 @@
 import type { AssetClass } from "@prisma/client";
+import { PO_DOCUMENT_SLOTS, type PoDocumentSlot } from "@/lib/documents";
 import { checkTotals, itemsTotal, parseMoney, TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
+import { UPLOAD_MAX_BYTES } from "@/lib/upload-meta";
 
 /**
  * PO form redesign (A3, spec §2): the form's pure model. The form holds strings exactly as typed; this file turns them
@@ -43,6 +45,11 @@ export interface DraftContext {
   invoiceAttached: boolean;
   /** An edit where IT has already registered a unit: the PO doesn't go back to IT (poStateFor). */
   itRegistered?: boolean;
+  /**
+   * A legacy PO (created before migration 39, spec §5b.3): its PO number, paid by, total amount due and sales invoice
+   * are optional, so they never hold up the rail or the checklist (a blank one counts as done).
+   */
+  legacy?: boolean;
 }
 
 export const blankLine = (key: string): LineDraft => ({
@@ -130,26 +137,42 @@ export function totalsReview(d: PoDraft): {
 /** The rail's ticks: each section is done when what it asks for is all there (guidance only). */
 export function sectionsDone(d: PoDraft, ctx: DraftContext): Record<SectionKey, boolean> {
   const items = itemFacts(d, ctx);
+  const legacy = !!ctx.legacy;
   return {
     vendor: !!d.vendorId && filled(ctx.vendorTin ?? ""),
-    invoice: filled(d.poNumber) && filled(d.invoiceRef) && !!d.purchasedAt && !!d.paidBy,
+    invoice: filled(d.invoiceRef) && !!d.purchasedAt && (legacy || (filled(d.poNumber) && !!d.paidBy)),
     items: items.allCategories && items.allQtyAndPrice && items.allDescribed,
-    docs: ctx.invoiceAttached,
-    totals: totalsReview(d).status === "ok",
+    docs: legacy || ctx.invoiceAttached,
+    totals: totalsDone(d, legacy),
   };
 }
 
+/** "Totals add up": on a legacy PO, blank totals are fine too (the total amount due is optional there). */
+function totalsDone(d: PoDraft, legacy: boolean): boolean {
+  const status = totalsReview(d).status;
+  return status === "ok" || (legacy && status === "empty");
+}
+
+export interface ChecklistItem {
+  label: string;
+  done: boolean;
+  /** Optional on this PO (a legacy one): shown as such, and done while blank. */
+  optional?: boolean;
+}
+
 /** "Before you save" (spec §2.10), in order. Guidance only: the server enforces the required fields. */
-export function checklist(d: PoDraft, ctx: DraftContext): Array<{ label: string; done: boolean }> {
+export function checklist(d: PoDraft, ctx: DraftContext): ChecklistItem[] {
   const items = itemFacts(d, ctx);
+  const legacy = !!ctx.legacy;
+  const opt = legacy ? { optional: true } : {};
   return [
-    { label: "Purchase order number", done: filled(d.poNumber) },
+    { label: "Purchase order number", done: legacy || filled(d.poNumber), ...opt },
     { label: "Vendor with a TIN", done: !!d.vendorId && filled(ctx.vendorTin ?? "") },
     { label: "SI number and date", done: filled(d.invoiceRef) && !!d.purchasedAt },
     { label: "Every item has a category", done: items.allCategories },
     { label: "Every item has a quantity and price", done: items.allQtyAndPrice },
-    { label: "Sales invoice attached", done: ctx.invoiceAttached },
-    { label: "Totals add up", done: totalsReview(d).status === "ok" },
+    { label: "Sales invoice attached", done: legacy || ctx.invoiceAttached, ...opt },
+    { label: "Totals add up", done: totalsDone(d, legacy), ...opt },
   ];
 }
 
@@ -247,6 +270,44 @@ export function toPayload(d: PoDraft, opts: { id?: string; reply?: string }): { 
   return { payload, cardOf };
 }
 
+/** The files held in the form's document slots until Save (spec §5b.1: nothing is stored before the PO is). */
+export type HeldFiles = Partial<Record<PoDocumentSlot, File>>;
+
+/** "Sales invoice attached": a file held in the invoice slot, or (an edit) one already on file. */
+export const invoiceAttached = (files: HeldFiles, onFile: Partial<Record<PoDocumentSlot, unknown>>): boolean =>
+  !!files.invoice || !!onFile.invoice;
+
+/**
+ * What the Save button sends (savePurchaseOrder takes FormData): the save object as the JSON field `payload`, and
+ * each filled slot's file as `doc:<slot>`. An empty slot is left out.
+ */
+export function toFormData(payload: SavePayload, files: HeldFiles): FormData {
+  const fd = new FormData();
+  fd.set("payload", JSON.stringify(payload));
+  for (const slot of PO_DOCUMENT_SLOTS) {
+    const file = files[slot];
+    if (file) fd.set(`doc:${slot}`, file, file.name);
+  }
+  return fd;
+}
+
+/** A file's size as the slots show it: "120 KB", "0.8 MB" (decimal, like the 4 MB cap). */
+export function fileSize(bytes: number): string {
+  if (bytes < 500_000) return `${Math.max(1, Math.round(bytes / 1000))} KB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/**
+ * One save carries the PO and its files in one request, which can't be bigger than the server's body limit (4 MB,
+ * next.config.ts). Each file is already capped at 4 MB; this catches several that together are too big, before the
+ * request fails without a word.
+ */
+export function filesTooBig(files: HeldFiles): string | null {
+  const total = PO_DOCUMENT_SLOTS.reduce((sum, s) => sum + (files[s]?.size ?? 0), 0);
+  if (total <= UPLOAD_MAX_BYTES) return null;
+  return `Together the files come to ${fileSize(total)}, and one save carries 4 MB. Save with the sales invoice, then add the others on the purchase order's page.`;
+}
+
 /** The server's `lines.<i>.<field>` errors, keyed by card index then field. */
 export function lineErrors(fieldErrors: Record<string, string>, cardOf: number[]): Record<number, Record<string, string>> {
   const out: Record<number, Record<string, string>> = {};
@@ -274,9 +335,10 @@ const LINE_FIELD_ORDER = ["description", "categoryId", "qty", "unit", "unitPrice
 
 /**
  * After a failed save: the first field with an error, in the order the form shows them — the header, then the items
- * card by card (description, category, qty, unit, price), then the totals, then the reply. The value is the field's
- * `data-po-field` mark: a header key, "lines", `line:<card>:<field>`, `totals.<key>` or "reply". Null when no error is
- * on a field the form shows (a conflict, or a document the form has no slot for yet): the banner takes focus instead.
+ * card by card (description, category, qty, unit, price), then the document slots, then the totals, then the reply.
+ * The value is the field's `data-po-field` mark: a header key, "lines", `line:<card>:<field>`, `doc:<slot>`, "docs"
+ * (the files together too big), `totals.<key>` or "reply". Null when no error is on a field the form shows (a
+ * conflict, a garbled form): the banner takes focus instead.
  */
 export function firstErrorTarget(fieldErrors: Record<string, string>, cardOf: number[]): string | null {
   for (const k of HEADER_ORDER) if (fieldErrors[k]) return k;
@@ -286,6 +348,8 @@ export function firstErrorTarget(fieldErrors: Record<string, string>, cardOf: nu
   for (const card of cards) {
     for (const f of LINE_FIELD_ORDER) if (byCard[card][f]) return `line:${card}:${f}`;
   }
+  for (const s of PO_DOCUMENT_SLOTS) if (fieldErrors[`doc:${s}`]) return `doc:${s}`;
+  if (fieldErrors.docs) return "docs";
   for (const k of TOTAL_KEYS) if (fieldErrors[`totals.${k}`]) return `totals.${k}`;
   if (fieldErrors.reply) return "reply";
   return null;

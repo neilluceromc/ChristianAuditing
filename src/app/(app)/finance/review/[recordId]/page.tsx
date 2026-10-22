@@ -164,6 +164,7 @@ export default async function GroupReviewPage({
             <RequestDocumentsCard
               requestId={g.po.id}
               canUpload={g.po.state !== "CANCELLED"}
+              si={g.money.invoiceRef}
               docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy, at: d.at, downloadHref: d.downloadHref }))}
             />
           ) : (

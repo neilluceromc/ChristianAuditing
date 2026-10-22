@@ -251,6 +251,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
           requestId={po.id}
           docs={po.documents}
           canUpload={canAttachToRequest(user.role) && po.state !== "CANCELLED"}
+          invoiceRequired={po.formV2}
+          si={po.invoiceRef}
         />
 
         <NoteThread requestId={po.id} refNo={po.refNo} notes={po.notes} canComment={!viewer} />

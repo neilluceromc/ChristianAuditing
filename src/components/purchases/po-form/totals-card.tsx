@@ -8,7 +8,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { FormError } from "@/components/ui/form-field";
 import { Icon } from "@/components/ui/icon";
 import { AffixInput, Eyebrow, FLAGGED_HINT, RING } from "./fields";
-import type { TotalsStatus } from "./po-form-model";
+import type { ChecklistItem, TotalsStatus } from "./po-form-model";
 
 /** The six ladder rows above TOTAL AMOUNT DUE, worded as on the invoice. */
 const ROWS: ReadonlyArray<{ key: Exclude<TotalKey, "totalAmountDue">; label: string; note?: string }> = [
@@ -40,7 +40,7 @@ export function TotalsCard({
   errors: Record<string, string>;
   flaggedTotals: boolean;
   whenYouSave: [string, string];
-  checklist: Array<{ label: string; done: boolean }>;
+  checklist: ChecklistItem[];
   saveLabel: string;
   pending: boolean;
   onSave: () => void;
@@ -164,6 +164,7 @@ export function TotalsCard({
                   )}
                 </span>
                 {c.label}
+                {c.optional && <span className="text-fg-faint"> · optional</span>}
                 <span className="sr-only">{c.done ? " — done" : " — not yet"}</span>
               </li>
             ))}

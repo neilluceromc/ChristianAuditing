@@ -9,8 +9,9 @@ import { poControls } from "@/lib/po-controls";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { poCategories } from "@/server/modules/purchases/po-categories";
 import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
+import { PO_DOCUMENT_SLOTS } from "@/lib/documents";
 import { PageHeader } from "@/components/ui/page-header";
-import { PoForm, type InitialLine } from "@/components/purchases/po-form/po-form";
+import { PoForm, type InitialLine, type PoFormInitial } from "@/components/purchases/po-form/po-form";
 
 /** What the PO form's vendor card shows: the seller block (spec §2.4). */
 const VENDOR_SELECT = { id: true, name: true, registeredName: true, registrationNo: true, address: true } as const;
@@ -57,6 +58,12 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     locked: u.registered + u.closedShort,
   }));
   const totals = Object.fromEntries(TOTAL_KEYS.map((k) => [k, moneyText(request.totals[k])])) as Record<TotalKey, string>;
+  // Each slot shows the newest document of its kind (getPurchase lists them newest first, removed ones left out).
+  const onFile: PoFormInitial["onFile"] = {};
+  for (const kind of PO_DOCUMENT_SLOTS) {
+    const doc = request.documents.find((d) => d.kind === kind);
+    if (doc) onFile[kind] = { fileName: doc.fileName, href: doc.downloadHref };
+  }
 
   return (
     <>
@@ -79,7 +86,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
           poNumber: request.poNumber, invoiceRef: request.invoiceRef, receiptRef: request.receiptRef,
           purchasedAt: request.purchasedAt, paidBy: request.paidBy, totals,
           formV2: request.formV2,
-          invoiceOnFile: request.documents.some((d) => d.kind === "invoice"),
+          onFile,
           itRegistered: request.units.some((u) => u.cls === "IT" && u.registered > 0),
           sentBack: request.sentBack,
         }}

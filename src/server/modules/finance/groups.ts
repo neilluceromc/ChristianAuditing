@@ -206,6 +206,8 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
           vendor: { select: { name: true } },
           lines: { orderBy: { createdAt: "asc" }, select: { id: true, description: true, qty: true, unitPrice: true } },
           documents: {
+            // a removed (superseded) document leaves its slot here too (spec §5b.1)
+            where: { supersededAt: null },
             orderBy: { createdAt: "desc" },
             select: { id: true, kind: true, fileName: true, createdAt: true, uploadedBy: { select: { name: true } } },
           },
