@@ -72,7 +72,6 @@ export function ComboPopup({
 
   const items = (
     <>
-      {shown.length === 0 && <li className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</li>}
       {rows.map(({ option, heading, headingId, describedBy }, i) => {
         // The group's hint, right of its heading — only a real group heading, never the synthetic Recent/All.
         const hint = heading !== null && heading === option.group ? groupHint?.[heading] : undefined;
@@ -119,6 +118,18 @@ export function ComboPopup({
     </>
   );
 
+  // Nothing matches: the words sit beside the (empty) listbox, never in it — a listbox owns only options (axe
+  // aria-required-children / listitem were critical and serious with them as a row of it).
+  const empty = shown.length === 0 ? <p className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</p> : null;
+
+  if (!hasFooter && empty) {
+    return (
+      <div className={LIST_CLASS} style={POPUP_ANIMATION}>
+        <ul id={listId} role="listbox" aria-busy={busy || undefined} />
+        {empty}
+      </div>
+    );
+  }
   if (!hasFooter) {
     return (
       <ul id={listId} role="listbox" aria-busy={busy || undefined} className={LIST_CLASS} style={POPUP_ANIMATION}>
@@ -134,9 +145,10 @@ export function ComboPopup({
       onMouseDown={(e) => { if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) e.preventDefault(); }}
     >
       {/* tabIndex -1: a scrollable list is a Tab stop in some browsers — Tab from the input goes straight to the footer. */}
-      <ul id={listId} role="listbox" tabIndex={-1} aria-busy={busy || undefined} className="max-h-[220px] overflow-y-auto p-1">
+      <ul id={listId} role="listbox" tabIndex={-1} aria-busy={busy || undefined} className={cn("max-h-[220px] overflow-y-auto", !empty && "p-1")}>
         {items}
       </ul>
+      {empty && <div className="p-1">{empty}</div>}
       <div className="border-t border-border p-1">{footerNode}</div>
     </div>
   );

@@ -67,9 +67,18 @@ describe("ComboPopup: existing callers", () => {
     const withRecent = [plain("Beta"), plain("Alpha"), plain("Gamma")];
     expect(render({ shown: withRecent, recentCount: 1 })).toBe(legacyList(withRecent, 1, 0, null));
   });
-  it("renders the empty and busy states byte-for-byte as before", () => {
-    expect(render({ shown: [] })).toBe(legacyList([], 0, 0, null));
-    expect(render({ shown: [], emptyText: "Type to search", busy: true })).toBe(legacyList([], 0, 0, null, "Type to search", true));
+  it("renders the empty and busy states with the words beside the empty listbox (Task 9: axe), not as a row of it", () => {
+    const html = render({ shown: [], emptyText: "Type to search", busy: true });
+    expect(html).toContain('<ul id="L" role="listbox" aria-busy="true"></ul><p class="px-2 py-1.5 text-xs text-fg-muted">Type to search</p>');
+    expect(render({ shown: [] })).toContain("</ul><p");
+    expect(render({ shown: [] })).toContain(">No matches.</p>");
+    expect(legacyList([], 0, 0, null)).toContain("<li"); // what it was
+  });
+  it("puts nothing in the listbox when nothing matches; the words follow it", () => {
+    for (const html of [render({ shown: [] }), render({ shown: [], footer: () => <button type="button">Create</button> })]) {
+      expect(/<ul[^>]*role="listbox"[^>]*>(.*?)<\/ul>/.exec(html)![1]).toBe("");
+      expect(html.indexOf("No matches.")).toBeGreaterThan(html.indexOf("</ul>"));
+    }
   });
   it("adds no footer wrapper without a footer", () => {
     expect(render({ shown: [plain("Alpha")] }).startsWith('<ul id="L" role="listbox"')).toBe(true);
