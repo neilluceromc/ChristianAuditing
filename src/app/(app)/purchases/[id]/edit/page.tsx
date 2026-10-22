@@ -78,6 +78,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
           departmentId: request.department?.id ?? null, vendorId: request.supplier?.id ?? null,
           poNumber: request.poNumber, invoiceRef: request.invoiceRef, receiptRef: request.receiptRef,
           purchasedAt: request.purchasedAt, paidBy: request.paidBy, totals,
+          formV2: request.formV2,
           invoiceOnFile: request.documents.some((d) => d.kind === "invoice"),
           itRegistered: request.units.some((u) => u.cls === "IT" && u.registered > 0),
           sentBack: request.sentBack,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  blankLine, checklist, emptyTotals, initials, lineErrors, SECTIONS, saveLabel, sectionsDone, toPayload, totalsReview,
+  blankLine, checklist, emptyTotals, firstErrorTarget, initials, lineErrors, SECTIONS, saveLabel, sectionsDone, toPayload, totalsReview,
   unitCounts, whenYouSave, unitChips, type DraftContext, type PoDraft,
 } from "./po-form-model";
 
@@ -178,4 +178,23 @@ it("initials: two letters from the name", () => {
   expect(initials("PCWORX")).toBe("PC");
   expect(initials("Quezon Furniture Works")).toBe("QF");
   expect(initials("  ")).toBe("?");
+});
+
+describe("after a failed save, the field to focus", () => {
+  it("is the first error in the order the form shows them", () => {
+    const cardOf = [1, 3];
+    expect(firstErrorTarget({ "totals.totalAmountDue": "x", paidBy: "x", poNumber: "x" }, cardOf)).toBe("poNumber");
+    expect(firstErrorTarget({ "totals.lessVat": "x", "lines.1.qty": "x", "lines.1.description": "x", "lines.0.unitPrice": "x" }, cardOf))
+      .toBe("line:1:unitPrice");
+    expect(firstErrorTarget({ "lines.1.unit": "x", "lines.1.categoryId": "x" }, cardOf)).toBe("line:3:categoryId");
+    expect(firstErrorTarget({ lines: "x", "lines.0.qty": "x" }, cardOf)).toBe("lines");
+    expect(firstErrorTarget({ reply: "x", "totals.addVat": "x", "totals.totalSales": "x" }, cardOf)).toBe("totals.totalSales");
+    expect(firstErrorTarget({ reply: "x", "doc:invoice": "x" }, cardOf)).toBe("reply");
+  });
+
+  it("is none when no error is on a field the form shows: the banner takes focus", () => {
+    expect(firstErrorTarget({}, [])).toBeNull();
+    expect(firstErrorTarget({ "doc:invoice": "Attach the sales invoice" }, [0])).toBeNull();
+    expect(firstErrorTarget({ "lines.4.qty": "x" }, [0])).toBeNull(); // a line the cards no longer map
+  });
 });

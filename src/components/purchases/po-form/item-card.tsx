@@ -57,7 +57,11 @@ export function ItemCard({
   onPriceEnter: () => void;
 }) {
   const n = index + 1;
-  const ids = { cat: useId(), unit: useId(), qty: useId(), price: useId() };
+  const ids = { cat: useId(), unit: useId(), qty: useId(), price: useId(), desc: useId() };
+  /** The `data-po-field` mark a failed save looks for (firstErrorTarget). */
+  const mark = (field: string) => `line:${index}:${field}`;
+  /** An input's description: its own note (if any) and its error. */
+  const described = (...parts: Array<string | false | undefined>) => parts.filter(Boolean).join(" ") || undefined;
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<{ name: string; message: string } | null>(null);
 
@@ -80,11 +84,16 @@ export function ItemCard({
   async function create(name: string, cls: AssetClass, close: () => void) {
     setCreating(true);
     setCreateError(null);
-    const res = await onCreateCategory(name, cls);
-    setCreating(false);
-    if (!res.ok) return setCreateError({ name, message: res.error });
-    onChange({ categoryId: res.id });
-    close();
+    try {
+      const res = await onCreateCategory(name, cls);
+      if (!res.ok) return setCreateError({ name, message: res.error });
+      onChange({ categoryId: res.id });
+      close();
+    } catch {
+      setCreateError({ name, message: "Couldn't create the category — check your connection and try again." });
+    } finally {
+      setCreating(false);
+    }
   }
 
   function categoryFooter(query: string, close: () => void) {
@@ -125,8 +134,10 @@ export function ItemCard({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <input
             data-po-desc={index}
+            data-po-field={mark("description")}
             aria-label={`Item ${n} description`}
             aria-invalid={!!errors.description || undefined}
+            aria-describedby={described(errors.description && `${ids.desc}-error`)}
             className="h-10 w-full min-w-0 rounded-[6px] bg-transparent px-1 text-[15.5px] font-medium text-fg placeholder:font-normal placeholder:text-fg-faint focus:outline-none"
             maxLength={200} value={line.description} onChange={(e) => onChange({ description: e.target.value })}
             placeholder="Item description, as written on the invoice"
@@ -137,7 +148,7 @@ export function ItemCard({
             maxLength={500} value={line.specs} onChange={(e) => onChange({ specs: e.target.value })}
             placeholder="Add specs or size — e.g. 305 m, i5 / 16 GB"
           />
-          <FormError>{errors.description}</FormError>
+          <FormError id={`${ids.desc}-error`}>{errors.description}</FormError>
         </div>
         <div className="mt-1 flex shrink-0 gap-0.5">
           <button type="button" className={iconBtn} aria-label={`Duplicate item ${n}`} title="Duplicate" onClick={onDuplicate}>
@@ -159,7 +170,7 @@ export function ItemCard({
 
       {/* row 2: category, qty, unit, price, amount */}
       <div className="grid grid-cols-2 items-start gap-3 rounded-b-(--radius-card) border-t border-dashed border-border bg-surface-subtle px-3 pb-3.5 pt-3 sm:px-3.5 @min-[640px]:grid-cols-[minmax(190px,1.6fr)_118px_104px_minmax(130px,1fr)_minmax(100px,auto)]">
-        <div className="col-span-2 flex min-w-0 flex-col gap-1.5 @min-[640px]:col-span-1">
+        <div data-po-field={mark("categoryId")} className="col-span-2 flex min-w-0 flex-col gap-1.5 @min-[640px]:col-span-1">
           <label htmlFor={ids.cat}><Eyebrow>Category</Eyebrow><span className="sr-only"> for item {n}</span></label>
           {categoryLocked ? (
             <Input id={ids.cat} value={category?.name ?? "—"} disabled readOnly aria-describedby={`${ids.cat}-locked`} />
@@ -172,7 +183,7 @@ export function ItemCard({
                   aria-describedby={errors.categoryId ? `${ids.cat}-error` : category ? `${ids.cat}-route` : undefined}
                   options={catOptions} value={line.categoryId || null}
                   onChange={(v) => onChange({ categoryId: v ?? "" })}
-                  placeholder="Choose a category" emptyText="No category matches."
+                  placeholder="Search or type a new one…" emptyText="No category matches."
                   groupHint={GROUP_HINT} footer={categoryFooter} maxLength={60}
                 />
               </div>
@@ -193,13 +204,13 @@ export function ItemCard({
           <FormError id={`${ids.cat}-error`}>{errors.categoryId}</FormError>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
+        <div data-po-field={mark("qty")} className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor={ids.qty}><Eyebrow>Qty</Eyebrow></label>
           <div className={cn("flex h-[38px] items-stretch overflow-hidden rounded-(--radius-card) border bg-surface focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--focus-shadow)]", errors.qty ? "border-[var(--error-border)]" : "border-border-strong")}>
             <button type="button" className={stepBtn} aria-label={`One fewer of item ${n}`} disabled={qty !== null && qty <= minQty} onClick={() => setQty((qty ?? minQty) - 1)}>−</button>
             <input
               id={ids.qty} aria-label={`Item ${n} quantity`} aria-invalid={!!errors.qty || undefined}
-              aria-describedby={locked > 0 ? `${ids.qty}-min` : undefined}
+              aria-describedby={described(locked > 0 && `${ids.qty}-min`, errors.qty && `${ids.qty}-error`)}
               inputMode="numeric" enterKeyHint="next" maxLength={3}
               className="w-full min-w-0 bg-transparent text-center text-[13px] tabular-nums text-fg focus:outline-none"
               value={line.qty} onChange={(e) => onChange({ qty: e.target.value.replace(/[^0-9]/g, "") })}
@@ -207,22 +218,23 @@ export function ItemCard({
             <button type="button" className={stepBtn} aria-label={`One more of item ${n}`} disabled={qty !== null && qty >= 999} onClick={() => setQty((qty ?? 0) + 1)}>+</button>
           </div>
           {locked > 0 && <p id={`${ids.qty}-min`} className="text-[11px] text-fg-muted">At least {locked}: registered or closed short</p>}
-          <FormError>{errors.qty}</FormError>
+          <FormError id={`${ids.qty}-error`}>{errors.qty}</FormError>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
+        <div data-po-field={mark("unit")} className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor={ids.unit}><Eyebrow>Unit</Eyebrow><span className="sr-only"> for item {n}</span></label>
           <EntityCombobox
-            id={ids.unit} invalid={!!errors.unit} options={unitOptions} value={line.unit || null}
+            id={ids.unit} invalid={!!errors.unit} aria-describedby={described(errors.unit && `${ids.unit}-error`)} options={unitOptions} value={line.unit || null}
             onChange={(v) => { if (v) onChange({ unit: v }); }} maxLength={12}
           />
-          <FormError>{errors.unit}</FormError>
+          <FormError id={`${ids.unit}-error`}>{errors.unit}</FormError>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
+        <div data-po-field={mark("unitPrice")} className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor={ids.price}><Eyebrow>Unit price</Eyebrow></label>
           <AffixInput
             prefix="₱" id={ids.price} aria-label={`Item ${n} unit price in pesos`} invalid={!!errors.unitPrice}
+            aria-describedby={described(errors.unitPrice && `${ids.price}-error`)}
             boxClassName={cn("h-[38px]", flaggedCost && RING)} className="text-right tabular-nums"
             inputMode="decimal" placeholder="0.00" value={line.unitPrice}
             onChange={(e) => onChange({ unitPrice: e.target.value.replace(/[^0-9.,]/g, "") })}
@@ -232,7 +244,7 @@ export function ItemCard({
               onPriceEnter();
             }}
           />
-          <FormError>{errors.unitPrice}</FormError>
+          <FormError id={`${ids.price}-error`}>{errors.unitPrice}</FormError>
         </div>
 
         <div className="col-span-2 flex min-w-0 items-baseline justify-between gap-1.5 @min-[640px]:col-span-1 @min-[640px]:flex-col @min-[640px]:items-end">

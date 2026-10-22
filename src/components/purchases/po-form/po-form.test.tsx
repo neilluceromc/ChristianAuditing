@@ -37,7 +37,7 @@ const edit = (extra: Partial<PoFormInitial> = {}): PoFormInitial => ({
   invoiceRef: "44511", receiptRef: null, purchasedAt: "2025-11-22", paidBy: "CREDIT_CARD",
   totals: { totalSales: "9,100.00", lessVat: "975.00", netOfVat: "8,125.00", discount: "", amountDue: "8,125.00", addVat: "975.00", totalAmountDue: "9,100.00" },
   lines: [{ id: "ln1", description: "Belden Cat6 UTP cable, blue", specs: "305 m", categoryId: "cat-cable", qty: "1", unit: "box", unitPrice: "9,100.00", locked: 0 }],
-  invoiceOnFile: true, itRegistered: false, sentBack: null,
+  invoiceOnFile: true, formV2: true, itRegistered: false, sentBack: null,
   ...extra,
 });
 
@@ -106,6 +106,35 @@ describe("PoForm (A3 shell)", () => {
     expect(html).toContain("At least 2: registered or closed short");
     expect(html).toContain("so its category can&#x27;t change");
     expect(html).toMatch(/<button[^>]*aria-label="Remove item 1"[^>]*disabled=""/);
+  });
+
+  it("a legacy PO (spec §5b.3): PO number, paid by and total amount due are optional, and so is the sales invoice", () => {
+    const star = (label: string, html: string) =>
+      html.includes(`${label}<span aria-hidden="true" style="color:var(--required-mark)"> *</span>`);
+    const v2 = render(edit({ invoiceOnFile: false }));
+    for (const label of ["Purchase order number", "Paid by", "Total amount due", "SI number"]) expect(star(label, v2), label).toBe(true);
+    expect(v2).toContain("The sales invoice is required");
+
+    const legacy = render(edit({ formV2: false, invoiceOnFile: false }));
+    for (const label of ["Purchase order number", "Paid by", "Total amount due"]) expect(star(label, legacy), label).toBe(false);
+    expect(star("SI number", legacy)).toBe(true); // still required on every PO
+    expect(legacy).not.toContain("The sales invoice is required");
+    expect(legacy).toContain("all optional on this older purchase order");
+  });
+
+  it("the totals status is a status region; the category picker says a new one can be typed", () => {
+    const html = render();
+    expect(html).toMatch(/<div role="status"[^>]*>(?:(?!<\/div>).)*?<span[^>]*>Type the total amount due from the invoice\.<\/span>/s);
+    expect(html).toContain('placeholder="Search or type a new one…"');
+  });
+
+  it("every field a failed save can point at carries its mark", () => {
+    const html = render(edit());
+    for (const mark of [
+      "vendorId", "poNumber", "invoiceRef", "purchasedAt", "receiptRef", "paidBy", "departmentId",
+      "line:0:description", "line:0:categoryId", "line:0:qty", "line:0:unit", "line:0:unitPrice",
+      "totals.totalSales", "totals.discount", "totals.totalAmountDue", "reply",
+    ]) expect(html, mark).toContain(`data-po-field="${mark}"`);
   });
 
   it("a vendor with no TIN shows the amber note", () => {

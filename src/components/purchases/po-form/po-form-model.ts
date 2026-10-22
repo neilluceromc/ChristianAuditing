@@ -267,3 +267,26 @@ export function initials(name: string): string {
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return (words[0][0] + words[1][0]).toUpperCase();
 }
+
+/** The header fields in the order the form shows them (a failed save focuses the first one with an error). */
+const HEADER_ORDER = ["vendorId", "poNumber", "invoiceRef", "purchasedAt", "receiptRef", "paidBy", "departmentId"] as const;
+const LINE_FIELD_ORDER = ["description", "categoryId", "qty", "unit", "unitPrice"] as const;
+
+/**
+ * After a failed save: the first field with an error, in the order the form shows them — the header, then the items
+ * card by card (description, category, qty, unit, price), then the totals, then the reply. The value is the field's
+ * `data-po-field` mark: a header key, "lines", `line:<card>:<field>`, `totals.<key>` or "reply". Null when no error is
+ * on a field the form shows (a conflict, or a document the form has no slot for yet): the banner takes focus instead.
+ */
+export function firstErrorTarget(fieldErrors: Record<string, string>, cardOf: number[]): string | null {
+  for (const k of HEADER_ORDER) if (fieldErrors[k]) return k;
+  if (fieldErrors.lines) return "lines";
+  const byCard = lineErrors(fieldErrors, cardOf);
+  const cards = Object.keys(byCard).map(Number).sort((a, b) => a - b);
+  for (const card of cards) {
+    for (const f of LINE_FIELD_ORDER) if (byCard[card][f]) return `line:${card}:${f}`;
+  }
+  for (const k of TOTAL_KEYS) if (fieldErrors[`totals.${k}`]) return `totals.${k}`;
+  if (fieldErrors.reply) return "reply";
+  return null;
+}

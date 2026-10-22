@@ -32,13 +32,15 @@ const NEW_TAB = { target: "_blank", rel: "noopener" } as const;
  * with Edit vendor.
  */
 export function VendorCard({
-  vendors, vendorId, onChange, error, flagged,
+  vendors, vendorId, onChange, error, flagged, onOpenVendorTab,
 }: {
   vendors: PoVendor[];
   vendorId: string;
   onChange: (id: string) => void;
   error?: string;
   flagged: boolean;
+  /** "Add a new vendor" or "Edit vendor" opened a tab: the form refreshes its lists when the user comes back. */
+  onOpenVendorTab: () => void;
 }) {
   const vendor = vendors.find((v) => v.id === vendorId) ?? null;
   const options: ComboOption[] = vendors.map((v) => ({
@@ -51,7 +53,7 @@ export function VendorCard({
   return (
     <SectionCard id="po-vendor" icon="suppliers" title="Vendor" sub="The seller's block at the top of the invoice.">
       <div className="flex flex-col gap-4 px-4 pb-5 pt-4 sm:px-5">
-        <Field label="Vendor" required error={error} flagged={flagged}>
+        <Field label="Vendor" required error={error} flagged={flagged} mark="vendorId">
           {(p) => (
             <div className="flex items-center gap-2.5">
               {vendor && <Badge text={initials(vendor.name)} style={tintFor(vendor.name)} className="size-8 rounded-(--radius-btn) text-[11.5px]" />}
@@ -69,6 +71,7 @@ export function VendorCard({
                     <Link
                       href="/purchases/suppliers/new"
                       {...NEW_TAB}
+                      onClick={onOpenVendorTab}
                       className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-xs font-medium text-accent-soft-text hover:bg-accent-tint"
                     >
                       <Icon name="add" size={14} />
@@ -108,6 +111,7 @@ export function VendorCard({
               <Link
                 href={`/purchases/suppliers/${vendor.id}/edit`}
                 {...NEW_TAB}
+                onClick={onOpenVendorTab}
                 className="rounded-(--radius-btn) px-2 py-1 text-[13px] font-medium text-accent-soft-text hover:bg-accent-tint"
               >
                 Edit vendor<span className="sr-only"> (opens in a new tab)</span>

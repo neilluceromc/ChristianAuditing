@@ -19,7 +19,7 @@ import { Field, SectionCard } from "./fields";
 import { InvoiceCard } from "./invoice-card";
 import { ItemCard, type CreateCategory, type PoCategoryChoice } from "./item-card";
 import {
-  blankLine, checklist, emptyTotals, lineErrors, saveLabel, sectionsDone, toPayload, totalsReview, unitChips, unitCounts,
+  blankLine, checklist, emptyTotals, firstErrorTarget, lineErrors, saveLabel, sectionsDone, toPayload, totalsReview, unitChips, unitCounts,
   whenYouSave, type DraftContext, type LineDraft, type PaidByValue, type PoDraft,
 } from "./po-form-model";
 import { SectionRail } from "./section-rail";
@@ -45,6 +45,8 @@ export interface PoFormInitial {
   lines: InitialLine[];
   /** A sales invoice is on file (the "Sales invoice attached" check). */
   invoiceOnFile: boolean;
+  /** From the new form (spec §5b.3): its PO number, paid by, total amount due and sales invoice are required. False on a legacy PO. */
+  formV2: boolean;
   /** IT has registered a unit from this PO: saving it doesn't send it back to IT. */
   itRegistered: boolean;
   /** The open send-back: who sent it (team and person), the fields they flagged and their note. The reply is required. */
@@ -103,21 +105,58 @@ export function PoForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [cardOf, setCardOf] = useState<number[]>([]);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  /** Bumped on each failed save: the effect below then takes the user to what went wrong. */
+  const [failures, setFailures] = useState(0);
+  const bannerRef = useRef<HTMLDivElement>(null);
   const nextKey = useRef(draft.lines.length);
+  /** Set when "Add a new vendor" or "Edit vendor" opened a new tab. */
+  const vendorTabOpen = useRef(false);
 
-  // "Add a new vendor" and "Edit vendor" open in a new tab: coming back refreshes the vendor and category lists,
-  // while everything typed here stays.
+  // Coming back from the vendor tab refreshes the vendor and category lists once, while everything typed here stays.
+  // Only then: a refresh on every focus would re-run the edit page's guard, which navigates away (losing what was
+  // typed) once the PO has moved on.
   useEffect(() => {
-    const refresh = () => router.refresh();
+    const refresh = () => {
+      if (!vendorTabOpen.current) return;
+      vendorTabOpen.current = false;
+      router.refresh();
+    };
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [router]);
+
+  // A fresh category list from the server already holds every category made here; one missing from it was deleted
+  // since (IT replaced it at Register), so it is dropped. A line still holding it hears so from the save.
+  const [categoriesSeen, setCategoriesSeen] = useState(categories);
+  if (categoriesSeen !== categories) {
+    setCategoriesSeen(categories);
+    setCreated([]);
+  }
+
+  // After a failed save the error is wherever the field is, often far above the Save button: focus the first field
+  // with an error (centred on screen), or else the banner.
+  useEffect(() => {
+    if (failures === 0) return;
+    const target = firstErrorTarget(fieldErrors, cardOf);
+    const box = target ? document.querySelector<HTMLElement>(`[data-po-field="${target}"]`) : null;
+    const field = box?.matches("input, textarea, button")
+      ? box
+      : box?.querySelector<HTMLElement>("input:not([disabled]), textarea, button:not([disabled])");
+    const el = field ?? bannerRef.current;
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.focus({ preventScroll: true });
+    // Only a new failure moves focus; typing into the fields afterwards doesn't.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failures]);
 
   // A legacy draft (sent back, never sent) has no sender: its first save is a plain save, and no reply is asked.
   const sentBack = initial?.state === "SENT_BACK" && initial.sentBack?.by ? initial.sentBack : null;
   const flaggedSet = new Set(sentBack?.fields ?? []);
   const flagged = (key: string) => flaggedSet.has(key);
   const flaggedWords = poFieldWords(sentBack?.fields ?? []);
+  // A legacy PO (spec §5b.3): PO number, paid by, total amount due and the sales invoice stay optional.
+  const strict = !initial || initial.formV2;
 
   const allCategories = useMemo(
     () => [...categories, ...created.filter((c) => !categories.some((x) => x.id === c.id))],
@@ -203,11 +242,12 @@ export function PoForm({
       if (res.kind === "rate_limited") return setRetryAfter(res.retryAfterSec ?? 60);
       setFieldErrors(res.fieldErrors ?? {});
       setError(res.fieldErrors ? Object.values(res.fieldErrors)[0] ?? res.message : res.message);
+      setFailures((n) => n + 1);
     });
   }
 
   const replyField = initial ? (
-    <div className="border-t border-border-faint pt-3">
+    <div className="border-t border-border-faint pt-3" data-po-field="reply">
       {/* Required on a sent-back PO (Purchasing's reply), and for an admin's edit while it is with IT. */}
       <Field
         label={sentBack ? "What did you fix?" : "What changed?"}
@@ -246,7 +286,11 @@ export function PoForm({
           )}
         </Banner>
       )}
-      {error && <Banner tone="fault" title={error} />}
+      {error && (
+        <div ref={bannerRef} tabIndex={-1} className="scroll-mt-5 rounded-(--radius-card) focus:outline-none focus-visible:shadow-[0_0_0_3px_var(--focus-shadow)]">
+          <Banner tone="fault" title={error} />
+        </div>
+      )}
 
       <div className="flex flex-col gap-5 min-[900px]:flex-row min-[900px]:items-start">
         <SectionRail done={done} className="shrink-0 min-[900px]:sticky min-[900px]:top-5 min-[900px]:w-[210px]" />
@@ -256,11 +300,12 @@ export function PoForm({
             <VendorCard
               vendors={vendors} vendorId={draft.vendorId} onChange={(id) => set("vendorId", id)}
               error={fieldErrors.vendorId} flagged={flagged("vendorId")}
+              onOpenVendorTab={() => { vendorTabOpen.current = true; }}
             />
 
             <InvoiceCard
               draft={draft} set={(k, v) => set(k, v as never)} errors={fieldErrors} flagged={flagged}
-              departments={departments} keepDepartmentId={initial?.departmentId}
+              departments={departments} keepDepartmentId={initial?.departmentId} strict={strict}
             />
 
             <SectionCard
@@ -274,7 +319,7 @@ export function PoForm({
             >
               <div className="flex flex-col gap-3 px-3 pb-1.5 pt-4 sm:px-[18px]">
                 {flagged("cost") && <p className="text-[11.5px] text-fg-muted">Flagged — check this one: the unit prices.</p>}
-                {fieldErrors.lines && <p role="alert" className="text-[11.5px] font-medium" style={{ color: "var(--error-text)" }}>{fieldErrors.lines}</p>}
+                {fieldErrors.lines && <p data-po-field="lines" role="alert" className="text-[11.5px] font-medium" style={{ color: "var(--error-text)" }}>{fieldErrors.lines}</p>}
                 {draft.lines.map((l, i) => (
                   <ItemCard
                     key={l.key} index={i} line={l} categories={allCategories} errors={errorsByCard[i] ?? {}}
@@ -323,7 +368,11 @@ export function PoForm({
               sub="A clear phone photo is enough. IT and Finance check your numbers against these."
             >
               <p className="px-4 pb-5 pt-4 text-xs text-fg-muted sm:px-5">
-                {initial?.invoiceOnFile ? "The sales invoice is on file." : "The sales invoice is required; the official receipt, delivery receipt and warranty slip are optional."}
+                {initial?.invoiceOnFile
+                  ? "The sales invoice is on file."
+                  : strict
+                    ? "The sales invoice is required; the official receipt, delivery receipt and warranty slip are optional."
+                    : "The sales invoice, official receipt, delivery receipt and warranty slip are all optional on this older purchase order."}
               </p>
             </SectionCard>
           </div>
@@ -336,7 +385,7 @@ export function PoForm({
             errors={fieldErrors} flaggedTotals={flagged("totals")}
             whenYouSave={whenYouSave(counts)} checklist={checklist(draft, ctx)} saveLabel={saveLabel(draft, ctx)}
             pending={pending} onSave={save} cancelHref={initial ? `/purchases/${initial.id}` : "/purchases"}
-            reply={replyField}
+            reply={replyField} strict={strict}
           />
         </div>
       </div>

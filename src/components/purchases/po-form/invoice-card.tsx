@@ -24,7 +24,7 @@ const dot = (color: string) => <span aria-hidden="true" className="inline-block 
  * SI number, invoice date, OR number, how it was paid (credit or debit card, nothing else) and the department.
  */
 export function InvoiceCard({
-  draft, set, errors, flagged, departments, keepDepartmentId,
+  draft, set, errors, flagged, departments, keepDepartmentId, strict,
 }: {
   draft: Pick<PoDraft, InvoiceKey>;
   set: (key: InvoiceKey, value: string) => void;
@@ -32,6 +32,8 @@ export function InvoiceCard({
   flagged: (key: string) => boolean;
   departments: PickerGroup[];
   keepDepartmentId?: string | null;
+  /** False on a legacy PO (spec §5b.3): the PO number and paid by are optional there. */
+  strict: boolean;
 }) {
   const { internal, client } = groupPickerOptions(departments, keepDepartmentId);
   const deptOptions: ComboOption[] = [
@@ -44,7 +46,7 @@ export function InvoiceCard({
     <SectionCard id="po-invoice" icon="requests" title="Invoice & payment" sub="Numbers that tie this order to the paperwork.">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-4 px-4 pb-5 pt-4 sm:gap-[18px] sm:px-5">
         <Field
-          label="Purchase order number" required error={errors.poNumber} flagged={flagged("poNumber")}
+          label="Purchase order number" required={strict} optional={!strict} error={errors.poNumber} flagged={flagged("poNumber")} mark="poNumber"
           hint="Your own number. It doesn't need to be on the invoice."
         >
           {(p) => (
@@ -55,7 +57,7 @@ export function InvoiceCard({
             />
           )}
         </Field>
-        <Field label="SI number" required error={errors.invoiceRef} flagged={flagged("invoiceRef")} hint="Top right of the sales invoice.">
+        <Field label="SI number" required error={errors.invoiceRef} flagged={flagged("invoiceRef")} mark="invoiceRef" hint="Top right of the sales invoice.">
           {(p) => (
             <AffixInput
               prefix="№" id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}
@@ -64,7 +66,7 @@ export function InvoiceCard({
             />
           )}
         </Field>
-        <Field label="Invoice date" required error={errors.purchasedAt} flagged={flagged("purchasedAt")} hint="The date written on it, not today.">
+        <Field label="Invoice date" required error={errors.purchasedAt} flagged={flagged("purchasedAt")} mark="purchasedAt" hint="The date written on it, not today.">
           {(p) => (
             <Input
               id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} className={cn(flagged("purchasedAt") && RING)}
@@ -72,7 +74,7 @@ export function InvoiceCard({
             />
           )}
         </Field>
-        <Field label="OR number" optional error={errors.receiptRef} flagged={flagged("receiptRef")} hint="Add it later if the receipt hasn't come.">
+        <Field label="OR number" optional error={errors.receiptRef} flagged={flagged("receiptRef")} mark="receiptRef" hint="Add it later if the receipt hasn't come.">
           {(p) => (
             <Input
               id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid} className={cn("font-mono", flagged("receiptRef") && RING)}
@@ -82,11 +84,15 @@ export function InvoiceCard({
         </Field>
 
         <fieldset
+          data-po-field="paidBy"
           className="col-span-full flex min-w-0 flex-col gap-1.5"
           aria-describedby={errors.paidBy ? "po-paid-by-error" : flagged("paidBy") ? "po-paid-by-hint" : undefined}
         >
           <legend className="mb-1.5 text-[13px] font-medium text-fg">
-            Paid by<span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>
+            Paid by
+            {strict
+              ? <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>
+              : <span className="font-normal text-fg-faint"> · optional</span>}
           </legend>
           <div className="flex flex-wrap gap-2.5">
             {PAY.map((p) => (
@@ -115,7 +121,7 @@ export function InvoiceCard({
           <FormError id="po-paid-by-error">{errors.paidBy}</FormError>
         </fieldset>
 
-        <Field label="For department" optional error={errors.departmentId} className="col-span-full">
+        <Field label="For department" optional error={errors.departmentId} className="col-span-full" mark="departmentId">
           {(p) => (
             <EntityCombobox
               id={p.id} aria-describedby={p["aria-describedby"]} invalid={p.invalid}

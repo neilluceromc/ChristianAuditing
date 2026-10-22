@@ -52,7 +52,7 @@ export function SectionCard({
 }
 
 export function Field({
-  label, required, optional, hint, error, flagged, className, children,
+  label, required, optional, hint, error, flagged, mark, className, children,
 }: {
   label: string;
   required?: boolean;
@@ -61,6 +61,8 @@ export function Field({
   error?: string;
   /** Sent back with this field ticked: the hint says so (the control carries RING). */
   flagged?: boolean;
+  /** The field's `data-po-field` mark: a failed save focuses the first field with an error (firstErrorTarget). */
+  mark?: string;
   className?: string;
   children: (props: { id: string; "aria-describedby"?: string; invalid: boolean }) => ReactNode;
 }) {
@@ -70,7 +72,7 @@ export function Field({
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
   return (
-    <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
+    <div data-po-field={mark} className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       <label htmlFor={id} className="text-[13px] font-medium text-fg">
         {label}
         {required && <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>}

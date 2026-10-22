@@ -30,7 +30,7 @@ const clean = (v: string) => v.replace(/[^0-9.,]/g, "");
  */
 export function TotalsCard({
   totals, setTotal, problems, status, statusText, errors, flaggedTotals, whenYouSave, checklist, saveLabel, pending, onSave,
-  cancelHref, reply, className,
+  cancelHref, reply, strict, className,
 }: {
   totals: Record<TotalKey, string>;
   setTotal: (key: TotalKey, value: string) => void;
@@ -47,6 +47,8 @@ export function TotalsCard({
   cancelHref: string;
   /** The sent-back reply ("What did you fix?") on an edit. */
   reply?: ReactNode;
+  /** False on a legacy PO (spec §5b.3): the total amount due is optional there. */
+  strict: boolean;
   className?: string;
 }) {
   const tone = STATUS_TONE[status];
@@ -71,7 +73,7 @@ export function TotalsCard({
             const problem = problems[r.key];
             const describedBy = err(r.key) ? `${id}-error` : problem ? `${id}-warn` : undefined;
             return (
-              <div key={r.key} className="flex flex-col py-[5px]">
+              <div key={r.key} data-po-field={`totals.${r.key}`} className="flex flex-col py-[5px]">
                 <div className="grid grid-cols-[minmax(0,1fr)_minmax(110px,150px)] items-center gap-3">
                   <label htmlFor={id} className="text-[13px] text-fg-secondary">
                     {r.label}{r.note && <span className="text-xs text-fg-faint"> {r.note}</span>}
@@ -91,10 +93,13 @@ export function TotalsCard({
           })}
         </div>
 
-        <div className="flex flex-col gap-1 border-t-[1.5px] border-fg pt-3">
+        <div data-po-field="totals.totalAmountDue" className="flex flex-col gap-1 border-t-[1.5px] border-fg pt-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label htmlFor="po-total-totalAmountDue" className="text-[13px] font-semibold uppercase tracking-[0.02em] text-fg">
-              Total amount due<span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>
+              Total amount due
+              {strict
+                ? <span aria-hidden style={{ color: "var(--required-mark)" }}> *</span>
+                : <span className="font-normal normal-case tracking-normal text-fg-faint"> · optional</span>}
             </label>
             <AffixInput
               prefix="₱" id="po-total-totalAmountDue"
@@ -112,6 +117,7 @@ export function TotalsCard({
         </div>
 
         <div
+          role="status"
           className="flex items-start gap-2.5 rounded-(--radius-card) border px-3 py-2.5"
           style={{ background: `var(--st-${tone}-bg)`, borderColor: `var(--st-${tone}-border)`, color: `var(--st-${tone}-text)` }}
         >
