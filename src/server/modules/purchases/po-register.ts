@@ -6,6 +6,7 @@ import { Prisma, type AssetClass } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { actionRole } from "@/server/auth/guards";
 import { checkRate } from "@/server/rate-limit";
+import { isDeadlock } from "@/server/prisma-errors";
 import { writeAudit } from "@/server/audit";
 import { notify } from "@/server/notifications/notify";
 import { lockPo } from "./po-lock";
@@ -116,6 +117,8 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
   let out: Registered | null = null;
   let failure: ActionResult<Registered> | null = null;
   let categoriesChanged = false;
+  /** Set only while a replaced category is being deleted: a foreign-key refusal then means another PO just used it. */
+  let deletingCategory = false;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -272,10 +275,14 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
       if (hit.count === 0) { failure = conflict("Someone else changed this purchase order first — reload and try again."); return; }
 
       // ---- new IT categories (spec §5, §5b.5–6): IT's replacements first, then whatever is still new is confirmed ----
-      for (const [i, l] of d.lines.entries()) {
-        const p = plan[i]!;
-        if (!p.replaced) continue;
-        const old = p.replaced;
+      // Category rows are touched in id order, so two submits meeting on the same categories queue, not deadlock.
+      const byCategoryId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+      const replacing = d.lines
+        .map((l, i) => ({ l, p: plan[i]! }))
+        .filter((x) => x.p.replaced)
+        .sort((a, b) => byCategoryId(a.p.replaced!.id, b.p.replaced!.id) || byCategoryId(a.l.lineId, b.l.lineId));
+      for (const { l, p } of replacing) {
+        const old = p.replaced!;
         const to = catById.get(p.categoryId)!;
         const line = lineById.get(l.lineId)!;
         const n = allLines.findIndex((x) => x.id === line.id) + 1;
@@ -287,7 +294,11 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
           tx.assetType.count({ where: { categoryId: old.id } }),
         ]);
         const remove = onLines + onAssets + withTypes === 0;
-        if (remove) await tx.assetCategory.delete({ where: { id: old.id } });
+        if (remove) {
+          deletingCategory = true;
+          await tx.assetCategory.delete({ where: { id: old.id } });
+          deletingCategory = false;
+        }
         categoriesChanged = true;
         await writeAudit(tx, {
           actorId: user.id, actorLabel: user.name, entityType: "purchase-order", entityId: po.id, action: "category.replace",
@@ -306,11 +317,11 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
           entityType: "purchase-order", entityId: po.id,
         });
       }
-      const confirmedHere = new Set<string>();
-      for (const p of plan) {
-        const cat = catById.get(p!.categoryId)!;
-        if (cat.confirmedAt !== null || confirmedHere.has(cat.id)) continue;
-        confirmedHere.add(cat.id);
+      const toConfirm = [...new Set(plan.map((p) => p!.categoryId))]
+        .map((id) => catById.get(id)!)
+        .filter((c) => c.confirmedAt === null)
+        .sort((a, b) => byCategoryId(a.id, b.id));
+      for (const cat of toConfirm) {
         const said = d.lines.some((x, j) => x.categoryAction === "confirm" && plan[j]!.categoryId === cat.id);
         const set = await tx.assetCategory.updateMany({ where: { id: cat.id, confirmedAt: null }, data: { confirmedAt: now } });
         if (set.count === 0) continue;
@@ -421,8 +432,14 @@ export async function registerFromPurchaseOrder(input: unknown): Promise<ActionR
         : "One of those tags was just taken. Reload and try again.");
     }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
-      // A replaced category picked up by another PO between the usage check and its delete: the whole submit rolled back.
-      return conflict("That category was just used elsewhere — nothing was written. Try that again.");
+      // A replaced category picked up by another PO between the usage check and its delete: the whole submit rolled
+      // back. Any other foreign-key refusal is a row that moved under the submit.
+      return conflict(deletingCategory
+        ? "That category was just used elsewhere — nothing was written. Try that again."
+        : "This purchase order changed elsewhere — reload and try again.");
+    }
+    if (isDeadlock(e)) {
+      return conflict("The database is busy right now — nothing was written. Try that again.");
     }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2028") {
       return conflict("The database is busy right now — nothing was written. Try that again.");

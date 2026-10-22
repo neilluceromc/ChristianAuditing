@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 import { lineProgress } from "@/lib/po-flow";
 
 /*
@@ -17,6 +18,8 @@ const h = vi.hoisted(() => ({
   /** Row locks, reads and counts, in order. */
   ops: [] as string[],
   revalidated: [] as string[],
+  /** Task 3 fix round 1: make one write ("assetCategory.delete", "purchaseRecord.create") throw this error. */
+  fail: null as { at: string; err: unknown } | null,
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
@@ -70,6 +73,7 @@ vi.mock("@/server/db/client", () => {
       return [...groups].map(([k, c]) => ({ [by[0]]: k === "" ? null : k, _count: { _all: c } }));
     },
     create: async ({ data }: { data: R }) => {
+      if (h.fail?.at === `${name}.create`) throw h.fail.err;
       const row: R = { id: `${name}-${++n}`, createdAt: new Date(), ...data };
       rows(name).push(row);
       return structuredClone(row);
@@ -86,6 +90,7 @@ vi.mock("@/server/db/client", () => {
       return { count: hit.length };
     },
     delete: async ({ where }: { where: R }) => {
+      if (h.fail?.at === `${name}.delete`) throw h.fail.err;
       const i = rows(name).findIndex((x) => matches(x, where));
       if (i < 0) throw new Error(`no ${name} row`);
       return structuredClone(rows(name).splice(i, 1)[0]);
@@ -164,6 +169,7 @@ const laptops = (tags: string[], extra: Row = {}) => ({ lineId: "ln1", model: "T
 
 beforeEach(() => {
   h.user = IVAN;
+  h.fail = null;
   h.ops = [];
   h.revalidated = [];
   h.tables = {
@@ -596,5 +602,66 @@ describe("registerFromPurchaseOrder — a new IT category from the PO", () => {
     expect(r).toMatchObject({
       kind: "validation", fieldErrors: { "lines.0.categoryAction": "Network cable is already confirmed — reload to see it." },
     });
+  });
+});
+
+/*
+ * Task 3 fix round 1: category rows are written in id order (no lock-order deadlock between two submits), a deadlock
+ * reads as "busy, try again", and only a refused category delete says the category was just used elsewhere.
+ */
+describe("registerFromPurchaseOrder — category writes under contention", () => {
+  const known = (code: string, meta?: Record<string, unknown>) =>
+    new Prisma.PrismaClientKnownRequestError("refused", { code, clientVersion: "6.0.0", meta });
+  const replaceLine = { lineId: "ln1", model: "Cat6 box", units: units(["BR-SW-0001"]), categoryAction: { replaceWith: "cat-sw" } };
+
+  beforeEach(() => {
+    t("assetCategory").push(
+      { id: "cat-new", name: "Network cable", cls: "IT", confirmedAt: null },
+      { id: "cat-sw", name: "Switch", cls: "IT", confirmedAt: CONFIRMED },
+    );
+    seedPo({ refNo: "PO-0215" });
+    seedLine("ln1", { description: "network cables", categoryId: "cat-new", qty: 3, unitPrice: 900 });
+  });
+
+  it("confirms new categories in id order, whatever the line order", async () => {
+    t("assetCategory").push({ id: "cat-zz", name: "Zigbee hub", cls: "IT", confirmedAt: null }, { id: "cat-aa", name: "Antenna", cls: "IT", confirmedAt: null });
+    seedLine("ln2", { description: "hubs", categoryId: "cat-zz", qty: 1, unitPrice: 100 });
+    seedLine("ln3", { description: "antennas", categoryId: "cat-aa", qty: 1, unitPrice: 100 });
+    const r = await registerFromPurchaseOrder({
+      poId: "po1",
+      lines: [
+        { lineId: "ln2", model: "Hub", units: units(["BR-HB-0001"]) },
+        { lineId: "ln1", model: "Cat6 box", units: units(["BR-NC-0001"]) },
+        { lineId: "ln3", model: "Ant", units: units(["BR-AN-0001"]) },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    expect(audits("category.confirm").map((a) => a.entityId)).toEqual(["cat-aa", "cat-new", "cat-zz"]);
+  });
+
+  it("a refused category delete says the category was just used elsewhere", async () => {
+    h.fail = { at: "assetCategory.delete", err: known("P2003", { field_name: "PurchaseUnit_categoryId_fkey (index)" }) };
+    expect(await registerFromPurchaseOrder({ poId: "po1", lines: [replaceLine] })).toMatchObject({
+      ok: false, kind: "conflict", message: "That category was just used elsewhere — nothing was written. Try that again.",
+    });
+  });
+
+  it("any other foreign-key refusal keeps the generic conflict", async () => {
+    h.fail = { at: "purchaseRecord.create", err: known("P2003", { field_name: "PurchaseRecord_vendorId_fkey (index)" }) };
+    expect(await registerFromPurchaseOrder({ poId: "po1", lines: [replaceLine] })).toMatchObject({
+      ok: false, kind: "conflict", message: "This purchase order changed elsewhere — reload and try again.",
+    });
+  });
+
+  it("a deadlock reads as busy, try again — from a Prisma query or a raw statement", async () => {
+    // The fake has no rollback: each attempt starts from the same tables.
+    const start = structuredClone(h.tables);
+    for (const err of [known("P2034"), known("P2010", { code: "40P01" })]) {
+      h.tables = structuredClone(start);
+      h.fail = { at: "assetCategory.delete", err };
+      expect(await registerFromPurchaseOrder({ poId: "po1", lines: [replaceLine] })).toMatchObject({
+        ok: false, kind: "conflict", message: "The database is busy right now — nothing was written. Try that again.",
+      });
+    }
   });
 });

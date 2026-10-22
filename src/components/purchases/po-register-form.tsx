@@ -333,7 +333,7 @@ function LineCard({ line, draft, errors, attempted, catalog, onChange, disabled 
               onChange={(e) => onChange({ replaceWith: e.target.value, confirm: false, typeId: "" })}
             >
               <option value="">Choose another IT category…</option>
-              {catalog.filter((c) => c.cls === "IT").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {catalog.filter((c) => c.cls === "IT" && c.confirmed).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </div>
           <p className="text-[11px] text-fg-muted">
@@ -380,7 +380,7 @@ function LineCard({ line, draft, errors, attempted, catalog, onChange, disabled 
                   >
                     <option value="">Pick a category…</option>
                     {/* An old request's unit: only the categories this person may register (the page scopes the catalog). */}
-                    {catalog.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.cls === "IT" ? "IT" : "non-IT"}</option>)}
+                    {catalog.filter((c) => c.confirmed).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.cls === "IT" ? "IT" : "non-IT"}</option>)}
                   </Select>
                 )}
               </FormField>
