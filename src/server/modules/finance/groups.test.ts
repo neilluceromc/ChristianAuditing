@@ -203,4 +203,10 @@ describe("PO form redesign (task 7): the PO's own money on the group review", ()
     expect(direct!.money).toMatchObject({ poNumber: null, paidBy: null, totalsConsistent: null });
     expect(Object.values(direct!.money.totals).every((v) => v === null)).toBe(true);
   });
+
+  it("the PO's documents leave out removed (superseded) ones", async () => {
+    h.record = record(po());
+    await groupDetail("rec7");
+    expect((h.recordArgs as unknown as Args).select.purchaseOrder.select.documents.where).toEqual({ supersededAt: null });
+  });
 });

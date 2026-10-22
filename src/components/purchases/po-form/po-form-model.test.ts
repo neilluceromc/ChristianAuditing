@@ -277,3 +277,23 @@ describe("a legacy PO (spec §5b.3)", () => {
     expect(strict["Purchase order number"].optional).toBeFalsy();
   });
 });
+
+describe("task 6 review, minor 7: a legacy PO's partial totals", () => {
+  it("are \"empty\" only while all seven are blank; partial totals that don't add up are \"off\", and the rail says so", () => {
+    const partial = owner({ totals: { ...emptyTotals(), totalSales: "9,000.00", lessVat: "975.00", netOfVat: "8,125.00" } });
+    const review = totalsReview(partial);
+    expect(review.status).toBe("off");
+    expect(review.problems).toMatchObject({ totalSales: "Items add up to ₱9,100.00.", netOfVat: "Total sales − VAT = ₱8,025.00." });
+    const legacy = ctx({ legacy: true });
+    expect(sectionsDone(partial, legacy).totals).toBe(false);
+    expect(checklist(partial, legacy).find((c) => c.label === "Totals add up")).toMatchObject({ done: false });
+    // all seven blank is still "empty", and fine on a legacy PO
+    expect(totalsReview(owner({ totals: emptyTotals() })).status).toBe("empty");
+    expect(sectionsDone(owner({ totals: emptyTotals() }), legacy).totals).toBe(true);
+  });
+
+  it("partial totals that add up so far, with no total amount due yet, ask for it", () => {
+    const partial = owner({ totals: { ...emptyTotals(), totalSales: "9,100.00" } });
+    expect(totalsReview(partial)).toMatchObject({ status: "off", text: "Type the total amount due from the invoice.", problems: {} });
+  });
+});

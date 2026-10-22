@@ -176,6 +176,8 @@ export default async function GroupReviewPage({
             <RequestDocumentsCard
               requestId={g.po.id}
               canUpload={g.po.state !== "CANCELLED"}
+              // a PO from the new form needs its sales invoice: the empty slot says Required, as on the PO page
+              invoiceRequired={g.po.formV2}
               si={g.money.invoiceRef}
               docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy, at: d.at, downloadHref: d.downloadHref }))}
             />

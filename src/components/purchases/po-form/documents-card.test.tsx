@@ -79,3 +79,23 @@ describe("DocumentsCard", () => {
     expect(text(html)).toContain("Flagged — check this one");
   });
 });
+
+describe("task 6 review, minors 1 and 5", () => {
+  const fileInput = (html: string, label: string) => html.match(new RegExp(`<input[^>]*type="file"[^>]*aria-label="${label}"[^>]*>`))?.[0] ?? "";
+
+  it("the required sales invoice's file input says it is required; the optional slots and a legacy PO's don't", () => {
+    const html = render();
+    expect(fileInput(html, "Sales invoice")).toContain('aria-required="true"');
+    for (const label of ["Official receipt", "Delivery receipt", "Warranty slip"]) {
+      expect(fileInput(html, label), label).not.toContain("aria-required");
+    }
+    expect(fileInput(render({ strict: false }), "Sales invoice")).not.toContain("aria-required");
+    expect(fileInput(render({ files: { invoice: pdf("si.pdf", 1000) } }), "Sales invoice")).toContain('aria-required="true"');
+  });
+
+  it("a filled slot marks Replace as where a failed save's focus lands (not Preview)", () => {
+    const html = render({ files: { invoice: pdf("si.pdf", 1000) } });
+    const marked = [...html.matchAll(/<button[^>]*data-po-focus[^>]*>(.*?)<\/button>/g)].map((m) => text(m[1]).trim());
+    expect(marked).toEqual(["Replace"]);
+  });
+});

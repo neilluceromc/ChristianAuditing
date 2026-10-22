@@ -61,8 +61,11 @@ export function RequestDocumentsCard({
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  /** The slot being stored or removed, and each slot's last refusal. */
-  const [busy, setBusy] = useState<PoDocumentSlot | null>(null);
+  /**
+   * The slots being stored or removed (a set: two slots can be in flight at once, and one finishing mustn't clear the
+   * other's spinner), and each slot's last refusal.
+   */
+  const [busy, setBusy] = useState<ReadonlySet<PoDocumentSlot>>(() => new Set());
   const [slotErrors, setSlotErrors] = useState<Partial<Record<PoDocumentSlot, string>>>({});
   const [removing, setRemoving] = useState<{ slot: PoDocumentSlot; doc: RequestDocumentRow } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,17 +91,26 @@ export function RequestDocumentsCard({
     });
   }
 
+  function markBusy(slot: PoDocumentSlot, on: boolean) {
+    setBusy((all) => {
+      const next = new Set(all);
+      if (on) next.add(slot);
+      else next.delete(slot);
+      return next;
+    });
+  }
+
   function storeInSlot(slot: PoDocumentSlot, file: File) {
     setSlotError(slot, null);
     setRetryAfter(null);
-    setBusy(slot);
+    markBusy(slot, true);
     const fd = new FormData();
     fd.set("orderId", requestId);
     fd.set("kind", slot);
     fd.set("file", file);
     startTransition(async () => {
       const res = await replacePoDocument(fd);
-      setBusy(null);
+      markBusy(slot, false);
       if (res.ok) {
         toast(`${SLOT_COPY[slot].title} saved`, "settled");
         router.refresh();
@@ -113,10 +125,10 @@ export function RequestDocumentsCard({
     setRemoving(null);
     setSlotError(slot, null);
     setRetryAfter(null);
-    setBusy(slot);
+    markBusy(slot, true);
     startTransition(async () => {
       const res = await removePoDocument({ documentId: doc.id });
-      setBusy(null);
+      markBusy(slot, false);
       if (res.ok) {
         toast(`${SLOT_COPY[slot].title} removed`, "settled");
         router.refresh();
@@ -159,7 +171,7 @@ export function RequestDocumentsCard({
                 shown={doc ? { fileName: doc.fileName, detail: `${doc.uploadedBy} · ${doc.at}`, preview: `${doc.downloadHref}?inline=1` } : null}
                 onPick={canUpload ? (file) => storeInSlot(slot, file) : undefined}
                 onRemove={canUpload && doc ? () => setRemoving({ slot, doc }) : undefined}
-                error={slotErrors[slot]} busy={busy === slot}
+                error={slotErrors[slot]} busy={busy.has(slot)}
               />
             );
           })}

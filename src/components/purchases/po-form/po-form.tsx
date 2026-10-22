@@ -146,9 +146,11 @@ export function PoForm({
     if (failures === 0) return;
     const target = firstErrorTarget(fieldErrors, cardOf);
     const box = target ? document.querySelector<HTMLElement>(`[data-po-field="${target}"]`) : null;
+    // A box can name its own target (a filled document slot: Replace, not Preview).
     const field = box?.matches("input, textarea, button, [tabindex]")
       ? box
-      : box?.querySelector<HTMLElement>('input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled])')
+      : box?.querySelector<HTMLElement>("[data-po-focus]:not([disabled])")
+        ?? box?.querySelector<HTMLElement>('input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled])')
         ?? box?.querySelector<HTMLElement>("button:not([disabled])");
     const el = field ?? bannerRef.current ?? rateRef.current;
     if (!el) return;

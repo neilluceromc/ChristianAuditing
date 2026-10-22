@@ -134,6 +134,8 @@ export function DocSlot({ kind, required, si = "", shown, onPick, onRemove, erro
   const fileInput = onPick ? (
     <input
       ref={input} type="file" accept={ACCEPT} className="sr-only" aria-label={title} aria-describedby={describedBy}
+      // the visible "Required" tag is outside the input's name and description, so say it here too
+      aria-required={required || undefined}
       disabled={busy}
       // Filled, Replace is the tab stop; a second, invisible one would only lose the focus ring.
       tabIndex={shown ? -1 : undefined}
@@ -188,7 +190,12 @@ export function DocSlot({ kind, required, si = "", shown, onPick, onRemove, erro
                 </Button>
               )}
               {onPick && (
-                <Button type="button" variant="secondary" size="sm" disabled={busy} aria-describedby={`${id}-title`} onClick={() => input.current?.click()}>
+                <Button
+                  type="button" variant="secondary" size="sm" disabled={busy} aria-describedby={`${id}-title`}
+                  // where a failed save's focus lands when the server refused this slot's file: Replace, not Preview
+                  data-po-focus=""
+                  onClick={() => input.current?.click()}
+                >
                   Replace
                 </Button>
               )}
@@ -214,7 +221,11 @@ export function DocSlot({ kind, required, si = "", shown, onPick, onRemove, erro
                 e.preventDefault();
                 if (editable) setDragging(true);
               }}
-              onDragLeave={() => setDragging(false)}
+              onDragLeave={(e) => {
+                // crossing onto the zone's own icon or text fires a dragleave too: only leaving the zone ends the highlight
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                setDragging(false);
+              }}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragging(false);

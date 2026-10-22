@@ -130,8 +130,12 @@ export function totalsReview(d: PoDraft): {
   const result = checkTotals(items, typed);
   const problems: Partial<Record<TotalKey, string>> = { ...result.problems };
   for (const k of TOTAL_KEYS) if (Number.isNaN(typed[k])) problems[k] = "Type an amount, like 9,100.00";
-  const status: TotalsStatus = typed.totalAmountDue === null ? "empty" : result.ok ? "ok" : "off";
-  return { items, status, text: STATUS_TEXT[status], problems };
+  // "empty" only while nothing is typed (task 6 review): partial totals that don't add up are "off", even on a legacy
+  // PO with no total amount due. Typed figures that are fine so far, with no total amount due yet, still ask for it.
+  const blank = TOTAL_KEYS.every((k) => typed[k] === null);
+  const status: TotalsStatus = blank ? "empty" : result.ok ? "ok" : "off";
+  const asksForTotal = status === "off" && typed.totalAmountDue === null && Object.keys(problems).length === 0;
+  return { items, status, text: asksForTotal ? STATUS_TEXT.empty : STATUS_TEXT[status], problems };
 }
 
 /** The rail's ticks: each section is done when what it asks for is all there (guidance only). */
