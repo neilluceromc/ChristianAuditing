@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { checkUploadMeta, isPreviewable, UPLOAD_TYPES } from "@/lib/upload-meta";
+import { checkUploadMeta, fileExtension, isPreviewable, UPLOAD_TYPES } from "@/lib/upload-meta";
 import { writeObject } from "./storage";
 
 // The limits and the pure meta check live in src/lib (client-safe, so the browser pre-checks with the same rules);
@@ -34,7 +34,7 @@ export function fileResponse(bytes: Uint8Array, fileName: string, req: Request):
   const inline = isPreviewable(fileName) && new URL(req.url).searchParams.get("inline") === "1";
   return new Response(new Uint8Array(bytes), {
     headers: {
-      "content-type": UPLOAD_TYPES[path.extname(fileName).toLowerCase()] ?? "application/octet-stream",
+      "content-type": UPLOAD_TYPES[fileExtension(fileName).toLowerCase()] ?? "application/octet-stream",
       "content-disposition": contentDisposition(fileName, inline ? "inline" : "attachment"),
       "x-content-type-options": "nosniff",
     },

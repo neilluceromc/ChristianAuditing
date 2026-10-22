@@ -84,6 +84,13 @@ describe("fileResponse: every download route's response", () => {
     expect(res.headers.get("content-disposition")).toBe(contentDisposition("résumé 收据.pdf", "inline"));
     expect(res.headers.get("content-disposition")).toContain("filename*=UTF-8''r%C3%A9sum%C3%A9%20%E6%94%B6%E6%8D%AE.pdf");
   });
+
+  it("one extension parser decides both the type and the disposition (a backslash in the name changes neither)", () => {
+    // win32's path.extname reads "scan\.pdf" as a dotfile with no extension; fileExtension (posix) reads ".pdf"
+    const res = fileResponse(bytes, "scan\\.pdf", req("?inline=1"));
+    expect(res.headers.get("content-disposition")).toMatch(/^inline; /);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+  });
 });
 
 describe("storeUpload", () => {
