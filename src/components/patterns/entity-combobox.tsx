@@ -77,7 +77,7 @@ export function ComboPopup({
         // The group's hint, right of its heading — only a real group heading, never the synthetic Recent/All.
         const hint = heading !== null && heading === option.group ? groupHint?.[heading] : undefined;
         return (
-          // "" is the clear sentinel (receive-form's "No supplier") — give it a real id and key
+          // "" is the clear sentinel (receive-form's "No vendor") — give it a real id and key
           <Fragment key={option.value || "none"}>
             {heading && (
               <li

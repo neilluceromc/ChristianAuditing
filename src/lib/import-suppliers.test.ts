@@ -10,7 +10,7 @@ import {
 // exercises every column at once.
 const HEADER = [
   "Name", "Registered name", "Category", "Contact person", "Phone", "Email", "Address",
-  "Registration no", "Contract status", "Contract start", "Contract end", "Notes",
+  "VAT REG. TIN", "Contract status", "Contract start", "Contract end", "Notes",
 ];
 
 const COL = {
@@ -87,6 +87,14 @@ describe("matchHeaders(SUPPLIER_IMPORT_HEADERS)", () => {
     expect(m.map.get("registrationNo")).toBe(4);
     expect(m.map.get("contractStatus")).toBe(5);
     expect(m.map.get("contractEnd")).toBe(6);
+  });
+
+  it("reads the VAT REG. TIN column under its new header and under the old ones (spec §2.3)", () => {
+    for (const header of ["VAT REG. TIN", "vat reg tin", "Registration no", "Registration number"]) {
+      const m = matchHeaders(["Name", header], SUPPLIER_IMPORT_HEADERS);
+      expect(m.map.get("registrationNo"), header).toBe(1);
+      expect(m.unknown, header).toEqual([]);
+    }
   });
 
   it("matches the real export header with no missing and no unknown columns", () => {

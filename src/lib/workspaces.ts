@@ -293,6 +293,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Vendors",
           href: "/purchases/suppliers",
           icon: "suppliers",
+          // Spec §2.2 renamed the page; the palette still finds it by the word people used before.
+          also: ["Suppliers"],
           views: [
             { label: "All vendors", href: "/purchases/suppliers" },
             // Phase 46: contracts ending within 30 days (supplier-list.ts, RENEWING_DAYS).
@@ -434,6 +436,8 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           label: "Vendors",
           href: "/purchases/suppliers",
           icon: "suppliers",
+          // Spec §2.2 renamed the page; the palette still finds it by the word people used before.
+          also: ["Suppliers"],
           views: [
             { label: "All vendors", href: "/purchases/suppliers" },
             { label: "Active contracts", href: "/purchases/suppliers?contract=ACTIVE" },
