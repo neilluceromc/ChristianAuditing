@@ -179,7 +179,7 @@ export default async function GroupReviewPage({
               // a PO from the new form needs its sales invoice: the empty slot says Required, as on the PO page
               invoiceRequired={g.po.formV2}
               si={g.money.invoiceRef}
-              docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy, at: d.at, downloadHref: d.downloadHref }))}
+              docs={g.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy ?? "Unknown", at: d.at, downloadHref: d.downloadHref }))}
             />
           ) : (
             <Card>
@@ -247,7 +247,7 @@ export default async function GroupReviewPage({
                   <Tr key={d.id}>
                     <Td>{d.label}</Td>
                     <Td><span className="block max-w-[16rem] truncate" title={d.fileName}>{d.fileName}</span></Td>
-                    <Td>{d.uploadedBy}</Td>
+                    <Td>{d.uploadedBy ?? "Unknown"}</Td>
                     <Td mono>{d.at}</Td>
                     <Td align="right"><a href={d.downloadHref} className="text-accent hover:underline">Download</a></Td>
                   </Tr>

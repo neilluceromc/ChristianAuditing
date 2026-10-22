@@ -6,6 +6,7 @@ import {
 } from "@/lib/depreciation";
 import { lifeLabel } from "@/lib/depreciation-input";
 import { fmtMoneyExact } from "@/lib/format";
+import { uploadStamp } from "@/lib/upload-meta";
 import { REG_LABEL_FINANCE, registrationState, returnSummary, type RegState } from "@/lib/registration";
 
 /** The four document slots of a registration (copied from the client-only document-slots.tsx, which server code cannot import). */
@@ -29,7 +30,11 @@ export interface FinanceAssetDetail {
   costC: number | null; result: DepResult | null; note: string | null; policyText: string; custom: boolean;
   lifeMonths: number | null; salvageC: number | null;
   startLabel: string | null; endLabel: string | null; monthsUsed: number | null;
-  docs: Array<{ kind: string; title: string; file: { id: string; fileName: string; size: number | null } | null }>;
+  /** Each slot's file, with when it was uploaded (ISO) and by whom (a name, or null) for the "Uploaded …" line. */
+  docs: Array<{
+    kind: string; title: string;
+    file: { id: string; fileName: string; size: number | null; uploadedAt: string; uploadedBy: string | null } | null;
+  }>;
   years: LifeYear[];
   /**
    * Phase 47 (spec §4.2 ruling): agrees with the engine — the depreciable base is cost − salvage; the purchase
@@ -67,7 +72,10 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
         select: { id: true, refNo: true, requestedBy: { select: { name: true } } },
       },
       purchaseRecord: { select: { id: true, fees: true, quantity: true } },
-      documents: { select: { id: true, kind: true, fileName: true, size: true, createdAt: true }, orderBy: { createdAt: "asc" } },
+      documents: {
+        select: { id: true, kind: true, fileName: true, size: true, createdAt: true, uploadedBy: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
       financeConfirmedBy: { select: { name: true } },
     },
   });
@@ -102,12 +110,12 @@ export async function financeAssetDetail(id: string, now: Date = new Date()): Pr
   const startOk = policy && start !== null;
   const monthsUsed = startOk ? Math.min(Math.max(asOf - start + 1, 0), policy.lifeMonths) : null;
 
-  type DocFile = { id: string; fileName: string; size: number | null };
+  type DocFile = { id: string; fileName: string; size: number | null; uploadedAt: string; uploadedBy: string | null };
   const bySlot = new Map<string, DocFile>();
   const others: Array<{ kind: string; title: string; file: DocFile | null }> = [];
   let attachmentCount = 0;
   for (const d of a.documents) {
-    const file = { id: d.id, fileName: d.fileName, size: d.size };
+    const file = { id: d.id, fileName: d.fileName, size: d.size, ...uploadStamp(d.createdAt, d.uploadedBy) };
     if (d.kind.startsWith("attachment:")) attachmentCount++; // the Attachments tab's, not a document slot
     else if (SLOT_KINDS.some((s) => s.kind === d.kind)) bySlot.set(d.kind, file); // newest wins
     else others.push({ kind: "other", title: d.kind === "other" ? "Other" : d.kind, file });

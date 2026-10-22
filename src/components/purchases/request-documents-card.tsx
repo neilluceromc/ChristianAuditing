@@ -19,7 +19,8 @@ export interface RequestDocumentRow {
   id: string;
   kind: string;
   fileName: string;
-  uploadedBy: string;
+  /** Null for a row nobody uploaded (system or import); rendered as "system" here, as before. */
+  uploadedBy: string | null;
   at: string;
   downloadHref: string;
 }
@@ -168,7 +169,7 @@ export function RequestDocumentsCard({
             return (
               <DocSlot
                 key={slot} kind={slot} required={invoiceRequired && slot === "invoice"} si={si ?? ""}
-                shown={doc ? { fileName: doc.fileName, detail: `${doc.uploadedBy} · ${doc.at}`, preview: `${doc.downloadHref}?inline=1` } : null}
+                shown={doc ? { fileName: doc.fileName, detail: `${doc.uploadedBy ?? "system"} · ${doc.at}`, preview: `${doc.downloadHref}?inline=1` } : null}
                 onPick={canUpload ? (file) => storeInSlot(slot, file) : undefined}
                 onRemove={canUpload && doc ? () => setRemoving({ slot, doc }) : undefined}
                 error={slotErrors[slot]} busy={busy.has(slot)}
@@ -199,7 +200,7 @@ export function RequestDocumentsCard({
                   <Tr key={d.id}>
                     <Td>{d.label}</Td>
                     <Td><span className="block max-w-[16rem] truncate" title={d.fileName}>{d.fileName}</span></Td>
-                    <Td>{d.uploadedBy}</Td>
+                    <Td>{d.uploadedBy ?? "system"}</Td>
                     <Td mono>{d.at}</Td>
                     <Td align="right"><a href={d.downloadHref} className="text-accent hover:underline">Download</a></Td>
                   </Tr>

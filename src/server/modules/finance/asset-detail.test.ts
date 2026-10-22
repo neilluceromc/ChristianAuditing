@@ -59,8 +59,8 @@ function asset(extra: Row = {}): Row {
     purchaseOrder: { id: "req1", refNo: "PR-2025-0012", requestedBy: { name: "Pia Lim" }, units: [{ qty: 3, unitPrice: "36000.00" }] },
     purchaseRecord: { id: "pr1", fees: "1500.00", quantity: 3 },
     documents: [
-      { id: "d1", kind: "invoice", fileName: "invoice.pdf", size: 120_000, createdAt: new Date("2026-01-01T00:00:00Z") },
-      { id: "d2", kind: "official-receipt", fileName: "or.png", size: null, createdAt: new Date("2026-01-02T00:00:00Z") },
+      { id: "d1", kind: "invoice", fileName: "invoice.pdf", size: 120_000, createdAt: new Date("2026-01-01T00:00:00Z"), uploadedBy: { name: "Ana Cruz" } },
+      { id: "d2", kind: "official-receipt", fileName: "or.png", size: null, createdAt: new Date("2026-01-02T00:00:00Z"), uploadedBy: null },
       { id: "d3", kind: "attachment:quotation", fileName: "quote.pdf", size: 9_000, createdAt: new Date("2026-02-01T00:00:00Z") },
       { id: "d4", kind: "attachment:photo", fileName: "box.jpg", size: 50_000, createdAt: new Date("2026-02-02T00:00:00Z") },
     ],
@@ -191,13 +191,17 @@ describe("financeAssetDetail — history sources (spec §4.5)", () => {
 });
 
 describe("financeAssetDetail — notes, attachments, documents", () => {
-  it("counts note threads (and open ones) and attachments; docs carry size; attachments are not document slots", async () => {
+  it("counts note threads (and open ones) and attachments; docs carry size and upload stamp; attachments are not document slots", async () => {
     const d = (await financeAssetDetail("a1", NOW))!;
     expect(d.noteCount).toBe(2);
     expect(d.openNoteCount).toBe(1);
     expect(d.attachmentCount).toBe(2);
-    expect(d.docs.find((x) => x.kind === "invoice")!.file).toEqual({ id: "d1", fileName: "invoice.pdf", size: 120_000 });
-    expect(d.docs.find((x) => x.kind === "official-receipt")!.file).toEqual({ id: "d2", fileName: "or.png", size: null });
+    expect(d.docs.find((x) => x.kind === "invoice")!.file).toEqual({
+      id: "d1", fileName: "invoice.pdf", size: 120_000, uploadedAt: "2026-01-01T00:00:00.000Z", uploadedBy: "Ana Cruz",
+    });
+    expect(d.docs.find((x) => x.kind === "official-receipt")!.file).toEqual({
+      id: "d2", fileName: "or.png", size: null, uploadedAt: "2026-01-02T00:00:00.000Z", uploadedBy: null,
+    });
     expect(d.docs.some((x) => x.file?.fileName === "quote.pdf")).toBe(false);
   });
 });

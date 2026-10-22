@@ -233,7 +233,8 @@ describe("NotesTab (spec §4.3, shared with the Inventory record)", () => {
 });
 
 const att = (id: string, over: Partial<AssetAttachmentView> = {}): AssetAttachmentView => ({
-  id, kind: "quotation", fileName: `${id}.pdf`, size: 1_536_000, createdAt: at("2026-10-19T02:00:00Z"), uploadedBy: "Ana Cruz", ...over,
+  id, kind: "quotation", fileName: `${id}.pdf`, size: 1_536_000, createdAt: at("2026-10-19T02:00:00Z"),
+  uploadedAt: "2026-10-19T02:00:00.000Z", uploadedBy: "Ana Cruz", ...over,
 });
 const hrefFor = (p: { ak?: string; att?: string | null }) => `/x?ak=${p.ak ?? "all"}&att=${p.att ?? ""}`;
 

@@ -28,7 +28,7 @@ const { default: AttachmentsPage, generateMetadata } = await import("./page");
 
 const file = (over: Partial<AssetAttachmentView>): AssetAttachmentView => ({
   id: "d1", kind: "proof-of-payment", fileName: "gcash.png", size: 120_000,
-  createdAt: new Date("2026-10-20T08:00:00Z"), uploadedBy: "Maria Reyes", ...over,
+  createdAt: new Date("2026-10-20T08:00:00Z"), uploadedAt: "2026-10-20T08:00:00.000Z", uploadedBy: "Maria Reyes", ...over,
 });
 
 const render = async (sp: Record<string, string> = {}) =>

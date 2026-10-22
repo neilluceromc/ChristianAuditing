@@ -20,7 +20,8 @@ export interface DocumentRow {
   kind: string;
   fileName: string;
   signed: boolean;
-  uploadedBy: string;
+  /** Null for a row nobody uploaded (system or import); rendered as "system" here, as before. */
+  uploadedBy: string | null;
   at: string;
   downloadHref: string;
 }
@@ -51,7 +52,7 @@ function DocList({ rows, canSign, onSign, label }: { rows: DocumentRow[]; canSig
             )
           )}
           <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
-            {doc.uploadedBy} · {doc.at}
+            {doc.uploadedBy ?? "system"} · {doc.at}
           </span>
         </li>
       ))}

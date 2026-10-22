@@ -1,3 +1,5 @@
+import { uploadStamp } from "@/lib/upload-meta";
+
 export interface AckItem { assetId: string; tag: string; model: string; serial: string | null }
 
 /** Held items the last signed form does not cover. With no form on file, all of them. */
@@ -17,4 +19,18 @@ export function uncoveredItems<A extends { assetId: string; tag: string }>(held:
 export function latestSigningDate(now: Date): string {
   const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
   return tomorrow.toISOString().slice(0, 10);
+}
+
+/**
+ * One signed form as the side card's Form tab lists it: its signed date, items and file name, plus when the file was
+ * uploaded (`createdAt`, ISO) and who recorded it (`recordedBy`'s name, or null) for the "Uploaded …" line. Only
+ * these reach the client — never the stored path or checksum.
+ */
+export function ackRow(row: {
+  id: string; signedAt: Date; items: unknown; fileName: string; createdAt: Date; recordedBy: { name: string } | null;
+}): { id: string; signedAt: Date; items: unknown; fileName: string; uploadedAt: string; uploadedBy: string | null } {
+  return {
+    id: row.id, signedAt: row.signedAt, items: row.items, fileName: row.fileName,
+    ...uploadStamp(row.createdAt, row.recordedBy),
+  };
 }

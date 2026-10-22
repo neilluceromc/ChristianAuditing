@@ -17,7 +17,8 @@ export interface SupplierDocumentRow {
   id: string;
   kind: string;
   fileName: string;
-  uploadedBy: string;
+  /** Null for a row nobody uploaded (system or import); rendered as "system" here, as before. */
+  uploadedBy: string | null;
   at: string;
   downloadHref: string;
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkUploadMeta, fileExtension, UPLOAD_MAX_BYTES, UPLOAD_TYPES } from "./upload-meta";
+import { checkUploadMeta, fileExtension, isPreviewable, PREVIEWABLE, UPLOAD_MAX_BYTES, UPLOAD_TYPES, uploadStamp } from "./upload-meta";
 import * as server from "@/server/uploads";
 import { slotFileAllowed } from "@/components/inventory/document-slots";
 
@@ -29,6 +29,37 @@ describe("upload-meta: the one client-safe upload check", () => {
   it("refuses a dotfile named like an extension, as the server always has", () => {
     expect(checkUploadMeta({ name: ".pdf", type: "application/pdf", size: 10 })).toBe("That type isn't allowed. Accepted: PDF, PNG, JPG.");
     expect(checkUploadMeta({ name: "pdf", type: "application/pdf", size: 10 })).toBe("That type isn't allowed. Accepted: PDF, PNG, JPG.");
+  });
+});
+
+describe("PREVIEWABLE: the one list of types a browser may show in place", () => {
+  it("is PDF, PNG and JPG — every upload type", () => {
+    expect([...PREVIEWABLE].sort()).toEqual([".jpeg", ".jpg", ".pdf", ".png"]);
+    for (const ext of Object.keys(UPLOAD_TYPES)) expect(PREVIEWABLE.has(ext), ext).toBe(true);
+  });
+
+  it("isPreviewable matches the extension case-insensitively, and nothing else", () => {
+    expect(isPreviewable("invoice.pdf")).toBe(true);
+    expect(isPreviewable("box.PNG")).toBe(true);
+    expect(isPreviewable("IMG_2041.JPG")).toBe(true);
+    expect(isPreviewable("scan.jpeg")).toBe(true);
+    expect(isPreviewable("quote.docx")).toBe(false);
+    expect(isPreviewable("notes.svg")).toBe(false);
+    expect(isPreviewable("page.html")).toBe(false);
+    expect(isPreviewable("noext")).toBe(false);
+    expect(isPreviewable(".pdf")).toBe(false);
+  });
+});
+
+describe("uploadStamp: when a listed file was uploaded, and by whom", () => {
+  it("gives the ISO time and the uploader's name", () => {
+    expect(uploadStamp(new Date("2026-10-22T01:41:00Z"), { name: "Ana Reyes" }))
+      .toEqual({ uploadedAt: "2026-10-22T01:41:00.000Z", uploadedBy: "Ana Reyes" });
+  });
+
+  it("gives a null uploader when there is none (a system or imported row)", () => {
+    expect(uploadStamp(new Date("2026-10-22T01:41:00Z"), null)).toEqual({ uploadedAt: "2026-10-22T01:41:00.000Z", uploadedBy: null });
+    expect(uploadStamp(new Date("2026-10-22T01:41:00Z"), undefined).uploadedBy).toBeNull();
   });
 });
 

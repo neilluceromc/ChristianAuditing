@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRecordAttachmentState, recordAttachmentsHref, recordTabItems, splitDocuments } from "./inventory-record";
+import { assetDocumentRow, parseRecordAttachmentState, recordAttachmentsHref, recordTabItems, splitDocuments } from "./inventory-record";
 
 const counts = { notes: 3, openNotes: 1, attachments: 2 };
 
@@ -71,5 +71,22 @@ describe("splitDocuments", () => {
     const { documents, attachments } = splitDocuments(rows);
     expect(documents.map((r) => r.id)).toEqual(["1", "3"]);
     expect(attachments.map((r) => r.id)).toEqual(["2", "4"]);
+  });
+});
+
+describe("assetDocumentRow (the Documents page loader; document preview Task 1)", () => {
+  const at = new Date("2026-10-22T01:41:00Z");
+  const doc = { id: "d1", kind: "invoice", fileName: "si.pdf", signed: false, createdAt: at };
+
+  it("carries the upload time (ISO) and the uploader's name, and keeps the date and the download link", () => {
+    expect(assetDocumentRow("a1", { ...doc, uploadedBy: { name: "Ana Reyes" } })).toEqual({
+      id: "d1", kind: "invoice", fileName: "si.pdf", signed: false,
+      uploadedAt: "2026-10-22T01:41:00.000Z", uploadedBy: "Ana Reyes", at: "22 Oct 2026",
+      downloadHref: "/inventory/a1/documents/d1/download",
+    });
+  });
+
+  it("a row nobody uploaded (system or import) has a null uploader", () => {
+    expect(assetDocumentRow("a1", { ...doc, uploadedBy: null }).uploadedBy).toBeNull();
   });
 });

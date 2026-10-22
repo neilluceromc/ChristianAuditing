@@ -1,16 +1,16 @@
-import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { readUpload } from "@/server/storage";
-import { contentDisposition, UPLOAD_TYPES } from "@/server/uploads";
+import { fileResponse } from "@/server/uploads";
 
 /**
  * Spec §3: unlike the asset document route this mirrors, there is no class
  * check here — any authenticated user may download a supplier document, so
  * requireUser() (redirects an unauthenticated caller) is the whole gate.
+ * `?inline=1` shows a PDF, PNG or JPG in place (`fileResponse`); anything else still downloads.
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string; docId: string }> },
 ) {
   await requireUser();
@@ -22,10 +22,5 @@ export async function GET(
   const bytes = await readUpload(doc.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });
 
-  return new Response(new Uint8Array(bytes), {
-    headers: {
-      "content-type": UPLOAD_TYPES[path.extname(doc.fileName).toLowerCase()] ?? "application/octet-stream",
-      "content-disposition": contentDisposition(doc.fileName),
-    },
-  });
+  return fileResponse(bytes, doc.fileName, req);
 }
