@@ -716,6 +716,28 @@ test.describe("the A3 form in a browser", () => {
       .toBeInViewport();
   });
 
+  test("at 1100×768 and 1000×768 the totals wrap under the cards: scrolling reaches them and Save, which takes a click", async ({ page }) => {
+    // re-review N1: wrapped, the card is static and uncapped (never squeezed to nothing by its distance down the page)
+    test.setTimeout(120_000);
+    await login(page, PURCHASING);
+    for (const width of [1100, 1000]) {
+      await page.setViewportSize({ width, height: 768 });
+      await newForm(page);
+      const items = (await page.locator("#po-items").boundingBox())!;
+      const totalsAt = (await page.locator("#po-totals").boundingBox())!;
+      expect(totalsAt.y, `${width}px: the totals wrap under the cards`).toBeGreaterThan(items.y + items.height);
+      const aside = page.getByRole("complementary", { name: "Invoice totals and save" });
+      expect(await aside.evaluate((el) => getComputedStyle(el).position), `${width}px: wrapped, the card isn't sticky`).toBe("static");
+      expect((await aside.boundingBox())!.height, `${width}px: the whole card shows, not a sliver`).toBeGreaterThan(800);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await expect(page.locator("#po-total-totalSales")).toBeAttached();
+      await expect(saveButton(page), `${width}px: scrolled to the end, Save is on screen`).toBeInViewport({ ratio: 1 });
+      await saveButton(page).click({ trial: true }); // nothing covers it: it would take the click
+      await page.locator("#po-total-totalSales").scrollIntoViewIfNeeded();
+      await expect(page.locator("#po-total-totalSales"), `${width}px: the first figure can be reached`).toBeInViewport();
+    }
+  });
+
   test("the category footer: Tab from the field reaches Create, Escape from the footer closes the list and returns focus", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, PURCHASING);

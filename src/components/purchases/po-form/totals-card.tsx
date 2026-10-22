@@ -30,11 +30,17 @@ const clean = (v: string) => v.replace(/[^0-9.,]/g, "");
  * A3's right-hand card: the invoice totals Purchasing types (nothing is computed — spec §2.9), amber where a figure
  * doesn't add up with what it expected, a status line, then "When you save", "Before you save" and the Save button.
  *
- * Final review I1: beside the cards (900 px and up) the card is taller than a 768–800 px laptop screen, so there it is
- * capped to the screen and scrolls inside itself, with the reply, Save and Cancel pinned to its bottom edge — Save is
- * always in view. The cap is the screen less where the card's top sits (`--totals-top`: under the page header on
- * load, 20 px once it sticks), so Save is in view before any scroll too. Stacked (under 900 px) it is unchanged: the
- * page scrolls and Save sits at the card's end.
+ * Final review I1: beside the cards the card is taller than a 768–800 px laptop screen, so there it is capped to the
+ * screen and scrolls inside itself, with the reply, Save and Cancel pinned to its bottom edge — Save is always in
+ * view. The cap is the screen less where the card's top sits (`--totals-top`: under the page header on load, 20 px once
+ * it sticks), so Save is in view before any scroll too.
+ *
+ * Re-review N1: "beside the cards" is the form row's own width, not the screen's. The row (po-form.tsx) is a container,
+ * and the card sits beside the cards only while it is at least 740 px wide (420 + 20 + 300), so every sticky, cap and
+ * pin rule is `@min-[740px]:`. Wrapped under the cards (a 1000–1290 px window with the app sidebar, say) the card is
+ * static and uncapped, and the page scrolls to Save as on a phone. The measure applies the cap only while the card is
+ * sticky, so a wrapped card is never capped to nothing. N2: it re-measures on scroll, resize and any change in the
+ * page's size (a banner inserted above the form moves the card without a scroll).
  */
 export function TotalsCard({
   totals, setTotal, problems, status, statusText, errors, flaggedTotals, whenYouSave, checklist, saveLabel, pending, onSave,
@@ -66,16 +72,25 @@ export function TotalsCard({
     let frame = 0;
     const measure = () => {
       frame = 0;
+      // beside the cards (sticky) only: a wrapped card sits far down the page and must not be capped by that offset
+      if (getComputedStyle(aside).position !== "sticky") {
+        aside.style.removeProperty("--totals-top");
+        return;
+      }
       aside.style.setProperty("--totals-top", `${Math.max(20, Math.round(aside.getBoundingClientRect().top))}px`);
     };
     const queue = () => { if (!frame) frame = requestAnimationFrame(measure); };
     measure();
     window.addEventListener("scroll", queue, { passive: true, capture: true });
     window.addEventListener("resize", queue);
+    // the page around the form changing size (a banner above it, the row wrapping) moves the card without a scroll
+    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(queue);
+    resized?.observe(aside.closest("main") ?? document.body);
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("scroll", queue, { capture: true });
       window.removeEventListener("resize", queue);
+      resized?.disconnect();
     };
   }, []);
 
@@ -90,8 +105,8 @@ export function TotalsCard({
       className={cn(
         "flex flex-col gap-3.5",
         // the room for focus rings (pr-1 / -mr-1) keeps the overflow from clipping them
-        "min-[900px]:-mr-1 min-[900px]:max-h-[calc(100dvh_-_var(--totals-top,1.25rem)_-_1.25rem)] min-[900px]:overflow-y-auto",
-        "min-[900px]:overscroll-contain min-[900px]:pr-1",
+        "@min-[740px]:-mr-1 @min-[740px]:max-h-[calc(100dvh_-_var(--totals-top,1.25rem)_-_1.25rem)] @min-[740px]:overflow-y-auto",
+        "@min-[740px]:overscroll-contain @min-[740px]:pr-1",
         className,
       )}
     >
@@ -213,8 +228,8 @@ export function TotalsCard({
           className={cn(
             "flex flex-col gap-3",
             // pinned to the scrolling card's bottom edge, over the figures that scroll under it
-            "min-[900px]:sticky min-[900px]:bottom-0 min-[900px]:z-10 min-[900px]:-mx-5 min-[900px]:-mb-4 min-[900px]:rounded-b-(--radius-card)",
-            "min-[900px]:border-t min-[900px]:border-border-faint min-[900px]:bg-surface min-[900px]:px-5 min-[900px]:pb-4 min-[900px]:pt-3",
+            "@min-[740px]:sticky @min-[740px]:bottom-0 @min-[740px]:z-10 @min-[740px]:-mx-5 @min-[740px]:-mb-4 @min-[740px]:rounded-b-(--radius-card)",
+            "@min-[740px]:border-t @min-[740px]:border-border-faint @min-[740px]:bg-surface @min-[740px]:px-5 @min-[740px]:pb-4 @min-[740px]:pt-3",
           )}
         >
           {reply}

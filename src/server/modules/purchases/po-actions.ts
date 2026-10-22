@@ -23,7 +23,6 @@ import { PO_DOCUMENT_SLOTS, type PoDocumentSlot } from "@/lib/documents";
 import { uniqueTarget } from "@/server/prisma-errors";
 import { validateUpload } from "@/server/uploads";
 import { storePoFiles, type PoFile, type StoredFile } from "./po-files";
-import { cuid } from "@/server/cuid";
 import { moneyForAsset } from "@/lib/po-money";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
 import { returnOne, undoOne } from "@/server/modules/finance/review-writes";
@@ -490,9 +489,9 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
     if (owner) return validationError({ poNumber: usedOn(d.poNumber, owner.refNo) });
   }
 
-  // final review M3: a new PO's id is minted now (shaped like the schema's cuid()), so its files are stored under
-  // requests/<poId>/ like every other PO document, and the create writes the PO with that id
-  const poId = d.id ?? cuid();
+  // final review M3: a new PO's id is minted now, so its files are stored under requests/<poId>/ like every other PO
+  // document, and the create writes the PO with that id. A plain UUID (re-review): nothing checks an id's shape.
+  const poId = d.id ?? randomUUID();
   let store: Awaited<ReturnType<typeof storePoFiles>>;
   try {
     store = await storePoFiles(poId, files);

@@ -917,9 +917,9 @@ describe("PO form redesign (A3): save with documents, PO number, totals, legacy 
       [id, "invoice", "si.pdf", PAT.id], [id, "warranty-slip", "ws.pdf", PAT.id],
     ]);
     expect(docs.map((d) => d.path).sort()).toEqual(stored().sort());
-    // final review M3: the PO's id is minted before its files are stored (a cuid, as the schema's default), so a new
-    // PO's documents live under requests/<poId>/ like every other PO document
-    expect(id).toMatch(/^c[a-z0-9]{24}$/);
+    // final review M3: the PO's id is minted before its files are stored, so a new PO's documents live under
+    // requests/<poId>/ like every other PO document
+    expect(id).not.toBe("");
     expect(stored().every((p) => p.startsWith(`requests/${id}/`))).toBe(true);
     expect(audits("document.uploaded")).toHaveLength(2);
     expect(audits("document.uploaded").every((a) => a.entityId === id && a.source === "web")).toBe(true);

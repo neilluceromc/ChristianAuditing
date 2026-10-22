@@ -128,11 +128,11 @@ export function ComboPopup({
   );
 
   // Nothing matches: the words sit beside the (empty) listbox, never in it — a listbox owns only options (axe
-  // aria-required-children / listitem were critical and serious with them as a row of it). Final review I2: they are a
-  // polite status the input points at (comboDescribedBy), and the same node stays while the list is open and empty, so
-  // "Searching…" turning into "No matches." or "Couldn't search" is announced. A list with options is unchanged.
+  // aria-required-children / listitem were critical and serious with them as a row of it). The input points at them
+  // (comboDescribedBy); the announcing is EntityCombobox's own ComboStatus, which exists before the list empties (re-review
+  // I2), so these words are no live region themselves. A list with options is unchanged.
   const empty = shown.length === 0
-    ? <p id={`${listId}-empty`} role="status" className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</p>
+    ? <p id={`${listId}-empty`} className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</p>
     : null;
 
   if (!hasFooter && empty) {
@@ -165,6 +165,20 @@ export function ComboPopup({
       <div className="border-t border-border p-1">{footerNode}</div>
     </div>
   );
+}
+
+/**
+ * What the combobox's live region says (re-review I2): the empty words while the list is open and shows nothing, ""
+ * otherwise. The region (ComboStatus) is always rendered, so typing from a list with options to nothing matching
+ * changes its text, which screen readers announce; a region inserted already filled often goes unheard.
+ */
+export function comboStatusText({ open, count, emptyText }: { open: boolean; count: number; emptyText?: string }): string {
+  return open && count === 0 ? (emptyText ?? "No matches.") : "";
+}
+
+/** The combobox's polite live region, beside the input and outside the popup: visually hidden, always there. */
+export function ComboStatus({ text }: { text: string }) {
+  return <span role="status" className="sr-only">{text}</span>;
 }
 
 export function EntityCombobox({
@@ -289,6 +303,7 @@ export function EntityCombobox({
 
         }}
       />
+      <ComboStatus text={comboStatusText({ open, count: shown.length, emptyText })} />
       {open && (
         <ComboPopup
           listId={listId}

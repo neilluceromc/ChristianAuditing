@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { cn } from "@/lib/cn";
 import { headingBefore } from "@/lib/combo-groups";
-import { ComboPopup, comboDescribedBy, type ComboOption } from "./entity-combobox";
+import { ComboPopup, ComboStatus, comboDescribedBy, comboStatusText, type ComboOption } from "./entity-combobox";
 
 /*
  * The listbox is a presentational component so its markup can be rendered closed-over-open in a node test.
@@ -69,7 +69,7 @@ describe("ComboPopup: existing callers", () => {
   });
   it("renders the empty and busy states with the words beside the empty listbox (Task 9: axe), not as a row of it", () => {
     const html = render({ shown: [], emptyText: "Type to search", busy: true });
-    expect(html).toContain('<ul id="L" role="listbox" aria-busy="true"></ul><p id="L-empty" role="status" class="px-2 py-1.5 text-xs text-fg-muted">Type to search</p>');
+    expect(html).toContain('<ul id="L" role="listbox" aria-busy="true"></ul><p id="L-empty" class="px-2 py-1.5 text-xs text-fg-muted">Type to search</p>');
     expect(render({ shown: [] })).toContain("</ul><p");
     expect(render({ shown: [] })).toContain(">No matches.</p>");
     expect(legacyList([], 0, 0, null)).toContain("<li"); // what it was
@@ -80,14 +80,28 @@ describe("ComboPopup: existing callers", () => {
       expect(html.indexOf("No matches.")).toBeGreaterThan(html.indexOf("</ul>"));
     }
   });
-  it("announces the empty words: a polite status the input can point at, with or without a footer (final review I2)", () => {
+  it("shows the empty words the input can point at, with or without a footer; the popup itself is no live region (I2)", () => {
     for (const footer of [undefined, () => <button type="button">Create</button>]) {
       for (const [emptyText, words] of [[undefined, "No matches."], ["Searching…", "Searching…"], ["No vendor matches.", "No vendor matches."]] as const) {
         const html = render({ shown: [], emptyText, footer });
-        expect(html).toContain(`<p id="L-empty" role="status" class="px-2 py-1.5 text-xs text-fg-muted">${words}</p>`);
-        expect(html.match(/role="status"/g)).toHaveLength(1);
+        expect(html).toContain(`<p id="L-empty" class="px-2 py-1.5 text-xs text-fg-muted">${words}</p>`);
+        // announced by EntityCombobox's own status beside the input (ComboStatus), never twice
+        expect(html).not.toContain('role="status"');
       }
     }
+  });
+  it("the status beside the input exists before the list empties, and its text changes when it does (re-review I2)", () => {
+    // typing in a list that shows options until nothing matches: the same live region, empty, then the words
+    const withOptions = renderToStaticMarkup(<ComboStatus text={comboStatusText({ open: true, count: 2 })} />);
+    const nothingMatches = renderToStaticMarkup(<ComboStatus text={comboStatusText({ open: true, count: 0 })} />);
+    expect(withOptions).toBe('<span role="status" class="sr-only"></span>');
+    expect(nothingMatches).toBe('<span role="status" class="sr-only">No matches.</span>');
+    // the caller's own words, and the server-searched states as they change
+    expect(comboStatusText({ open: true, count: 0, emptyText: "Searching…" })).toBe("Searching…");
+    expect(comboStatusText({ open: true, count: 0, emptyText: "Couldn't search" })).toBe("Couldn't search");
+    // closed, or back to options: silent again
+    expect(comboStatusText({ open: false, count: 0, emptyText: "No vendor matches." })).toBe("");
+    expect(comboStatusText({ open: true, count: 1, emptyText: "No vendor matches." })).toBe("");
   });
   it("adds no status, and changes nothing, while there are options (final review I2)", () => {
     const shown = [plain("Alpha", { sub: "A-1" }), plain("Beta")];

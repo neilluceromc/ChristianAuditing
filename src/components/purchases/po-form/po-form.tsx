@@ -335,8 +335,9 @@ export function PoForm({
         <SectionRail done={done} className="shrink-0 min-[900px]:sticky min-[900px]:top-5 min-[900px]:w-[210px]" />
 
         {/* The cards' basis (420px) keeps the totals column beside them from a 1280px laptop with the app sidebar and
-            the rail open (420 + 20 + 300 fits the 758px left there); narrower, the totals wrap under the cards. */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-5">
+            the rail open (420 + 20 + 300 fits the 758px left there); narrower, the totals wrap under the cards. The row
+            is a container: the totals card is sticky and capped only at @min-[740px], where it sits beside them. */}
+        <div className="@container flex min-w-0 flex-1 flex-wrap items-start gap-5">
           <div className="flex min-w-0 flex-[999_1_420px] flex-col gap-4">
             <VendorCard
               vendors={vendors} vendorId={draft.vendorId} onChange={(id) => set("vendorId", id)}
@@ -410,7 +411,7 @@ export function PoForm({
           </div>
 
           <TotalsCard
-            className="min-w-0 max-w-full flex-[1_1_300px] min-[900px]:sticky min-[900px]:top-5"
+            className="min-w-0 max-w-full flex-[1_1_300px] @min-[740px]:sticky @min-[740px]:top-5"
             totals={draft.totals}
             setTotal={(k, v) => setDraft((d) => ({ ...d, totals: { ...d.totals, [k]: v } }))}
             problems={review.problems} status={review.status} statusText={review.text}
