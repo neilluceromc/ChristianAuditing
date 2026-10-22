@@ -617,7 +617,7 @@ test.describe("the A3 form in a browser", () => {
     expect(await db.requestDocument.count({ where: { orderId: id, kind: { in: ["official-receipt", "delivery-receipt"] } } })).toBe(2);
   });
 
-  test("after a failed save, focus goes to what's wrong: the qty input, the refused file's Replace, the rate-limit notice", async ({ page }) => {
+  test("after a failed save, focus goes to what's wrong: the qty input, the refused file's Replace (a SIMULATED server refusal), the rate-limit notice", async ({ page }) => {
     test.setTimeout(180_000);
     await login(page, PURCHASING);
     await newForm(page);
@@ -635,8 +635,10 @@ test.describe("the A3 form in a browser", () => {
     await expect(qty).toBeInViewport();
     await qty.fill("2");
 
-    // the server refuses the held sales invoice: Replace takes focus (not Preview). The browser's own check passes the
-    // same rules, so the file is retyped as it goes into the save's FormData — the server sees an image/gif named .png.
+    // SIMULATED server refusal: the server refuses the held sales invoice and Replace takes focus (not Preview). The
+    // browser's own check applies the same rules, so no real file can reach this path: the page retypes the file as it
+    // goes into the save's FormData — the server sees an image/gif named .png. The real FormData.set is put back in a
+    // finally, so a failure here can't leave the patch in place for the rest of the test.
     await page.evaluate(() => {
       const w = window as unknown as { __realSet?: FormData["set"] };
       w.__realSet = FormData.prototype.set;
@@ -647,13 +649,16 @@ test.describe("the A3 form in a browser", () => {
         return fileName === undefined ? real.call(this, name, value) : real.call(this, name, value, fileName);
       } as FormData["set"];
     });
-    await saveButton(page).click();
-    await expect(slot(page, "invoice")).toContainText("That type isn't allowed. Accepted: PDF, PNG, JPG.");
-    await expect(slot(page, "invoice").getByRole("button", { name: "Replace" })).toBeFocused();
-    await expect(slot(page, "invoice").getByRole("button", { name: "Replace" })).toBeInViewport();
-    await page.evaluate(() => {
-      FormData.prototype.set = (window as unknown as { __realSet: FormData["set"] }).__realSet;
-    });
+    try {
+      await saveButton(page).click();
+      await expect(slot(page, "invoice")).toContainText("That type isn't allowed. Accepted: PDF, PNG, JPG.");
+      await expect(slot(page, "invoice").getByRole("button", { name: "Replace" })).toBeFocused();
+      await expect(slot(page, "invoice").getByRole("button", { name: "Replace" })).toBeInViewport();
+    } finally {
+      await page.evaluate(() => {
+        FormData.prototype.set = (window as unknown as { __realSet: FormData["set"] }).__realSet;
+      });
+    }
 
     // rate-limited: the notice comes into view and takes focus
     const user = await db.user.findUniqueOrThrow({ where: { email: PURCHASING } });
