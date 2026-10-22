@@ -697,6 +697,20 @@ test.describe("the A3 form in a browser", () => {
     }
   });
 
+  test("at 1366×768 the Save button is on screen on load, and stays there scrolled down to the items", async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await login(page, PURCHASING);
+    await newForm(page);
+    // the totals card is taller than the screen: it scrolls inside itself, with Save pinned to its bottom edge
+    await expect(saveButton(page), "on load, before any page scroll").toBeInViewport({ ratio: 1 });
+    await expect(page.locator("#po-total-totalSales")).toBeInViewport();
+    await page.evaluate(() => window.scrollTo(0, document.querySelector("#po-items")!.getBoundingClientRect().top + window.scrollY - 40));
+    await expect(saveButton(page), "scrolled down to the items").toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole("complementary", { name: "Invoice totals and save" }).getByRole("link", { name: "Cancel", exact: true }))
+      .toBeInViewport();
+  });
+
   test("the category footer: Tab from the field reaches Create, Escape from the footer closes the list and returns focus", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, PURCHASING);

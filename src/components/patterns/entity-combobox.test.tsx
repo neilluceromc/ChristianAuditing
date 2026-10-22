@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { cn } from "@/lib/cn";
 import { headingBefore } from "@/lib/combo-groups";
-import { ComboPopup, type ComboOption } from "./entity-combobox";
+import { ComboPopup, comboDescribedBy, type ComboOption } from "./entity-combobox";
 
 /*
  * The listbox is a presentational component so its markup can be rendered closed-over-open in a node test.
@@ -69,7 +69,7 @@ describe("ComboPopup: existing callers", () => {
   });
   it("renders the empty and busy states with the words beside the empty listbox (Task 9: axe), not as a row of it", () => {
     const html = render({ shown: [], emptyText: "Type to search", busy: true });
-    expect(html).toContain('<ul id="L" role="listbox" aria-busy="true"></ul><p class="px-2 py-1.5 text-xs text-fg-muted">Type to search</p>');
+    expect(html).toContain('<ul id="L" role="listbox" aria-busy="true"></ul><p id="L-empty" role="status" class="px-2 py-1.5 text-xs text-fg-muted">Type to search</p>');
     expect(render({ shown: [] })).toContain("</ul><p");
     expect(render({ shown: [] })).toContain(">No matches.</p>");
     expect(legacyList([], 0, 0, null)).toContain("<li"); // what it was
@@ -79,6 +79,29 @@ describe("ComboPopup: existing callers", () => {
       expect(/<ul[^>]*role="listbox"[^>]*>(.*?)<\/ul>/.exec(html)![1]).toBe("");
       expect(html.indexOf("No matches.")).toBeGreaterThan(html.indexOf("</ul>"));
     }
+  });
+  it("announces the empty words: a polite status the input can point at, with or without a footer (final review I2)", () => {
+    for (const footer of [undefined, () => <button type="button">Create</button>]) {
+      for (const [emptyText, words] of [[undefined, "No matches."], ["Searching…", "Searching…"], ["No vendor matches.", "No vendor matches."]] as const) {
+        const html = render({ shown: [], emptyText, footer });
+        expect(html).toContain(`<p id="L-empty" role="status" class="px-2 py-1.5 text-xs text-fg-muted">${words}</p>`);
+        expect(html.match(/role="status"/g)).toHaveLength(1);
+      }
+    }
+  });
+  it("adds no status, and changes nothing, while there are options (final review I2)", () => {
+    const shown = [plain("Alpha", { sub: "A-1" }), plain("Beta")];
+    expect(render({ shown })).toBe(legacyList(shown, 0, 0, null));
+    expect(render({ shown })).not.toContain("L-empty");
+    expect(render({ shown, footer: () => <button type="button">Go</button> })).not.toContain('role="status"');
+  });
+  it("the input is described by the empty words only while the list is open and empty (final review I2)", () => {
+    expect(comboDescribedBy(undefined, "L", { open: true, empty: true })).toBe("L-empty");
+    expect(comboDescribedBy("hint err", "L", { open: true, empty: true })).toBe("hint err L-empty");
+    expect(comboDescribedBy("hint", "L", { open: true, empty: false })).toBe("hint");
+    expect(comboDescribedBy("hint", "L", { open: false, empty: true })).toBe("hint");
+    expect(comboDescribedBy(undefined, "L", { open: false, empty: true })).toBeUndefined();
+    expect(comboDescribedBy("", "L", { open: true, empty: false })).toBeUndefined();
   });
   it("adds no footer wrapper without a footer", () => {
     expect(render({ shown: [plain("Alpha")] }).startsWith('<ul id="L" role="listbox"')).toBe(true);

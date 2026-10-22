@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { TotalKey } from "@/lib/po-totals";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,12 @@ const clean = (v: string) => v.replace(/[^0-9.,]/g, "");
 /**
  * A3's right-hand card: the invoice totals Purchasing types (nothing is computed — spec §2.9), amber where a figure
  * doesn't add up with what it expected, a status line, then "When you save", "Before you save" and the Save button.
+ *
+ * Final review I1: beside the cards (900 px and up) the card is taller than a 768–800 px laptop screen, so there it is
+ * capped to the screen and scrolls inside itself, with the reply, Save and Cancel pinned to its bottom edge — Save is
+ * always in view. The cap is the screen less where the card's top sits (`--totals-top`: under the page header on
+ * load, 20 px once it sticks), so Save is in view before any scroll too. Stacked (under 900 px) it is unchanged: the
+ * page scrolls and Save sits at the card's end.
  */
 export function TotalsCard({
   totals, setTotal, problems, status, statusText, errors, flaggedTotals, whenYouSave, checklist, saveLabel, pending, onSave,
@@ -53,12 +59,42 @@ export function TotalsCard({
   strict: boolean;
   className?: string;
 }) {
+  const asideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const aside = asideRef.current;
+    if (!aside) return;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      aside.style.setProperty("--totals-top", `${Math.max(20, Math.round(aside.getBoundingClientRect().top))}px`);
+    };
+    const queue = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    measure();
+    window.addEventListener("scroll", queue, { passive: true, capture: true });
+    window.addEventListener("resize", queue);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", queue, { capture: true });
+      window.removeEventListener("resize", queue);
+    };
+  }, []);
+
   const tone = STATUS_TONE[status];
   const ring = flaggedTotals ? RING : undefined;
   const err = (k: TotalKey) => errors[`totals.${k}`];
 
   return (
-    <aside aria-label="Invoice totals and save" className={cn("flex flex-col gap-3.5", className)}>
+    <aside
+      ref={asideRef}
+      aria-label="Invoice totals and save"
+      className={cn(
+        "flex flex-col gap-3.5",
+        // the room for focus rings (pr-1 / -mr-1) keeps the overflow from clipping them
+        "min-[900px]:-mr-1 min-[900px]:max-h-[calc(100dvh_-_var(--totals-top,1.25rem)_-_1.25rem)] min-[900px]:overflow-y-auto",
+        "min-[900px]:overscroll-contain min-[900px]:pr-1",
+        className,
+      )}
+    >
       <section
         id="po-totals" aria-labelledby="po-totals-h"
         className="flex scroll-mt-5 flex-col gap-3 rounded-(--radius-card) border border-border bg-surface px-4 pb-4 pt-[18px] shadow-card sm:px-5"
@@ -173,10 +209,18 @@ export function TotalsCard({
           </ul>
         </div>
 
-        {reply}
-
-        <Button variant="primary" size="lg" className="w-full" loading={pending} onClick={onSave}>{saveLabel}</Button>
-        <ButtonLink href={cancelHref} className="w-full">Cancel</ButtonLink>
+        <div
+          className={cn(
+            "flex flex-col gap-3",
+            // pinned to the scrolling card's bottom edge, over the figures that scroll under it
+            "min-[900px]:sticky min-[900px]:bottom-0 min-[900px]:z-10 min-[900px]:-mx-5 min-[900px]:-mb-4 min-[900px]:rounded-b-(--radius-card)",
+            "min-[900px]:border-t min-[900px]:border-border-faint min-[900px]:bg-surface min-[900px]:px-5 min-[900px]:pb-4 min-[900px]:pt-3",
+          )}
+        >
+          {reply}
+          <Button variant="primary" size="lg" className="w-full" loading={pending} onClick={onSave}>{saveLabel}</Button>
+          <ButtonLink href={cancelHref} className="w-full">Cancel</ButtonLink>
+        </div>
       </section>
     </aside>
   );

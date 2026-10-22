@@ -23,6 +23,15 @@ const FOOTED_CLASS = "absolute z-40 mt-1 w-full overflow-hidden rounded-(--radiu
 const POPUP_ANIMATION = { animation: "fade var(--dur-2) var(--ease-std)" };
 
 /**
+ * The input's aria-describedby (final review I2): the caller's own ids, plus the popup's empty words while the list is
+ * open and shows nothing, so "No matches." / "Searching…" is read with the field as well as announced.
+ */
+export function comboDescribedBy(describedBy: string | undefined, listId: string, state: { open: boolean; empty: boolean }) {
+  const ids = [describedBy, state.open && state.empty ? `${listId}-empty` : undefined].filter(Boolean).join(" ");
+  return ids || undefined;
+}
+
+/**
  * The open dropdown: the listbox and, when `footer` yields something, an action area under it. Presentational
  * (no state, no hooks) so its markup can be rendered open in a node test. Without a footer the markup is the
  * original `<ul>`; with one, the `<ul>` sits in a wrapper beside the footer — buttons never live inside a listbox.
@@ -119,8 +128,12 @@ export function ComboPopup({
   );
 
   // Nothing matches: the words sit beside the (empty) listbox, never in it — a listbox owns only options (axe
-  // aria-required-children / listitem were critical and serious with them as a row of it).
-  const empty = shown.length === 0 ? <p className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</p> : null;
+  // aria-required-children / listitem were critical and serious with them as a row of it). Final review I2: they are a
+  // polite status the input points at (comboDescribedBy), and the same node stays while the list is open and empty, so
+  // "Searching…" turning into "No matches." or "Couldn't search" is announced. A list with options is unchanged.
+  const empty = shown.length === 0
+    ? <p id={`${listId}-empty`} role="status" className="px-2 py-1.5 text-xs text-fg-muted">{emptyText ?? "No matches."}</p>
+    : null;
 
   if (!hasFooter && empty) {
     return (
@@ -257,7 +270,7 @@ export function EntityCombobox({
         aria-controls={listId}
         aria-autocomplete="list"
         aria-activedescendant={open && shown[active] ? `${listId}-${shown[active].value || "none"}` : undefined}
-        aria-describedby={describedBy}
+        aria-describedby={comboDescribedBy(describedBy, listId, { open, empty: shown.length === 0 })}
         aria-invalid={invalid || undefined}
         className={fieldClasses(invalid)}
         placeholder={placeholder}
