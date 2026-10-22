@@ -20,7 +20,9 @@ const ROWS: ReadonlyArray<{ key: Exclude<TotalKey, "totalAmountDue">; label: str
   { key: "addVat", label: "Add: VAT" },
 ];
 
-const STATUS_TONE: Record<TotalsStatus, "neutral" | "settled" | "attention"> = { empty: "neutral", ok: "settled", off: "attention" };
+const STATUS_TONE: Record<TotalsStatus, "neutral" | "settled" | "attention"> = {
+  empty: "neutral", partial: "neutral", ok: "settled", off: "attention",
+};
 
 const clean = (v: string) => v.replace(/[^0-9.,]/g, "");
 

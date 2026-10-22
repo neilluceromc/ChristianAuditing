@@ -294,6 +294,17 @@ describe("task 6 review, minor 7: a legacy PO's partial totals", () => {
 
   it("partial totals that add up so far, with no total amount due yet, ask for it", () => {
     const partial = owner({ totals: { ...emptyTotals(), totalSales: "9,100.00" } });
-    expect(totalsReview(partial)).toMatchObject({ status: "off", text: "Type the total amount due from the invoice.", problems: {} });
+    expect(totalsReview(partial)).toMatchObject({ status: "partial", text: "Type the total amount due from the invoice.", problems: {} });
+  });
+
+  it("fix round 1: \"partial\" (nothing wrong yet, not complete) is neutral guidance, and a legacy PO's partial totals aren't done", () => {
+    const partial = owner({ totals: { ...emptyTotals(), totalSales: "9,100.00", lessVat: "975.00", netOfVat: "8,125.00" } });
+    expect(totalsReview(partial)).toMatchObject({ status: "partial", text: "Type the total amount due from the invoice.", problems: {} });
+    const legacy = ctx({ legacy: true });
+    expect(sectionsDone(partial, legacy).totals).toBe(false);
+    expect(checklist(partial, legacy).find((c) => c.label === "Totals add up")).toMatchObject({ done: false });
+    expect(sectionsDone(partial, ctx()).totals).toBe(false);
+    // a line that is wrong is still "off", with or without a total amount due
+    expect(totalsReview(owner({ totals: { ...emptyTotals(), totalSales: "9,000.00" } })).status).toBe("off");
   });
 });

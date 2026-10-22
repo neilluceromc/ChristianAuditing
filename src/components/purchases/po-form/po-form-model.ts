@@ -110,10 +110,12 @@ function itemFacts(d: PoDraft, ctx: DraftContext) {
   };
 }
 
-export type TotalsStatus = "empty" | "ok" | "off";
+/** "partial": something is typed and nothing is wrong yet, but it isn't complete (no total amount due) — neutral. */
+export type TotalsStatus = "empty" | "ok" | "off" | "partial";
 
 const STATUS_TEXT: Record<TotalsStatus, string> = {
   empty: "Type the total amount due from the invoice.",
+  partial: "Type the total amount due from the invoice.",
   ok: "The figures add up, and the items match total sales.",
   off: "Some figures don't add up — check the highlighted lines against the invoice. You can still save if the invoice itself is off; Finance will see the note.",
 };
@@ -130,12 +132,11 @@ export function totalsReview(d: PoDraft): {
   const result = checkTotals(items, typed);
   const problems: Partial<Record<TotalKey, string>> = { ...result.problems };
   for (const k of TOTAL_KEYS) if (Number.isNaN(typed[k])) problems[k] = "Type an amount, like 9,100.00";
-  // "empty" only while nothing is typed (task 6 review): partial totals that don't add up are "off", even on a legacy
-  // PO with no total amount due. Typed figures that are fine so far, with no total amount due yet, still ask for it.
+  // "empty" only while nothing is typed (task 6 review); "off" once a line has a problem; "partial" (neutral) while
+  // what is typed is fine so far but not complete — so a legacy PO's partial totals don't count as done either.
   const blank = TOTAL_KEYS.every((k) => typed[k] === null);
-  const status: TotalsStatus = blank ? "empty" : result.ok ? "ok" : "off";
-  const asksForTotal = status === "off" && typed.totalAmountDue === null && Object.keys(problems).length === 0;
-  return { items, status, text: asksForTotal ? STATUS_TEXT.empty : STATUS_TEXT[status], problems };
+  const status: TotalsStatus = blank ? "empty" : result.ok ? "ok" : Object.keys(problems).length > 0 ? "off" : "partial";
+  return { items, status, text: STATUS_TEXT[status], problems };
 }
 
 /** The rail's ticks: each section is done when what it asks for is all there (guidance only). */

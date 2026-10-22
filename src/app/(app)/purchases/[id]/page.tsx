@@ -10,7 +10,7 @@ import { poControls } from "@/lib/po-controls";
 import { poFieldWords } from "@/lib/po-send-back";
 import { bounceBack, stepperModel } from "@/lib/purchase-thread";
 import { canAttachToRequest } from "@/lib/supplier-access";
-import { fmtDate, fmtDateTime } from "@/lib/format";
+import { fmtDate, fmtDateTime, fmtMoneyExact } from "@/lib/format";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -97,7 +97,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         }
       />
       <p className="-mt-2 pb-4 font-mono text-[11px] text-fg-muted">
-        saved by {po.requester} · {fmtDate(po.createdAt)} · {po.units.length} line{po.units.length === 1 ? "" : "s"} · {po.total}
+        saved by {po.requester} · {fmtDate(po.createdAt)} · {po.units.length} line{po.units.length === 1 ? "" : "s"} · {fmtMoneyExact(po.totalValue)}
         {" "}· for {po.department?.name ?? "no department"}
         {po.reviewedBy ? ` · IT-reviewed by ${po.reviewedBy}` : ""}
       </p>
