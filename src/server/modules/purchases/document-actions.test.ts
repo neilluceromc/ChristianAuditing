@@ -10,9 +10,10 @@ const h = vi.hoisted(() => ({
   po: null as { id: string; state: string; refNo?: string } | null,
   docs: [] as Array<Record<string, unknown>>,
   audits: [] as Array<Record<string, unknown>>,
+  revalidated: [] as string[],
 }));
 
-vi.mock("next/cache", () => ({ revalidatePath: () => undefined }));
+vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
 vi.mock("@/server/auth/guards", () => ({ actionUser: async () => h.user }));
 vi.mock("@/server/rate-limit", () => ({ checkRate: async () => ({ allowed: true, retryAfterSec: 0 }) }));
 vi.mock("@/server/audit", () => ({ writeAudit: async (_tx: unknown, e: Record<string, unknown>) => { h.audits.push(e); } }));
@@ -64,6 +65,7 @@ beforeEach(() => {
   h.po = { id: "po-1", state: "WITH_IT" };
   h.docs = [];
   h.audits = [];
+  h.revalidated = [];
 });
 
 describe("uploadPoDocument", () => {
@@ -153,6 +155,18 @@ describe("replacePoDocument and removePoDocument (PO form redesign, spec §5b.1)
     const again = await removePoDocument({ documentId: "doc-1" });
     expect(again).toMatchObject({ ok: false, kind: "conflict" });
     expect(h.audits).toHaveLength(2);
+  });
+
+  it("upload, replace and remove each refresh the PO page and its edit page (final review M1)", async () => {
+    h.user = { id: "u1", name: "Pat", role: "purchasing_staff" };
+    await uploadPoDocument(form("invoice", "si-v1.pdf"));
+    expect(h.revalidated).toEqual(["/purchases/po-1", "/purchases/po-1/edit"]);
+    h.revalidated = [];
+    await replacePoDocument(replaceForm());
+    expect(h.revalidated).toEqual(["/purchases/po-1", "/purchases/po-1/edit"]);
+    h.revalidated = [];
+    await removePoDocument({ documentId: "doc-2" });
+    expect(h.revalidated).toEqual(["/purchases/po-1", "/purchases/po-1/edit"]);
   });
 
   it("the same roles and states as upload: a viewer or a cancelled PO is refused", async () => {

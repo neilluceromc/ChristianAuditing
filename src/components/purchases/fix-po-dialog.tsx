@@ -12,7 +12,7 @@ import { ReasonField } from "@/components/patterns/reason-field";
 import { useFinanceRunner } from "@/components/finance/use-finance-runner";
 import { PAID_BY_LABEL } from "@/lib/po-flow";
 import { PO_REASON_HINT } from "@/lib/po-send-back";
-import { parseMoney, TOTAL_KEYS, TOTAL_LABEL, type TotalKey } from "@/lib/po-totals";
+import { formatTypedMoney, parseMoney, TOTAL_KEYS, TOTAL_LABEL, type TotalKey } from "@/lib/po-totals";
 import { REASON_CHIPS } from "@/lib/reason-chips";
 import { fixPurchaseOrder } from "@/server/modules/purchases/po-actions";
 
@@ -63,8 +63,8 @@ export const FIX_PO_CLAIMED = [
 
 const cents = (n: number) => Math.round(n * 100);
 
-/** The dialog as it opens: each field showing the PO's own value. */
-function formOf(po: FixPoValues, lines: FixPoLine[]): FixPoForm {
+/** The dialog as it opens: each field showing the PO's own value, the totals as the edit form shows them ("9,100.00"). */
+export function fixPoFormOf(po: FixPoValues, lines: FixPoLine[]): FixPoForm {
   return {
     vendorId: po.vendorId ?? "",
     poNumber: po.poNumber ?? "",
@@ -74,7 +74,7 @@ function formOf(po: FixPoValues, lines: FixPoLine[]): FixPoForm {
     purchasedAt: po.purchasedAt ?? "",
     fees: po.fees === null ? "" : String(po.fees),
     prices: Object.fromEntries(lines.map((l) => [l.id, l.unitPrice === null ? "" : String(l.unitPrice)])),
-    totals: Object.fromEntries(TOTAL_KEYS.map((k) => [k, po.totals[k] === null ? "" : String(po.totals[k])])) as Record<TotalKey, string>,
+    totals: Object.fromEntries(TOTAL_KEYS.map((k) => [k, formatTypedMoney(po.totals[k])])) as Record<TotalKey, string>,
   };
 }
 
@@ -128,7 +128,7 @@ export function FixPoDialog({
   vendors: Array<{ id: string; name: string }>;
 }) {
   const { pending, error, setError, fieldErrors, retryAfter, setRetryAfter, reset, run } = useFinanceRunner(FIX_PO_CLAIMED);
-  const [form, setForm] = useState<FixPoForm>(() => formOf(po, lines));
+  const [form, setForm] = useState<FixPoForm>(() => fixPoFormOf(po, lines));
   const [reason, setReason] = useState("");
   const set = <K extends keyof FixPoForm>(key: K, value: FixPoForm[K]) => setForm((f) => ({ ...f, [key]: value }));
   const setTotal = (key: TotalKey, value: string) => setForm((f) => ({ ...f, totals: { ...f.totals, [key]: value } }));
@@ -137,7 +137,7 @@ export function FixPoDialog({
   useEffect(() => {
     if (!open) return;
     reset();
-    setForm(formOf(po, lines));
+    setForm(fixPoFormOf(po, lines));
     setReason("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);

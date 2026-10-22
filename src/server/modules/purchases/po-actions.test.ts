@@ -27,6 +27,8 @@ const h = vi.hoisted(() => ({
   racePoCheck: 0,
   /** The next revalidatePath throws this (a failure after the save's transaction committed). */
   failRevalidate: null as Error | null,
+  /** Runs once after a transaction rolls back: another session's write that the rollback must not undo. */
+  afterRollback: null as (() => void) | null,
 }));
 
 vi.mock("next/cache", () => ({
@@ -145,6 +147,9 @@ vi.mock("@/server/db/client", () => {
       return await fn(full);
     } catch (err) {
       h.tables = before;
+      const then = h.afterRollback;
+      h.afterRollback = null;
+      then?.();
       throw err;
     }
   };
@@ -238,6 +243,7 @@ beforeEach(() => {
   h.failDoc = null;
   h.racePoCheck = 0;
   h.failRevalidate = null;
+  h.afterRollback = null;
   h.tables = {
     user: [PAT, IVAN, ANA, ADA].map((u) => ({ ...u })),
     vendor: [{ id: "v1", name: "Octagon", archivedAt: null }, { id: "v2", name: "PC Express", archivedAt: null }],
@@ -911,6 +917,10 @@ describe("PO form redesign (A3): save with documents, PO number, totals, legacy 
       [id, "invoice", "si.pdf", PAT.id], [id, "warranty-slip", "ws.pdf", PAT.id],
     ]);
     expect(docs.map((d) => d.path).sort()).toEqual(stored().sort());
+    // final review M3: the PO's id is minted before its files are stored (a cuid, as the schema's default), so a new
+    // PO's documents live under requests/<poId>/ like every other PO document
+    expect(id).toMatch(/^c[a-z0-9]{24}$/);
+    expect(stored().every((p) => p.startsWith(`requests/${id}/`))).toBe(true);
     expect(audits("document.uploaded")).toHaveLength(2);
     expect(audits("document.uploaded").every((a) => a.entityId === id && a.source === "web")).toBe(true);
     expect(t("notification")).toEqual([expect.objectContaining({ team: "IT", kind: "TO_CHECK", title: "PO-0214 · 1 Laptop from Purchasing to check" })]);
@@ -1137,6 +1147,22 @@ describe("a category deleted while the form was open (Task 3 carried: IT replace
     expect(r).toMatchObject({ kind: "validation", fieldErrors: { lines: GONE } });
     expect(t("purchaseOrder")).toEqual([]);
     expect(stored()).toEqual([]);
+
+    // final review M4: the category really went in between — the refusal names each line that used it
+    h.failDoc = p2003("PurchaseUnit_categoryId_fkey (index)");
+    h.afterRollback = () => { h.tables.assetCategory = t("assetCategory").filter((c) => c.id !== "cat-lt"); };
+    const named = await savePurchaseOrder(form(v2({
+      lines: [
+        line({ description: "Laptop", qty: 1, unitPrice: 9100 }),
+        line({ description: "office chairs", categoryId: "cat-ch", qty: 1, unitPrice: 100 }),
+        line({ description: "Spare laptop", qty: 1, unitPrice: 100 }),
+      ],
+    })));
+    expect(named).toMatchObject({ kind: "validation" });
+    expect(errorsOf(named)).toEqual({ "lines.0.categoryId": GONE, "lines.2.categoryId": GONE });
+    expect(t("purchaseOrder")).toEqual([]);
+    expect(stored()).toEqual([]);
+    t("assetCategory").push({ id: "cat-lt", name: "Laptops", cls: "IT" }); // back for the next case
 
     // any other foreign-key refusal is not laundered into a category message
     h.failDoc = p2003("RequestDocument_uploadedById_fkey (index)");

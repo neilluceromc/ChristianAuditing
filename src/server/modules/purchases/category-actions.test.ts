@@ -127,6 +127,20 @@ describe("createCategoryFromPo", () => {
     expect(h.audits).toEqual([]);
   });
 
+  it("capitalises a plain first letter only: 'iPhone case' stays as typed (final review M6)", async () => {
+    const made = async (name: string) => {
+      const r = await createCategoryFromPo({ name, cls: "IT" });
+      return r.ok ? r.data.name : `refused: ${JSON.stringify(r)}`;
+    };
+    expect(await made("iPhone case")).toBe("iPhone case");
+    expect(await made("eBay voucher")).toBe("eBay voucher");
+    expect(await made("patch panel")).toBe("Patch panel");
+    expect(await made("x1 hub")).toBe("X1 hub");
+    expect(await made("éclair stand")).toBe("Éclair stand");
+    expect(await made("4K monitor")).toBe("4K monitor");
+    expect(await made("USB hub")).toBe("USB hub");
+  });
+
   it("the name is 2–60 characters after trimming", async () => {
     expect(await createCategoryFromPo({ name: " x ", cls: "IT" })).toMatchObject({ ok: false, kind: "validation", fieldErrors: { name: expect.any(String) } });
     expect(await createCategoryFromPo({ name: "y".repeat(61), cls: "IT" })).toMatchObject({ ok: false, kind: "validation" });

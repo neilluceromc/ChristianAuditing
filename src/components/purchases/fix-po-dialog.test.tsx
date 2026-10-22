@@ -5,7 +5,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: 
 vi.mock("@/components/ui/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("@/server/modules/purchases/po-actions", () => ({ fixPurchaseOrder: vi.fn() }));
 
-import { FIX_PO_CLAIMED, fixPoPatch, type FixPoForm, type FixPoValues } from "./fix-po-dialog";
+import { FIX_PO_CLAIMED, fixPoFormOf, fixPoPatch, type FixPoForm, type FixPoValues } from "./fix-po-dialog";
 
 /*
  * PO form redesign (spec §5b.4): the PO number, paid by and each of the seven typed totals are money fields IT and
@@ -33,6 +33,18 @@ describe("FixPoDialog", () => {
       "patch.poNumber", "patch.paidBy",
       "patch.totalSales", "patch.lessVat", "patch.netOfVat", "patch.discount", "patch.amountDue", "patch.addVat", "patch.totalAmountDue",
     ]));
+  });
+
+  it("opens with each total as the edit form shows it (final review M5), and an untouched dialog sends nothing", () => {
+    const f = fixPoFormOf(PO, LINES);
+    expect(f.totals).toEqual({
+      totalSales: "9,100.00", lessVat: "975.00", netOfVat: "8,125.00", discount: "", amountDue: "8,125.00", addVat: "975.00",
+      totalAmountDue: "9,100.00",
+    });
+    expect(fixPoPatch(PO, LINES, f)).toEqual({});
+    // the unit prices and fees keep their plain form (they are compared as numbers typed without commas)
+    expect(f.prices).toEqual({ l1: "9100" });
+    expect(fixPoFormOf({ ...PO, fees: 1250 }, LINES).fees).toBe("1250");
   });
 
   it("an untouched dialog sends nothing, even where a total is typed with commas or a peso sign", () => {

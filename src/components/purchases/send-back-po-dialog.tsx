@@ -12,16 +12,18 @@ import { FormField } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
 import { useFinanceRunner } from "@/components/finance/use-finance-runner";
-import { PO_REASON_HINT, PO_SEND_BACK_FIELDS, PO_SEND_BACK_GROUPS, type PoSendBackKey } from "@/lib/po-send-back";
+import { PO_REASON_HINT, PO_SEND_BACK_GROUPS, poSendBackFields, type PoSendBackKey } from "@/lib/po-send-back";
 import { sendBackPurchaseOrder, undoPoSendBack } from "@/server/modules/purchases/po-actions";
 
 /**
  * Spec §4 way 1 / §5: IT (or Finance) ticks what is wrong with a PO's money details and adds a note; the PO goes
- * back to Purchasing, whose team gets the bell. The same checklist idiom as Finance's per-asset send-back.
+ * back to Purchasing, whose team gets the bell. The same checklist idiom as Finance's per-asset send-back. Fees is on
+ * the list only for a legacy PO that has a fee (poSendBackFields).
  */
 export function SendBackPoDialog({
-  open, onClose, id, refNo,
-}: { open: boolean; onClose: () => void; id: string; refNo: string }) {
+  open, onClose, id, refNo, formV2, fees,
+}: { open: boolean; onClose: () => void; id: string; refNo: string; formV2: boolean; fees: number | null }) {
+  const offered = poSendBackFields({ formV2, fees });
   const { pending, error, fieldErrors, retryAfter, setRetryAfter, reset, run } = useFinanceRunner(["note"]);
   const [ticked, setTicked] = useState<Set<PoSendBackKey>>(new Set());
   const [note, setNote] = useState("");
@@ -46,7 +48,7 @@ export function SendBackPoDialog({
   }
 
   function send() {
-    const fields = PO_SEND_BACK_FIELDS.filter((f) => ticked.has(f.key)).map((f) => f.key);
+    const fields = offered.filter((f) => ticked.has(f.key)).map((f) => f.key);
     run(
       () => sendBackPurchaseOrder({ id, fields, ...(note.trim() ? { note } : {}) }),
       // Task 6 fix round 1: the send-back can be taken back for 15 minutes (undoPoSendBack), from the toast too
@@ -78,7 +80,7 @@ export function SendBackPoDialog({
         {PO_SEND_BACK_GROUPS.map((group) => (
           <fieldset key={group} className="flex flex-col gap-1.5">
             <legend className="mb-1 text-xs font-medium text-fg">{group}</legend>
-            {PO_SEND_BACK_FIELDS.filter((f) => f.group === group).map((f) => (
+            {offered.filter((f) => f.group === group).map((f) => (
               <label key={f.key} className="flex items-center gap-2 text-[13px] text-fg-secondary">
                 <Checkbox checked={ticked.has(f.key)} onChange={(e) => toggle(f.key, e.target.checked)} />
                 {f.label}

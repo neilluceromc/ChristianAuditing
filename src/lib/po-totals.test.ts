@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOTAL_KEYS, TOTAL_LABEL, checkTotals, itemsTotal, parseMoney, totalsConsistency } from "./po-totals";
+import { TOTAL_KEYS, TOTAL_LABEL, checkTotals, formatTypedMoney, itemsTotal, parseMoney, totalsConsistency } from "./po-totals";
 
 const GOOD = { totalSales: 9100, lessVat: 975, netOfVat: 8125, amountDue: 8125, addVat: 975, totalAmountDue: 9100 };
 
@@ -33,6 +33,20 @@ describe("parseMoney", () => {
 
   it("passes numbers through", () => {
     expect(parseMoney(975)).toBe(975);
+  });
+});
+
+describe("formatTypedMoney (final review M5: one format for a stored total in a typed field)", () => {
+  it("shows two decimals with thousands commas, and nothing for none", () => {
+    expect(formatTypedMoney(9100)).toBe("9,100.00");
+    expect(formatTypedMoney(975)).toBe("975.00");
+    expect(formatTypedMoney(0)).toBe("0.00");
+    expect(formatTypedMoney(0.5)).toBe("0.50");
+    expect(formatTypedMoney(1234567.891)).toBe("1,234,567.89");
+    expect(formatTypedMoney(null)).toBe("");
+  });
+  it("reads back as the same amount", () => {
+    for (const n of [9100, 8125.5, 0.01, 1234567.89]) expect(parseMoney(formatTypedMoney(n))).toBe(n);
   });
 });
 

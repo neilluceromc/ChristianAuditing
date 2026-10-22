@@ -370,12 +370,14 @@ function ReopenGroupButton({ recordId, refNo }: { recordId: string; refNo: strin
 }
 
 /** A PO group's money problems go back to Purchasing on the PO (spec §5): the PO's own send-back. */
-export function SendBackPoButton({ id, refNo }: { id: string; refNo: string }) {
+export function SendBackPoButton({
+  id, refNo, formV2, fees,
+}: { id: string; refNo: string; formV2: boolean; fees: number | null }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button variant="danger" onClick={() => setOpen(true)}>Send back to Purchasing</Button>
-      <SendBackPoDialog open={open} onClose={() => setOpen(false)} id={id} refNo={refNo} />
+      <SendBackPoDialog open={open} onClose={() => setOpen(false)} id={id} refNo={refNo} formV2={formV2} fees={fees} />
     </>
   );
 }

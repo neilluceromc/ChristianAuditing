@@ -30,9 +30,15 @@ export interface PoCategory {
   reused: boolean;
 }
 
+/**
+ * "patch panel" → "Patch panel", but "iPhone case" and "eBay voucher" stay as typed (final review M6): the first
+ * character is uppercased only when it is a lowercase letter and the second is not an uppercase one.
+ */
+const capitaliseName = (s: string) =>
+  /^\p{Ll}/u.test(s) && !/^.\p{Lu}/u.test(s) ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
 const createSchema = z.object({
-  name: z.string().trim().min(2, "At least 2 characters").max(60, "At most 60 characters")
-    .transform((s) => s.charAt(0).toUpperCase() + s.slice(1)),
+  name: z.string().trim().min(2, "At least 2 characters").max(60, "At most 60 characters").transform(capitaliseName),
   cls: z.enum(["IT", "PURCHASING"]),
 });
 

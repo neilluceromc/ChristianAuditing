@@ -29,6 +29,13 @@ export function parseMoney(v: string | number | null | undefined): number | null
   return NUMBER.test(s) ? Number(s) : Number.NaN;
 }
 
+/**
+ * A stored amount as a typed totals field shows it: "9,100.00"; "" for none. The edit form and the Fix dialog both
+ * open with it (final review M5), and parseMoney reads it back as the same amount.
+ */
+export const formatTypedMoney = (n: number | null): string =>
+  n === null ? "" : n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 /** Whole centavos, so ₱0.10 + ₱0.20 is exactly ₱0.30. */
 const cents = (n: number) => Math.round(n * 100);
 

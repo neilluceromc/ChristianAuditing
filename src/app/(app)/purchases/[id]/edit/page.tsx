@@ -8,17 +8,13 @@ import { PO_WRITE_ROLES } from "@/lib/po-flow";
 import { poControls } from "@/lib/po-controls";
 import { getPurchase, policyLoadouts } from "@/server/modules/purchases/queries";
 import { poCategories } from "@/server/modules/purchases/po-categories";
-import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
+import { formatTypedMoney, TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
 import { PO_DOCUMENT_SLOTS } from "@/lib/documents";
 import { PageHeader } from "@/components/ui/page-header";
 import { PoForm, type InitialLine, type PoFormInitial } from "@/components/purchases/po-form/po-form";
 
 /** What the PO form's vendor card shows: the seller block (spec §2.4). */
 const VENDOR_SELECT = { id: true, name: true, registeredName: true, registrationNo: true, address: true } as const;
-
-/** A stored amount as the form's inputs show it: "9,100.00"; "" for none. */
-const moneyText = (n: number | null) =>
-  n === null ? "" : n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -54,10 +50,10 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     categoryId: u.categoryId ?? "",
     qty: String(u.qty),
     unit: u.unit,
-    unitPrice: moneyText(u.unitPrice),
+    unitPrice: formatTypedMoney(u.unitPrice),
     locked: u.registered + u.closedShort,
   }));
-  const totals = Object.fromEntries(TOTAL_KEYS.map((k) => [k, moneyText(request.totals[k])])) as Record<TotalKey, string>;
+  const totals = Object.fromEntries(TOTAL_KEYS.map((k) => [k, formatTypedMoney(request.totals[k])])) as Record<TotalKey, string>;
   // Each slot shows the newest document of its kind (getPurchase lists them newest first, removed ones left out).
   const onFile: PoFormInitial["onFile"] = {};
   for (const kind of PO_DOCUMENT_SLOTS) {

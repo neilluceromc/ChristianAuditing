@@ -72,7 +72,11 @@ export function PoActionsBar({
       {retryAfter !== null && <RateLimitNotice retryAfterSec={retryAfter} onExpire={() => setRetryAfter(null)} />}
       {error && <Banner tone="fault" title={error} />}
 
-      {controls.sendBack && <SendBackPoDialog open={sendingBack} onClose={() => setSendingBack(false)} id={po.id} refNo={po.refNo} />}
+      {controls.sendBack && (
+        <SendBackPoDialog
+          open={sendingBack} onClose={() => setSendingBack(false)} id={po.id} refNo={po.refNo} formV2={po.formV2} fees={po.fees}
+        />
+      )}
       {controls.fix && <FixPoDialog open={fixing} onClose={() => setFixing(false)} po={po} lines={lines} vendors={vendors} />}
 
       <Dialog

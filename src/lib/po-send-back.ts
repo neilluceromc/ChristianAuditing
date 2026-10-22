@@ -28,6 +28,16 @@ export const PO_SEND_BACK_FIELDS = [
 }>;
 
 export type PoSendBackKey = (typeof PO_SEND_BACK_FIELDS)[number]["key"];
+
+/**
+ * What the send-back dialog offers on this PO (final review M2). The A3 form has no fees field (spec §4), so "Fees" is
+ * offered only on a legacy PO (formV2 false) that has a fee; sendBackPurchaseOrder still accepts `fees`, and
+ * poFieldWords still words it, for send-backs made before.
+ */
+export function poSendBackFields(po: { formV2: boolean; fees: number | null }) {
+  const offerFees = !po.formV2 && po.fees !== null;
+  return PO_SEND_BACK_FIELDS.filter((f) => f.key !== "fees" || offerFees);
+}
 export const PO_SEND_BACK_GROUPS = ["Purchase", "Documents", "Anything else"] as const;
 
 /** The checklist labels of the given keys, in the order given; an unknown key shows as itself. */

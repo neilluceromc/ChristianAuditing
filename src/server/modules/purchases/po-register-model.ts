@@ -1,7 +1,7 @@
 import type { AssetClass, Role } from "@prisma/client";
 import { canRegisterLine } from "@/lib/po-flow";
 import { registerCatalog, type CatalogCategory } from "@/server/modules/inventory/register-queries";
-import type { PoRegisterLine } from "@/components/purchases/po-register-form";
+import type { PoRegisterLine } from "@/lib/po-register-line";
 import type { PurchaseDetail } from "./queries";
 
 /**

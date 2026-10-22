@@ -120,7 +120,7 @@ export default async function GroupReviewPage({
                     }}
                   />
                 )}
-                {controls.sendBack && <SendBackPoButton id={g.po.id} refNo={g.refNo!} />}
+                {controls.sendBack && <SendBackPoButton id={g.po.id} refNo={g.refNo!} formV2={g.po.formV2} fees={g.po.fees} />}
               </div>
             )}
             <CardBody className="flex flex-col gap-2">

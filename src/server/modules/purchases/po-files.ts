@@ -13,13 +13,14 @@ export type PoFile = { kind: PoDocumentSlot; file: File };
 export type StoredFile = { kind: PoDocumentSlot; relPath: string; checksum: string; fileName: string; size: number };
 
 /**
- * Stores each file under `requests/<poIdHint>/<kind>/` (one folder per slot, so two slots holding the same file name
+ * Stores each file under `requests/<poId>/<kind>/` (one folder per slot, so two slots holding the same file name
  * stored in the same millisecond never collide). A store that fails part-way removes what it had stored and rethrows.
  * `cleanup()` deletes every stored file; a delete that fails is logged, never thrown — the caller is already
  * reporting the failure that made it clean up.
  */
 export async function storePoFiles(
-  poIdHint: string,
+  /** The PO's id: a new PO's is minted before the store (saveImpl), so its files sit with every other PO document. */
+  poId: string,
   files: readonly PoFile[],
 ): Promise<{ stored: StoredFile[]; cleanup(): Promise<void> }> {
   const stored: StoredFile[] = [];
@@ -34,7 +35,7 @@ export async function storePoFiles(
   };
   try {
     for (const f of files) {
-      const s = await storeUpload(`requests/${poIdHint}/${f.kind}`, f.file);
+      const s = await storeUpload(`requests/${poId}/${f.kind}`, f.file);
       stored.push({ kind: f.kind, ...s });
     }
   } catch (err) {

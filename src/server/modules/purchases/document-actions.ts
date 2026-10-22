@@ -72,6 +72,8 @@ async function addPoDocument(formData: FormData, idField: "requestId" | "orderId
     return created;
   });
   revalidatePath(`/purchases/${requestId}`);
+  // final review M1: the edit form's document slots read the same rows (as removePoDocument refreshes them)
+  revalidatePath(`/purchases/${requestId}/edit`);
   return ok({ id: doc.id });
 }
 

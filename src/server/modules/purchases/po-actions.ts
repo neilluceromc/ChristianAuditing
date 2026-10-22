@@ -23,6 +23,7 @@ import { PO_DOCUMENT_SLOTS, type PoDocumentSlot } from "@/lib/documents";
 import { uniqueTarget } from "@/server/prisma-errors";
 import { validateUpload } from "@/server/uploads";
 import { storePoFiles, type PoFile, type StoredFile } from "./po-files";
+import { cuid } from "@/server/cuid";
 import { moneyForAsset } from "@/lib/po-money";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
 import { returnOne, undoOne } from "@/server/modules/finance/review-writes";
@@ -489,9 +490,12 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
     if (owner) return validationError({ poNumber: usedOn(d.poNumber, owner.refNo) });
   }
 
+  // final review M3: a new PO's id is minted now (shaped like the schema's cuid()), so its files are stored under
+  // requests/<poId>/ like every other PO document, and the create writes the PO with that id
+  const poId = d.id ?? cuid();
   let store: Awaited<ReturnType<typeof storePoFiles>>;
   try {
-    store = await storePoFiles(d.id ?? `new-${randomUUID()}`, files);
+    store = await storePoFiles(poId, files);
   } catch {
     return conflict("Could not store the documents — nothing was saved. Try again.");
   }
@@ -501,7 +505,7 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
   try {
     const result = d.id
       ? await editPo(d.id, d, user, lineCls, archived, store.stored, commit)
-      : await createPo(d, user, lineCls, store.stored, commit);
+      : await createPo(poId, d, user, lineCls, store.stored, commit);
     // A refusal (decided under the lock, before any write) committed nothing that points at the files.
     if (!result.ok) await store.cleanup();
     return result;
@@ -510,8 +514,15 @@ async function saveImpl(input: unknown): Promise<ActionResult<Saved>> {
     if (!commit.done && d.poNumber && isPoNumberClash(err)) {
       return validationError({ poNumber: await poNumberRefusal(d.poNumber, d.id ?? null) });
     }
-    // The category was deleted between the check above and the line write (the transaction rolled back).
-    if (!commit.done && isCategoryGone(err)) return validationError({ lines: CATEGORY_GONE });
+    // The category was deleted between the check above and the line write (the transaction rolled back): say so on
+    // each line whose category is gone, as the pre-check does (final review M4); on the items only if none is.
+    if (!commit.done && isCategoryGone(err)) {
+      const still = await prisma.assetCategory.findMany({ where: { id: { in: catIds } }, select: { id: true } });
+      const left = new Set(still.map((c) => c.id));
+      const gone = Object.fromEntries(d.lines.flatMap((l, i) =>
+        left.has(l.categoryId) ? [] : [[`lines.${i}.categoryId`, CATEGORY_GONE]]));
+      return validationError(Object.keys(gone).length > 0 ? gone : { lines: CATEGORY_GONE });
+    }
     throw err;
   }
 }
@@ -545,7 +556,7 @@ async function writeStoredDocs(tx: Prisma.TransactionClient, orderId: string, st
 
 /** Every new PO is from the new form (formV2): saveImpl has refused it unless its required fields are all there. */
 async function createPo(
-  d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, stored: readonly StoredFile[], commit: { done: boolean },
+  id: string, d: SaveInput, user: Actor, lineCls: Array<AssetClass | null>, stored: readonly StoredFile[], commit: { done: boolean },
 ): Promise<ActionResult<Saved>> {
   const state = stateAfterSave(lineCls.map((cls) => ({ cls })));
   const totals = totalsOf(d.totals ?? {});
@@ -559,7 +570,7 @@ async function createPo(
     const refNo = poRefNo(Number(nextval));
     const created = await tx.purchaseOrder.create({
       data: {
-        refNo, state, requestedById: user.id, formV2: true, ...head,
+        id, refNo, state, requestedById: user.id, formV2: true, ...head,
         lines: {
           create: d.lines.map((l) => ({
             description: l.description, specs: l.specs ? l.specs : null, categoryId: l.categoryId, qty: l.qty, unit: l.unit,
