@@ -105,13 +105,15 @@ describe("credentials authorize (Users & access spec §4.2, §4.6)", () => {
     expect(attempts.locked.every((k) => k === "nina@thebackroomop.com")).toBe(true);
   });
 
-  it("a parallel burst through the callback gets three tries (fix round 1, I-1)", async () => {
+  it("a parallel burst through the callback gets at most three tries (fix round 1, I-1; final review M-3)", async () => {
     h.findUnique.mockResolvedValue(row());
     const compare = vi.spyOn(bcrypt, "compare");
     await Promise.all(Array.from({ length: 6 }, (_, i) => authorize("nina@thebackroomop.com", `nope-${i}`)));
-    expect(compare).toHaveBeenCalledTimes(3);
+    const tried = compare.mock.calls.length;
+    expect(tried).toBeGreaterThanOrEqual(1);
+    expect(tried).toBeLessThanOrEqual(3);
     compare.mockRestore();
-    expect(attempts.rows).toHaveLength(3);
+    expect(attempts.rows).toHaveLength(tried);
   });
 
   it("a wrong password through the callback counts as a failure, for known and unknown emails", async () => {

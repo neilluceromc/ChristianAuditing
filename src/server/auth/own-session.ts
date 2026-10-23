@@ -28,11 +28,23 @@ const MARKS = Symbol.for("cris.own-session.marks");
 const marks: WeakMap<object, Map<string, OwnSession>> = ((globalThis as { [MARKS]?: WeakMap<object, Map<string, OwnSession>> })[MARKS] ??=
   new WeakMap());
 
-export async function refreshOwnSession(userId: string, sessionVersion: number, mustChangePassword: boolean): Promise<void> {
-  // Auth.js types the update as a Partial<Session>; the jwt callback (config.edge.ts) reads this signed shape instead.
-  const update = await signedSessionUpdate(userId, sessionVersion, mustChangePassword);
-  await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
+/**
+ * Final review M-1: called after the change committed, so it never throws. If the update fails (no cookie in this
+ * context, a transient Auth.js error), the change still stands and the action still reports it; nothing is marked, so
+ * this device is signed out at its next request like the others (the guards fail safe). Returns whether it refreshed.
+ */
+export async function refreshOwnSession(userId: string, sessionVersion: number, mustChangePassword: boolean): Promise<boolean> {
+  try {
+    // Auth.js types the update as a Partial<Session>; the jwt callback (config.edge.ts) reads this signed shape instead.
+    const update = await signedSessionUpdate(userId, sessionVersion, mustChangePassword);
+    await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
+  } catch (err) {
+    // The error's name and message only: never the update (it carries the proof).
+    console.error("refreshOwnSession: this device's session was not refreshed", err instanceof Error ? `${err.name}: ${err.message}` : "unknown error");
+    return false;
+  }
   markOwnSessionRefreshed(userId, { sessionVersion, mustChangePassword });
+  return true;
 }
 
 /** Records that this request's response carries a new session cookie for `userId` with these values. */

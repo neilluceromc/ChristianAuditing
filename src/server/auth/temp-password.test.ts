@@ -55,4 +55,11 @@ describe("calm words (fix round 1, M2)", () => {
     expect(TEMP_PASSWORD_WORDS).toContain("button");
     expect(TEMP_PASSWORD_WORDS.length).toBeGreaterThanOrEqual(64);
   });
+
+  it("keeps no amber/ember near-twins (final review M-2)", () => {
+    expect(TEMP_PASSWORD_WORDS).toContain("amber");
+    expect(TEMP_PASSWORD_WORDS).not.toContain("ember");
+    expect(TEMP_PASSWORD_WORDS).toContain("pelican");
+    expect(TEMP_PASSWORD_WORDS.length).toBeGreaterThanOrEqual(64);
+  });
 });

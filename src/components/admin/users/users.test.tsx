@@ -28,6 +28,7 @@ import { UserPanel, type UserPanelProps } from "./user-panel";
 import { AddUserForm } from "./add-user-sheet";
 import { TempPasswordBox } from "./temp-password-box";
 import { ResetPasswordBody } from "./reset-password-dialog";
+import { asideMaxHeight } from "./users-view";
 
 /** The markup with React's entity escapes undone, so verbatim copy can be matched as written. */
 const text = (html: string) =>
@@ -136,6 +137,8 @@ describe("the list and its filters", () => {
     expect(html).toContain('aria-selected="true"');
     // The narrow layout's cards: one per row, each a button naming the person.
     expect(html.match(/data-user-card=/g)).toHaveLength(3);
+    // Final review M-5: the card list doesn't share the section's name.
+    expect(html).toContain('aria-label="User cards"');
     expect(html).toContain("IT staff · IT");
     expect(html).toContain("Viewer · No employee record");
   });
@@ -429,9 +432,32 @@ describe("fix round 2", () => {
     expect(render(<ResetPasswordBody name="Nina Reyes" temp="Cedar-3388-lumen" error={null} />)).toContain("data-takes-focus");
   });
 
-  it("N-2: the discard question is an alertdialog, so it is announced when it takes focus", () => {
+  // Final review M-6: it is inline, not modal, so it is a labelled group announced assertively (focus still moves to
+  // Keep editing), never an alertdialog that promises a dialog Escape could dismiss.
+  it("N-2: the discard question is a labelled, assertive group that takes focus", () => {
     const html = panel({ row: userRow(), leaving: true, initial: { draft: { role: "viewer" } } });
-    expect(html).toMatch(/role="alertdialog"[^>]*aria-labelledby="[^"]+"[^>]*data-discard-prompt/);
+    expect(html).toMatch(/role="group"[^>]*aria-labelledby="[^"]+"[^>]*aria-live="assertive"[^>]*data-discard-prompt/);
+    expect(html).not.toContain("alertdialog");
+  });
+
+  it("sizes the side panel to end above Cris's corner wherever its top is (asideMaxHeight)", () => {
+    expect(asideMaxHeight(900, 170, 88)).toBe(626); // at rest, 1440x900 with Cris shown
+    expect(asideMaxHeight(900, 16, 88)).toBe(780); // stuck at the top
+    expect(asideMaxHeight(900, 16, 0)).toBe(868); // Cris hidden
+    expect(asideMaxHeight(600, 400, 88)).toBe(320); // never below 320 px
+    expect(asideMaxHeight(900, -40, 88)).toBe(796); // a top above the window counts as 0
+  });
+
+  // Task 5 fix wave (the 1440 screenshot): the panel's controls scroll clear of Cris's corner, and its bottom bars keep
+  // their buttons out of it, as other pages do (cris-widget.css).
+  it("keeps clear of Cris: the scroll area's bottom room and its bars' data-cris-avoid", () => {
+    const html = panel({ row: userRow(), initial: { draft: { role: "viewer" } } });
+    expect(html).toContain("data-panel-scroll");
+    expect(html).toMatch(/data-panel-scroll[^>]*style="[^"]*padding-bottom:calc\(1rem \+ var\(--cris-clear, 0px\)\)/);
+    expect(html).toMatch(/scroll-padding-bottom:var\(--cris-clear, 0px\)/);
+    expect(html).toMatch(/aria-label="Unsaved changes"[^>]*data-cris-avoid=""/);
+    const asking = panel({ row: userRow(), leaving: true, initial: { draft: { role: "viewer" } } });
+    expect(asking).toMatch(/data-discard-prompt=""[^>]*data-cris-avoid=""|data-cris-avoid=""[^>]*data-discard-prompt=""/);
   });
 });
 

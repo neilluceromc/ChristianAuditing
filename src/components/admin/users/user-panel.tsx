@@ -267,7 +267,13 @@ export function UserPanel({
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 py-4">
+      {/* Cris's corner (the 1440 screenshot, Task 5 fix wave): while Cris shows, the scroll area ends with Cris's
+          clearance and keeps a focused control above it, as #main does on every page (cris-widget.css). */}
+      <div
+        data-panel-scroll=""
+        className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 pt-4"
+        style={{ paddingBottom: "calc(1rem + var(--cris-clear, 0px))", scrollPaddingBottom: "var(--cris-clear, 0px)" }}
+      >
         {locked && <Banner tone="neutral" live="off" title={locked} />}
         {notice?.message && <Banner tone="fault" title={notice.message} />}
 
@@ -539,7 +545,9 @@ export function UserPanel({
       </div>
 
       {asking && (
-        <div role="alertdialog" aria-labelledby={`${titleId}-ask`} data-discard-prompt="" className="flex shrink-0 flex-col gap-2.5 border-t px-5 py-3"
+        // Final review M-6: inline, not modal, so a labelled group announced assertively (focus moves to Keep editing).
+        // data-cris-avoid: its buttons stay out of Cris's corner, like every sticky bottom bar (cris-widget.css).
+        <div role="group" aria-labelledby={`${titleId}-ask`} aria-live="assertive" data-discard-prompt="" data-cris-avoid="" className="flex shrink-0 flex-col gap-2.5 border-t px-5 py-3"
           style={{ background: "var(--st-attention-bg)", borderColor: "var(--st-attention-border)" }}
         >
           <p id={`${titleId}-ask`} className="text-[12.5px] text-fg">
@@ -566,7 +574,7 @@ export function UserPanel({
       )}
 
       {dirty && !asking && (
-        <div role="region" aria-label="Unsaved changes" className="flex shrink-0 items-center gap-2.5 border-t border-border bg-surface-subtle px-5 py-3">
+        <div role="region" aria-label="Unsaved changes" data-cris-avoid="" className="flex shrink-0 items-center gap-2.5 border-t border-border bg-surface-subtle px-5 py-3">
           <span className="flex-1 text-[12.5px] text-fg-secondary">Unsaved changes</span>
           <Button variant="ghost" className={TARGET} disabled={busy} onClick={() => { discard(); focus(focusOnClose("edit")); }}>
             Discard

@@ -1,9 +1,10 @@
 /*
  * Test double (not a test file, never imported by app code): the SignInAttempt table in memory, filtered the way
  * Postgres would for sign-in-limit.ts's queries, plus an interactive `$transaction` whose
- * `$executeRaw` "SELECT pg_advisory_xact_lock(ns, hashtext(key))" really serialises callers per key until the
- * transaction ends. Every query yields to the event loop's microtasks first, so concurrent callers interleave exactly
- * where an unlocked check-then-insert would race.
+ * `$queryRaw` "SELECT pg_try_advisory_xact_lock(ns, hashtext(key))" behaves as Postgres's does: it takes the key's
+ * lock until the transaction ends and answers true, or answers false at once when another transaction holds it
+ * (final review M-3: never waits). Every query yields to the event loop's microtasks first, so concurrent callers
+ * interleave exactly where an unlocked check-then-insert would race.
  */
 
 export type AttemptRow = { id: string; emailKey: string; createdAt: Date };
@@ -13,13 +14,16 @@ export const attempts = {
   seq: 0,
   /** The lock keys taken, in the order the locks were granted. */
   locked: [] as string[],
+  /** The lock keys asked for while another transaction held them (answered false). */
+  busy: [] as string[],
 };
 
 export function resetAttempts(): void {
   attempts.rows = [];
   attempts.seq = 0;
   attempts.locked = [];
-  locks.clear();
+  attempts.busy = [];
+  held.clear();
 }
 
 /** Lets other pending promise chains run, without timers (works under vi.useFakeTimers). */
@@ -58,7 +62,14 @@ export const signInAttemptTable = {
   },
 };
 
-const locks = new Map<string, Promise<void>>();
+/** Keys whose advisory lock some open transaction holds. */
+const held = new Set<string>();
+
+/** Tests only: holds a key's lock as another transaction would; call the result to release it. */
+export function holdLock(key: string): () => void {
+  held.add(key);
+  return () => held.delete(key);
+}
 
 /**
  * An interactive-transaction double. The array form (`$transaction([p1, p2])`) just awaits the promises, as other
@@ -66,24 +77,27 @@ const locks = new Map<string, Promise<void>>();
  */
 export async function fakeTransaction(arg: unknown): Promise<unknown> {
   if (Array.isArray(arg)) return Promise.all(arg);
-  const releases: Array<() => void> = [];
+  const mine: string[] = [];
   const tx = {
     signInAttempt: signInAttemptTable,
-    async $executeRaw(_sql: TemplateStringsArray, ...values: unknown[]) {
+    // pg_try_advisory_xact_lock: decided at the call, never queued behind the holder.
+    async $queryRaw(_sql: TemplateStringsArray, ...values: unknown[]) {
       const key = String(values[values.length - 1]);
-      const previous = locks.get(key) ?? Promise.resolve();
-      let release!: () => void;
-      const mine = new Promise<void>((resolve) => (release = resolve));
-      locks.set(key, previous.then(() => mine));
-      releases.push(release);
-      await previous;
+      if (held.has(key)) {
+        attempts.busy.push(key);
+        await yieldTurn();
+        return [{ locked: false }];
+      }
+      held.add(key);
+      mine.push(key);
       attempts.locked.push(key);
-      return 1;
+      await yieldTurn();
+      return [{ locked: true }];
     },
   };
   try {
     return await (arg as (t: typeof tx) => Promise<unknown>)(tx);
   } finally {
-    for (const release of releases) release();
+    for (const key of mine) held.delete(key);
   }
 }

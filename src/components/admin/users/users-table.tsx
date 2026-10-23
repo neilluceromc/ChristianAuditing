@@ -121,7 +121,7 @@ export function UsersTable({
         </TBody>
       </Table>
 
-      <ul className="hidden flex-col gap-2 p-2 max-[700px]:flex" aria-label="Users">
+      <ul className="hidden flex-col gap-2 p-2 max-[700px]:flex" aria-label="User cards">
         {rows.map((r) => (
           <li key={r.id}>
             <button

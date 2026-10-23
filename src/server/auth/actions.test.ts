@@ -294,15 +294,19 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
     expect(h.signIn).not.toHaveBeenCalled();
   });
 
-  it("a burst of parallel wrong passwords gets three tries; the rest are paused (fix round 1, I-1)", async () => {
+  // Final review M-3: the email's lock is tried, not waited for, so tries that find it busy are paused at once.
+  it("a burst of parallel wrong passwords gets at most three tries; the rest are paused (fix round 1, I-1)", async () => {
     h.userFindUnique.mockResolvedValue(account());
     const compare = vi.spyOn(bcrypt, "compare");
     const replies = await Promise.all(Array.from({ length: 6 }, (_, i) => login("nina@thebackroomop.com", `guess-${i}`)));
-    expect(replies.filter((r) => r.error === WRONG)).toHaveLength(3);
-    expect(replies.filter((r) => r.error === PAUSED)).toHaveLength(3);
-    expect(compare).toHaveBeenCalledTimes(3); // only the three that got through checked a password
+    const wrong = replies.filter((r) => r.error === WRONG).length;
+    expect(wrong).toBeGreaterThanOrEqual(1);
+    expect(wrong).toBeLessThanOrEqual(3);
+    expect(replies.filter((r) => r.error === PAUSED)).toHaveLength(6 - wrong);
+    expect(compare).toHaveBeenCalledTimes(wrong); // only the ones that got through checked a password
     compare.mockRestore();
-    expect(attempts.rows).toHaveLength(3);
+    expect(attempts.rows).toHaveLength(wrong);
+    for (let i = wrong; i < 3; i++) await login("nina@thebackroomop.com", `more-${i}`); // one at a time: up to three
     expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: PAUSED });
   });
 
@@ -326,7 +330,8 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
       password: "correct horse battery",
       redirect: false,
     });
-    expect(h.userUpdate.mock.invocationCallOrder[0]).toBeLessThan(h.signIn.mock.invocationCallOrder[0]);
+    // Final review M-7: lastSignInAt is stamped only after signIn issued the session.
+    expect(h.userUpdate.mock.invocationCallOrder[0]).toBeGreaterThan(h.signIn.mock.invocationCallOrder[0]);
   });
 
   // Task 5 (found by e2e): Home would render the first-sign-in page under the "/" address; go there by name instead.
@@ -336,6 +341,14 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
       /^REDIRECT:\/welcome\/password$/,
     );
     expect(h.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("a session that isn't issued (signIn refuses) is told 'wrong' and stamps no lastSignInAt (final review M-7)", async () => {
+    h.userFindUnique.mockResolvedValue(account());
+    const { AuthError } = await import("next-auth");
+    h.signIn.mockRejectedValueOnce(new AuthError("refused"));
+    expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: WRONG });
+    expect(h.userUpdate).not.toHaveBeenCalled();
   });
 
   it("success with no next goes Home", async () => {

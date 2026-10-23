@@ -21,7 +21,7 @@ export function BootstrapForm() {
       <FormField label="Admin email" required>
         {(p) => <Input {...p} name="email" type="email" required />}
       </FormField>
-      <FormField label="Password" required hint="At least 10 characters">
+      <FormField label="Password" required hint="At least 10 characters, with letters and at least one number">
         {(p) => <Input {...p} name="password" type="password" autoComplete="new-password" required />}
       </FormField>
       <FormField

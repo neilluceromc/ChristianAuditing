@@ -43,4 +43,21 @@ describe("own-session.ts with Next's real work-unit storage", () => {
       expect(renderCopy.refreshedOwnSession("u1")).toEqual({ sessionVersion: 7, mustChangePassword: false });
     });
   });
+
+  it("never throws after the commit: a failed update is logged without the payload, and nothing is marked (M-1)", async () => {
+    vi.stubEnv("AUTH_SECRET", "test-secret-for-own-session");
+    const { workUnitAsyncStorage } = await import("next/dist/server/app-render/work-unit-async-storage.external");
+    const { refreshOwnSession, refreshedOwnSession } = await import("./own-session");
+    const run = workUnitAsyncStorage.run.bind(workUnitAsyncStorage) as unknown as <T>(s: object, f: () => T) => T;
+    h.update.mockRejectedValueOnce(new Error("no cookie store"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await run({}, async () => {
+      expect(await refreshOwnSession("u9", 3, false)).toBe(false);
+      expect(refreshedOwnSession("u9")).toBeNull();
+    });
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/proof/);
+    log.mockRestore();
+    vi.unstubAllEnvs();
+  });
 });

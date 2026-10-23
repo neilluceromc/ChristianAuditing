@@ -105,8 +105,19 @@ describe("quickSignIn", () => {
 
 describe("createBootstrapAdmin", () => {
   it("opens Home", async () => {
-    const f = form({ name: "Admin One", email: "admin@thebackroomop.com", password: "long enough password", domain: "" });
+    const f = form({ name: "Admin One", email: "admin@thebackroomop.com", password: "long enough password 7", domain: "" });
     expect(await destination(() => createBootstrapAdmin({}, f))).toBe("/");
     expect(h.cookieSet).toHaveBeenCalledWith("br.dept", "it", expect.any(Object));
+  });
+
+  // Final review M-8: the first admin's password follows the same rules as every new password.
+  it("refuses a password that breaks the shared rules, with their copy", async () => {
+    const base = { name: "Admin One", email: "admin@thebackroomop.com", domain: "" };
+    expect(await createBootstrapAdmin({}, form({ ...base, password: "short1" }))).toEqual({
+      error: "Password must be at least 10 characters.",
+    });
+    expect(await createBootstrapAdmin({}, form({ ...base, password: "long enough password" }))).toEqual({
+      error: "Password must use letters and at least one number.",
+    });
   });
 });

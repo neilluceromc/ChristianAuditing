@@ -144,6 +144,38 @@ async function seriousViolations(page: Page) {
     .map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`);
 }
 
+/**
+ * Every control in `scope`, scrolled into view the way the keyboard brings it (nearest, honouring scroll padding),
+ * lies clear of Cris's mascot. Returns the ones that would sit under it. Empty when Cris isn't shown.
+ */
+async function controlsUnderCris(scope: Locator, scroll = true): Promise<string[]> {
+  return scope.evaluate((root, scroll) => {
+    const dock = document.querySelector("[data-cris-dock]");
+    if (!dock) return [];
+    const under: string[] = [];
+    for (const el of root.querySelectorAll<HTMLElement>('button, a[href], input, [role="switch"]')) {
+      if (el.getClientRects().length === 0 || getComputedStyle(el).visibility === "hidden") continue;
+      if (scroll) el.scrollIntoView({ block: "nearest", behavior: "instant" });
+      // What is actually painted: the control's box clipped by every scrolling box it sits in (a control scrolled out
+      // of the panel's scroll area is hidden, wherever its box is) and by the window.
+      let r = el.getBoundingClientRect();
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const o = getComputedStyle(p).overflowY;
+        if (o !== "auto" && o !== "scroll" && o !== "hidden") continue;
+        const b = p.getBoundingClientRect();
+        const left = Math.max(r.left, b.left);
+        const top = Math.max(r.top, b.top);
+        r = new DOMRect(left, top, Math.min(r.right, b.right) - left, Math.min(r.bottom, b.bottom) - top);
+      }
+      if (r.width <= 0 || r.height <= 0 || r.top >= window.innerHeight) continue;
+      const c = dock.getBoundingClientRect();
+      const overlaps = r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top;
+      if (overlaps) under.push((el.getAttribute("aria-label") ?? el.textContent ?? el.tagName).trim().slice(0, 40));
+    }
+    return under;
+  }, scroll);
+}
+
 /** No sideways scroll on the page. */
 async function expectNoSidewaysScroll(page: Page, label: string) {
   const { scroll, client } = await page.evaluate(() => ({
@@ -557,7 +589,8 @@ test.describe("users & access: the flows", () => {
     await panel.getByRole("radio", { name: /^Finance staff/ }).check();
     await expect(panel.getByRole("region", { name: "Unsaved changes" })).toBeVisible();
     await page.locator(`tr[data-user-row="${b.id}"]`).click();
-    const prompt = panel.getByRole("alertdialog", { name: "Discard unsaved changes?" });
+    // Final review M-6: an inline, labelled group (not a dialog); focus still moves into it.
+    const prompt = panel.getByRole("group", { name: "Discard unsaved changes?" });
     await expect(prompt).toBeVisible();
     await expect(prompt.getByRole("button", { name: "Keep editing" })).toBeFocused();
     await prompt.getByRole("button", { name: "Keep editing" }).click();
@@ -619,6 +652,20 @@ test.describe("users & access: layout, screenshots and axe", () => {
     expect(pill.x + pill.width, "the Permanent pill stays left of the Role chip").toBeLessThanOrEqual(chip.x);
     await expectNoSidewaysScroll(page, "1440");
     await expectTallTargets(panel, "1440 panel");
+    // Cris's corner (the controller's finding on the first 1440 screenshot: Cris sat over the panel's Edit): every
+    // panel control, brought into view, is clear of Cris; so are the Unsaved changes bar's.
+    await expect(page.locator("[data-cris-dock]")).toBeVisible();
+    // At rest (nothing scrolled), and with each control brought into view, nothing in the panel is under Cris.
+    await expect.poll(() => controlsUnderCris(panel, false), { message: "panel controls under Cris at rest" }).toEqual([]);
+    expect(await controlsUnderCris(panel), "panel controls under Cris at 1440x900").toEqual([]);
+    await panel.getByRole("radio", { name: /^Viewer/ }).check();
+    await expect(panel.getByRole("region", { name: "Unsaved changes" })).toBeVisible();
+    expect(await controlsUnderCris(panel), "the Save bar under Cris at 1440x900").toEqual([]);
+    await panel.getByRole("region", { name: "Unsaved changes" }).getByRole("button", { name: "Discard", exact: true }).click();
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      document.querySelector("[data-panel-scroll]")?.scrollTo(0, 0);
+    });
     await page.screenshot({ path: `${SCRATCH}access-1440.png` });
 
     // 1024: no side panel; picking a row opens a drawer, Close removes ?sel=.
@@ -657,7 +704,7 @@ test.describe("users & access: layout, screenshots and axe", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await openUsers(page, "?q=E2E+Layout");
     await expect(page.getByRole("table")).toBeHidden();
-    const cards = page.getByRole("list", { name: "Users" });
+    const cards = page.getByRole("list", { name: "User cards" });
     await expect(cards).toBeVisible();
     await expectNoSidewaysScroll(page, "375 list");
     await cards.locator(`[data-user-card="${who.id}"]`).click();

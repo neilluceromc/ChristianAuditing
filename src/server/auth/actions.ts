@@ -11,6 +11,7 @@ import { clearSignInFailures, releaseSignInAttempt, reserveSignInAttempt } from 
 import { prisma } from "../db/client";
 import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
+import { passwordProblem } from "@/lib/password-rules";
 import { SIGN_IN_COPY } from "@/lib/sign-in-copy";
 import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
 import { PASSWORD_PAGE, ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
@@ -64,14 +65,18 @@ export async function signInWithCredentials(
   }
   if (user.disabled) return { error: SIGN_IN_COPY.wrong }; // counted, like a wrong password
 
+  // Cleared BEFORE signIn: the provider's authorize() reserves an attempt of its own, and must not find this
+  // email's earlier failures and pause the right password.
   await clearSignInFailures(email);
-  await prisma.user.update({ where: { id: user.id }, data: { lastSignInAt: new Date() } });
   try {
     await signIn("credentials", { email, password, redirect: false });
   } catch (err) {
     if (err instanceof AuthError) return { error: SIGN_IN_COPY.wrong };
     throw err;
   }
+  // Final review M-7: stamped only once the session is issued (a reset or turn-off landing between the compare and
+  // authorize() makes signIn refuse), as quickSignIn does.
+  await prisma.user.update({ where: { id: user.id }, data: { lastSignInAt: new Date() } });
   // Users & access (Task 5, found by e2e): someone who owes a password goes to the first-sign-in page by its own
   // address. Sent to Home, the guards render that page with "/" left in the address bar.
   if (user.mustChangePassword) redirect(PASSWORD_PAGE);
@@ -185,7 +190,9 @@ export async function createBootstrapAdmin(
 
   if (name.length < 2) return { error: "Enter your name." };
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email." };
-  if (password.length < 10) return { error: "Password must be at least 10 characters." };
+  // Final review M-8: the same rules as every new password (length, then letters and a number).
+  const problem = passwordProblem(password, {});
+  if (problem) return { error: problem };
 
   const passwordHash = await bcrypt.hash(password, 10);
   try {

@@ -67,9 +67,12 @@ export type SignInReservation = { paused: true } | { paused: false; attemptId: s
 
 /**
  * Fix round 1 (I-1): the check and the record under one per-email lock, so a burst of parallel attempts can't all
- * pass the check before any failure lands. Inside a transaction holding `pg_advisory_xact_lock` for this email: if
- * the email is paused, refuse; otherwise insert this attempt now, counted as a failure until it proves otherwise.
- * The lock ends with the transaction, before the caller's bcrypt compare, so no pooled connection waits on bcrypt.
+ * pass the check before any failure lands. Inside a transaction holding the email's advisory lock: if the email is
+ * paused, refuse; otherwise insert this attempt now, counted as a failure until it proves otherwise. The lock ends
+ * with the transaction, before the caller's bcrypt compare, so no pooled connection waits on bcrypt.
+ * Final review M-3: the lock is only TRIED (`pg_try_advisory_xact_lock`). When another attempt for the same email
+ * holds it, this one is answered as paused at once (the same reply as a pause), so a burst never parks pooled
+ * connections in a lock queue. A person signs in one attempt at a time; only parallel tries on one email see it.
  * Afterwards the caller keeps the row (a wrong password, a turned-off account), releases it (the right password
  * for a waiting or declined account: not a failure) or clears the email (a successful sign-in).
  */
@@ -92,13 +95,15 @@ export async function clearCurrentPasswordFailures(userId: string): Promise<void
 
 async function reserveIn(k: string, limit: Limit): Promise<SignInReservation> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK_NAMESPACE}::int4, hashtext(${k}::text))`;
+    const [lock] = await tx.$queryRaw<{ locked: boolean }[]>`
+      SELECT pg_try_advisory_xact_lock(${LOCK_NAMESPACE}::int4, hashtext(${k}::text)) AS locked`;
+    if (!lock?.locked) return { paused: true } as const; // another attempt for this email is in flight
     const now = new Date();
     if (await pausedIn(tx, k, now, limit)) return { paused: true } as const;
     const row = await tx.signInAttempt.create({ data: { emailKey: k, createdAt: now }, select: { id: true } });
     return { paused: false, attemptId: row.id } as const;
     // Prisma's 2 s default maxWait includes opening a connection, which a cold start can exceed (measured ~2.1 s on
-    // the laptop): a sign-in must not fail for that. The work inside is two short queries.
+    // the laptop): a sign-in must not fail for that. The work inside is three short queries and never waits on a lock.
   }, { maxWait: 10_000, timeout: 10_000 });
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
@@ -30,6 +30,44 @@ function subscribeWide(on: () => void) {
 const wideNow = () => window.matchMedia(WIDE).matches;
 // The server renders the wide layout; CSS hides the side panel below 1180 px until the client knows.
 const wideOnServer = () => true;
+
+/**
+ * The side panel's height (Task 5 fix wave, the 1440 screenshot): from wherever its top is now (lower at rest, 16 px
+ * once it sticks) to Cris's clearance above the window's bottom, so Cris's corner never covers a panel control. At
+ * least 320 px, so a short window still shows a usable panel (the page then scrolls).
+ */
+export function asideMaxHeight(viewportHeight: number, top: number, crisClear: number): number {
+  return Math.max(Math.round(viewportHeight - Math.max(top, 0) - crisClear - 16), 320);
+}
+
+/** Keeps the side panel's bottom above Cris's corner as the page scrolls or resizes, and as Cris comes and goes. */
+function useAsideAboveCris(active: boolean) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!active || !el) return;
+    let frame = 0;
+    const fit = () => {
+      frame = 0;
+      const clear = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cris-clear")) || 0;
+      el.style.maxHeight = `${asideMaxHeight(window.innerHeight, el.getBoundingClientRect().top, clear)}px`;
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(fit); };
+    fit();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    // Cris's dock appearing, hiding or moving changes --cris-clear (cris-widget.css) and the page above the panel.
+    const watch = new MutationObserver(schedule);
+    watch.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      watch.disconnect();
+    };
+  }, [active]);
+  return ref;
+}
 
 /**
  * Users & access (spec §4.4; boards Users2, Tablet2, Phone2): the client shell. The list is the server's (`?role=`,
@@ -76,6 +114,7 @@ export function UsersView({
 
   const { rows, total, page, pageCount, pendingCount, roleCounts } = list;
   const shown = selected ?? (wide ? rows[0] ?? null : null);
+  const asideRef = useAsideAboveCris(wide && !!shown);
   const filtered = !!(filter.role || filter.status || filter.q || filter.disabled !== null);
 
   /** The open panel has drafts that differ: moving away asks first (fix round 1, Minor 5). */
@@ -172,8 +211,9 @@ export function UsersView({
 
         {wide && shown && (
           <aside
+            ref={asideRef}
             aria-label={`${shown.name}'s details`}
-            className="sticky top-4 hidden max-h-[calc(100dvh-6rem)] min-h-[480px] flex-col overflow-hidden rounded-(--radius-card) border border-border bg-surface shadow-card min-[1180px]:flex"
+            className="sticky top-4 hidden max-h-[calc(100dvh-6rem)] min-h-[320px] flex-col overflow-hidden rounded-(--radius-card) border border-border bg-surface shadow-card min-[1180px]:flex"
           >
             {panelFor(shown)}
           </aside>

@@ -142,6 +142,18 @@ describe("setOwnPassword (first sign-in)", () => {
     expect(JSON.stringify(r)).not.toContain("proof");
   });
 
+  // Final review M-1: the change committed, so a failed session refresh doesn't turn it into an error.
+  it("still reports the saved password when this device's session refresh fails", async () => {
+    signIn({ mustChangePassword: true, passwordHash: tempHash });
+    h.unstableUpdate.mockRejectedValueOnce(new Error("no cookie store"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await inRequest(() => setOwnPassword({ password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
+    expect(r).toEqual({ ok: true, data: { sessionVersion: 1 } });
+    expect(h.audits).toHaveLength(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+
   it("enforces the rules on the server", async () => {
     signIn({ mustChangePassword: true, passwordHash: tempHash });
     const cases: Array<[Record<string, string>, string, string]> = [
@@ -254,11 +266,13 @@ describe("changeOwnPassword (Account settings)", () => {
       expect(attempts.rows).toHaveLength(0);
     });
 
-    it("a parallel burst of wrong passwords gets five compares' worth of tries, no more", async () => {
+    it("a parallel burst of wrong passwords gets five compares' worth of tries at most (final review M-3)", async () => {
       signIn({ mustChangePassword: false, passwordHash: currentHash });
       const results = await Promise.all(Array.from({ length: 8 }, () => wrong()));
-      expect(results.filter((r) => !r.ok && r.kind === "validation")).toHaveLength(5);
-      expect(results.filter((r) => !r.ok && r.kind === "rate_limited")).toHaveLength(3);
+      const tried = results.filter((r) => !r.ok && r.kind === "validation").length;
+      expect(tried).toBeGreaterThanOrEqual(1);
+      expect(tried).toBeLessThanOrEqual(5);
+      expect(results.filter((r) => !r.ok && r.kind === "rate_limited")).toHaveLength(8 - tried);
     });
   });
 });
