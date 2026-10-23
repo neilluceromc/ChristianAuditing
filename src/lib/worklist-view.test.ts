@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  BULK, COLUMNS, DEFAULT_SORT, NO_FILTERS, PER_PAGE, bulkCheckedToast, bulkToast, bulkTriageToast, capNote, categoryChips, decisionToast,
+  BULK, COLUMNS, DEFAULT_SORT, NO_FILTERS, PER_PAGE, bulkCheckedToast, bulkToast, bulkTriageToast, capNote, categoryChips, categoryOption, categoryTrigger, decisionToast,
   emptyQueue, filterRows, filtersActive, filtersFor, headerCounts, isRed, nextSort, pageFrom, pageLabel, pageOfKey, paginate,
   queueFrom, queueTabs, recordHref, selectAfter, sortRows, workHref,
   focusAfterDecision, isChangedElsewhere, refusalToast, undoReport, focusIsFree, drawerStays, refusedRowLeft,
@@ -75,6 +75,14 @@ describe("filters", () => {
       { label: "Monitor", value: "Monitor", count: 1 },
       { label: "Uncategorised", value: "Uncategorised", count: 1 },
     ]);
+  });
+  it("the category menu: Category: All, or the chosen one with its count; each option shows its count", () => {
+    const chips = categoryChips(rows);
+    expect(categoryTrigger(chips, null)).toBe("Category: All");
+    expect(categoryTrigger(chips, "Monitor")).toBe("Category: Monitor (1)");
+    // a category the queue no longer holds (its last row decided): still named, with 0
+    expect(categoryTrigger(chips, "Printer")).toBe("Category: Printer (0)");
+    expect(chips.map(categoryOption)).toEqual(["All (3)", "Laptop (1)", "Monitor (1)", "Uncategorised (1)"]);
   });
   it("a category narrows the rows", () => {
     expect(keys(filterRows(rows, { ...NO_FILTERS, category: "Monitor" }))).toEqual(["triage:t2"]);

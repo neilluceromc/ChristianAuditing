@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   RETURN_NOTE_LABEL, approvalItem, checkItem, groupWork, hireItem, historyByAsset, lastReturnByAsset, leaverItem, loanItem,
-  loanStatus, missingItem, noteText, purchaseReviewItem, repairItem, sectionStats, triageItem, warrantyFact,
+  loanStatus, missingItem, noteText, purchaseReviewItem, repairItem, returnHolderKeys, sectionStats, triageItem, warrantyFact,
   type ColumnsOf, type WorkAssetLike, type WorkGroup, type WorkItem, type WorkSectionId,
 } from "./worklist";
 
@@ -73,11 +73,56 @@ describe("historyByAsset", () => {
       e("a2", "2026-05-01", "create"),
     ], new Map([["a1", "BR-LT-1025"], ["a2", "BR-MN-1021"]]));
     expect(m.get("a1")).toEqual([
-      { at: day("2026-06-03"), text: "Neil Lucero returned for triage" },
+      { at: day("2026-06-03"), text: "Returned · recorded by Neil Lucero" },
       { at: day("2026-03-01"), text: "Neil Lucero changed to Loan" },
       { at: day("2026-02-01"), text: "Neil Lucero assigned to EMP-0042" },
     ]);
     expect(m.get("a2")).toEqual([{ at: day("2026-05-01"), text: "Neil Lucero created" }]);
+  });
+});
+
+describe("historyByAsset: a return names who handed it back, and who recorded it (polish)", () => {
+  const tags = new Map([["a1", "BR-LT-1025"]]);
+  const ret = (diff: unknown, action = "lifecycle.return") =>
+    ({ entityId: "a1", createdAt: day("2026-06-03"), action, diff, actorLabel: "Kristine Valdez" });
+  const triageDiff = { status: { from: "DEPLOYED", to: "SPARE" }, returnedAt: { from: null, to: "2026-06-03" } };
+  const holders = new Map([["EMP-0042", "Juan dela Cruz"], ["emp-id-7", "Ana Reyes"]]);
+  it("{holder} returned it · recorded by {actor} — the holder read from the diff's employee number", () => {
+    const m = historyByAsset([ret({ ...triageDiff, assignee: { from: "EMP-0042", to: null } })], tags, 3, holders);
+    expect(m.get("a1")?.map((h) => h.text)).toEqual(["Juan dela Cruz returned it · recorded by Kristine Valdez"]);
+  });
+  it("a holder written by id (no employee number) is found too", () => {
+    const m = historyByAsset([ret({ ...triageDiff, assignee: { from: "emp-id-7", to: null } })], tags, 3, holders);
+    expect(m.get("a1")?.map((h) => h.text)).toEqual(["Ana Reyes returned it · recorded by Kristine Valdez"]);
+  });
+  it("no holder known: Returned · recorded by {actor}", () => {
+    expect(historyByAsset([ret(triageDiff)], tags, 3, holders).get("a1")?.[0].text).toBe("Returned · recorded by Kristine Valdez");
+    // a holder the lookup did not find reads the same — never a bare employee number or id
+    expect(historyByAsset([ret({ ...triageDiff, assignee: { from: "EMP-9999", to: null } })], tags, 3, holders).get("a1")?.[0].text)
+      .toBe("Returned · recorded by Kristine Valdez");
+  });
+  it("an approved request's return and one through Cris say so; a return not for triage keeps its status", () => {
+    const withHolder = { ...triageDiff, assignee: { from: "EMP-0042", to: null } };
+    expect(historyByAsset([ret(withHolder, "lifecycle.return executed")], tags, 3, holders).get("a1")?.[0].text)
+      .toBe("Juan dela Cruz returned it · recorded by Kristine Valdez (approved request)");
+    expect(historyByAsset([ret({ ...withHolder, via: { from: null, to: "Cris" } })], tags, 3, holders).get("a1")?.[0].text)
+      .toBe("Juan dela Cruz returned it · recorded by Kristine Valdez (via Cris)");
+    expect(historyByAsset([ret({ status: { from: "DEPLOYED", to: "DEFECTIVE" }, assignee: { from: "EMP-0042", to: null } })], tags, 3, holders).get("a1")?.[0].text)
+      .toBe("Juan dela Cruz returned it as Defective · recorded by Kristine Valdez");
+  });
+  it("returnHolderKeys: the employee numbers (or ids) the returns name, once each", () => {
+    expect(returnHolderKeys([
+      ret({ assignee: { from: "EMP-0042", to: null } }),
+      ret({ assignee: { from: "EMP-0042", to: null } }, "lifecycle.return executed"),
+      ret(triageDiff),
+      { entityId: "a1", createdAt: day("2026-06-01"), action: "lifecycle.assign", diff: { assignee: { from: null, to: "EMP-0050" } }, actorLabel: "X" },
+    ])).toEqual(["EMP-0042"]);
+  });
+  it("other events read as before", () => {
+    const m = historyByAsset([
+      { entityId: "a1", createdAt: day("2026-06-01"), action: "lifecycle.assign", diff: { assignee: { from: null, to: "EMP-0042" } }, actorLabel: "Neil Lucero" },
+    ], tags, 3, holders);
+    expect(m.get("a1")?.[0].text).toBe("Neil Lucero assigned to EMP-0042");
   });
 });
 

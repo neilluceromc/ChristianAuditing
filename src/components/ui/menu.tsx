@@ -10,7 +10,15 @@ export interface MenuItem {
   onSelect: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /**
+   * Set on every item of a pick-one menu (the Worklist's category filter): each item is then a `menuitemradio`
+   * with `aria-checked`, the checked one marked with a tick and focused first when the menu opens from the keyboard.
+   */
+  checked?: boolean;
 }
+
+/** The menu's focusable items, plain or radio. */
+const ITEMS = "[role^=menuitem]:not([aria-disabled])";
 
 /** The gap between the trigger and the popup, in px (the old mt-1 / mb-1). */
 const GAP = 4;
@@ -36,6 +44,7 @@ export function Menu({
   trigger,
   items,
   align = "end",
+  label,
 }: {
   trigger: (props: {
     onClick: () => void;
@@ -47,6 +56,8 @@ export function Menu({
   }) => React.ReactNode;
   items: MenuItem[];
   align?: "start" | "end";
+  /** the popup's accessible name */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   // Phase 30 review (R14): the popup renders in a portal with position: fixed, placed from the
@@ -65,7 +76,8 @@ export function Menu({
     rootRef.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
   };
   const focusFirstItem = () => {
-    listRef.current?.querySelector<HTMLElement>("[role=menuitem]:not([aria-disabled])")?.focus();
+    const list = listRef.current;
+    (list?.querySelector<HTMLElement>(`${ITEMS}[aria-checked="true"]`) ?? list?.querySelector<HTMLElement>(ITEMS))?.focus();
   };
 
   function onTriggerClick() {
@@ -171,7 +183,7 @@ export function Menu({
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const nodes = Array.from(
-          listRef.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not([aria-disabled])") ?? [],
+          listRef.current?.querySelectorAll<HTMLElement>(ITEMS) ?? [],
         );
         if (nodes.length === 0) return;
         const i = nodes.indexOf(document.activeElement as HTMLElement);
@@ -204,6 +216,7 @@ export function Menu({
           ref={listRef}
           id={menuId}
           role="menu"
+          aria-label={label}
           className="fixed z-40 min-w-[160px] rounded-(--radius-btn) border border-border bg-surface-raised p-1 shadow-pop"
           // hidden until placed, so the first frame never shows it at the page's corner
           style={{ ...placement, visibility: placement ? undefined : "hidden", animation: "fade var(--dur-2) var(--ease-std)" }}
@@ -211,7 +224,8 @@ export function Menu({
           {items.map((item) => (
             <button
               key={item.label}
-              role="menuitem"
+              role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+              aria-checked={item.checked}
               type="button"
               aria-disabled={item.disabled || undefined}
               disabled={item.disabled}
@@ -222,12 +236,16 @@ export function Menu({
               }}
               className={cn(
                 "block w-full rounded-[5px] px-2.5 py-1.5 text-left text-xs",
+                item.checked !== undefined && "flex items-center gap-2 whitespace-nowrap",
                 "disabled:pointer-events-none disabled:opacity-55",
                 item.danger
                   ? "text-[var(--error-text)] hover:bg-[var(--st-fault-bg)]"
                   : "text-fg-secondary hover:bg-surface-subtle",
               )}
             >
+              {item.checked !== undefined && (
+                <span aria-hidden className={cn("w-3 shrink-0 text-accent", !item.checked && "invisible")}>✓</span>
+              )}
               {item.label}
             </button>
           ))}

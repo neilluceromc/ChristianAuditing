@@ -4,7 +4,8 @@
  * live in home/queries.ts.
  */
 import type { ApprovalType, AssetClass, Priority } from "@prisma/client";
-import { auditSentence } from "./activity";
+import { auditSentence, viaSuffix } from "./activity";
+import { statusLabel } from "./asset-class";
 import { summarizeApproval } from "./approval-execution";
 import { slaLabel } from "./approvals-list";
 import { addDays, daysUntil, dueStatus } from "./deadlines";
@@ -397,11 +398,43 @@ export function lastReturnByAsset(rows: WorkReturnRow[]): Map<string, WorkReturn
 
 export interface WorkAuditRow { entityId: string; action: string; diff: unknown; actorLabel: string; createdAt: Date }
 
+const RETURN_ACTIONS: ReadonlySet<string> = new Set(["lifecycle.return", "lifecycle.return executed"]);
+type AuditDiffLike = Record<string, { from?: unknown; to?: unknown } | undefined> | null;
+
+/** The holder a return's audit diff names: `assignee.from`, the employee number (or, without one, the id) prepareLifecycle wrote. */
+function returnHolderKey(r: Pick<WorkAuditRow, "action" | "diff">): string | null {
+  if (!RETURN_ACTIONS.has(r.action)) return null;
+  const from = (r.diff as AuditDiffLike)?.assignee?.from;
+  return typeof from === "string" && from.trim() ? from : null;
+}
+
+/** The employee numbers (or ids) the return events name, once each — what lifecycleHistory looks up the names of. */
+export function returnHolderKeys(rows: Pick<WorkAuditRow, "action" | "diff">[]): string[] {
+  return [...new Set(rows.map(returnHolderKey).filter((k): k is string => k !== null))];
+}
+
+/**
+ * A return in the panel's history (polish): the person who handed it back, then the IT person who recorded it — so
+ * it never reads as if the recorder returned it while Last holder names someone else. A return that did not land for
+ * triage keeps its status ("as Defective"); an approved request's and Cris's keep their suffixes.
+ */
+function returnSentence(r: WorkAuditRow, holder: string | null): string {
+  const diff = r.diff as AuditDiffLike;
+  const to = diff?.status?.to;
+  const outcome = diff?.returnedAt?.to || !to ? "" : ` as ${statusLabel(String(to))}`;
+  const approved = r.action.endsWith(" executed") ? " (approved request)" : "";
+  const head = holder ? `${holder} returned it${outcome}` : `Returned${outcome}`;
+  return `${head} · recorded by ${r.actorLabel}${approved}${viaSuffix(r.diff)}`;
+}
+
 /**
  * The last `per` lifecycle events per asset, newest first, from one batched audit read — each the same sentence
- * every activity feed builds (`auditSentence`), without the tag the panel already shows.
+ * every activity feed builds (`auditSentence`), without the tag the panel already shows; a return names its holder
+ * (`holders`: employee number or id → name, for `returnHolderKeys`) and its recorder instead.
  */
-export function historyByAsset(rows: WorkAuditRow[], tags: ReadonlyMap<string, string>, per = 3): Map<string, WorkHistoryEntry[]> {
+export function historyByAsset(
+  rows: WorkAuditRow[], tags: ReadonlyMap<string, string>, per = 3, holders: ReadonlyMap<string, string> = new Map(),
+): Map<string, WorkHistoryEntry[]> {
   const grouped = new Map<string, WorkAuditRow[]>();
   for (const r of rows) grouped.set(r.entityId, [...(grouped.get(r.entityId) ?? []), r]);
   const out = new Map<string, WorkHistoryEntry[]>();
@@ -412,7 +445,9 @@ export function historyByAsset(rows: WorkAuditRow[], tags: ReadonlyMap<string, s
       .slice(0, per)
       .map((r) => ({
         at: r.createdAt,
-        text: auditSentence({ actorLabel: r.actorLabel, action: r.action, diff: r.diff, entityLabel: tags.get(id) ?? "" }, { omitEntity: true }),
+        text: RETURN_ACTIONS.has(r.action)
+          ? returnSentence(r, holders.get(returnHolderKey(r) ?? "") ?? null)
+          : auditSentence({ actorLabel: r.actorLabel, action: r.action, diff: r.diff, entityLabel: tags.get(id) ?? "" }, { omitEntity: true }),
       })));
   }
   return out;

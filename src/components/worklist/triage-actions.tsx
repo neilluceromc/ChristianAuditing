@@ -13,6 +13,14 @@ type QuickOutcome = "SPARE" | "DEFECTIVE";
 export const PANEL_BUTTON = "h-11 w-full text-[13px] aria-disabled:cursor-default aria-disabled:opacity-55";
 
 /**
+ * A row of the panel's secondary buttons (polish): a flex row whose buttons size to their labels and share what is
+ * left ("Send to repair" wider); when the panel is too narrow for them all, whole buttons wrap — a label never
+ * breaks inside its button. Still 44 px tall.
+ */
+export const ACTION_ROW = "flex flex-wrap gap-2";
+export const ROW_BUTTON = "h-11 flex-auto whitespace-nowrap text-[13px] aria-disabled:cursor-default aria-disabled:opacity-55";
+
+/**
  * While a decision runs, a panel button stays focusable — `aria-disabled`, not `disabled` — so focus never drops to
  * the page when the call starts (fix round 1, I1); the caller's handler is the guard (`unlessBusy`).
  */
@@ -49,9 +57,9 @@ export function TriageButtons({
           label="Reason" required rows={2} value={reason} onChange={onReason} chips={chipsForTriage(choice)}
           error={error ?? undefined} disabled={busy} inputRef={reasonRef}
         />
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="ghost" className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose(null))}>Cancel</Button>
-          <Button variant="primary" className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, onConfirm)}>Confirm</Button>
+        <div data-action-row="" className={ACTION_ROW}>
+          <Button variant="ghost" className={ROW_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose(null))}>Cancel</Button>
+          <Button variant="primary" className={ROW_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, onConfirm)}>Confirm</Button>
         </div>
       </div>
     );
@@ -61,10 +69,10 @@ export function TriageButtons({
       <Button variant="primary" className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onDecide("SPARE"))}>
         {TRIAGE_LABEL.SPARE}
       </Button>
-      <div className="grid grid-cols-3 gap-2">
-        <Button className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onDecide("DEFECTIVE"))}>{TRIAGE_LABEL.DEFECTIVE}</Button>
-        <Button className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose("DISPOSE"))}>{TRIAGE_LABEL.DISPOSE}</Button>
-        <Button className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose("DONATED"))}>{TRIAGE_LABEL.DONATED}</Button>
+      <div data-action-row="" className={ACTION_ROW}>
+        <Button className={ROW_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onDecide("DEFECTIVE"))}>{TRIAGE_LABEL.DEFECTIVE}</Button>
+        <Button className={ROW_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose("DISPOSE"))}>{TRIAGE_LABEL.DISPOSE}</Button>
+        <Button className={ROW_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose("DONATED"))}>{TRIAGE_LABEL.DONATED}</Button>
       </div>
     </div>
   );

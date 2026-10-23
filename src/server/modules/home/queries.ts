@@ -12,7 +12,7 @@ import {
 } from "@/lib/home";
 import {
   approvalItem, checkItem, groupWork, hireItem, historyByAsset, lastReturnByAsset, leaverItem, loanItem, loanSoonEdge,
-  missingItem, purchaseReviewItem, repairItem, triageItem,
+  missingItem, purchaseReviewItem, repairItem, returnHolderKeys, triageItem,
   type WorkAuditRow, type WorkGroup, type WorkHistoryEntry, type WorkItem, type WorkParty, type WorkReturnLike,
   type WorkRow, type WorkSectionId,
 } from "@/lib/worklist";
@@ -161,7 +161,21 @@ async function lifecycleHistory(tags: ReadonlyMap<string, string>): Promise<Map<
     WHERE h.rn <= ${HISTORY_PER_ASSET}
     ORDER BY h."entityId", h.rn
   `);
-  return historyByAsset(rows, tags, HISTORY_PER_ASSET);
+  return historyByAsset(rows, tags, HISTORY_PER_ASSET, await returnHolders(returnHolderKeys(rows)));
+}
+
+/**
+ * Polish: the people the shown returns name — a return's audit diff holds the holder's employee number (or, without
+ * one, their id: prepareLifecycle's `assignee.from`), so its history line can say who handed it back. One read, and
+ * only when a return is shown.
+ */
+async function returnHolders(keys: string[]): Promise<Map<string, string>> {
+  if (keys.length === 0) return new Map();
+  const people = await prisma.employee.findMany({
+    where: { OR: [{ employeeNo: { in: keys } }, { id: { in: keys } }] },
+    select: { id: true, employeeNo: true, name: true },
+  });
+  return new Map(people.flatMap((p) => [[p.employeeNo, p.name], [p.id, p.name]] as const));
 }
 
 /**
