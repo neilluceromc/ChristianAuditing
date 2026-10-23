@@ -1,18 +1,20 @@
 import { Prisma, type AssetClass, type Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { fmtMoney, localDateISO } from "@/lib/format";
+import { fmtMoney } from "@/lib/format";
 import { INVENTORY_LIST_CONFIG } from "@/lib/inventory-list";
 import { parseListState, serializeListState, withFilter } from "@/lib/url-state";
 import { slaLabel } from "@/lib/approvals-list";
 import { summarizeApproval } from "@/lib/approval-execution";
 import { approvalClassWhere } from "@/lib/approval-access";
 import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, resolvePolicy } from "@/lib/loadout";
-import { beyondRepair, downDays, repairStage, REPAIR_STAGE_LABEL } from "@/lib/repairs";
 import {
   DISMISS_PREF_KEY, activeDismissals, coverageLine, todayStamp,
 } from "@/lib/home";
 import {
-  loanRow, loanSoonEdge, leaverRow, groupWork, purchaseReviewRow, type WorkGroup, type WorkRow, type WorkSectionId,
+  approvalItem, checkItem, groupWork, hireItem, historyByAsset, lastReturnByAsset, leaverItem, loanItem, loanSoonEdge,
+  missingItem, purchaseReviewItem, repairItem, triageItem,
+  type WorkAuditRow, type WorkGroup, type WorkHistoryEntry, type WorkItem, type WorkParty, type WorkReturnLike,
+  type WorkSectionId,
 } from "@/lib/worklist";
 import { orderByOffboardingAttention } from "@/lib/offboarding";
 import { leaverStates } from "@/server/modules/offboarding/queries";
@@ -30,6 +32,65 @@ const CAP = { small: 10, large: 50 };
 /** Phase 40 §6, migration 38: IT's purchase-order queue is the orders WITH_IT. */
 const PURCHASE_REVIEW_WHERE = { state: "WITH_IT" } as const satisfies Prisma.PurchaseOrderWhereInput;
 
+/** Worklist split view (H4): the asset fields every asset section's panel facts read. */
+const ASSET_FACTS_SELECT = {
+  id: true, tag: true, model: true, serial: true, purchasedAt: true, cost: true, warrantyUntil: true,
+  category: { select: { name: true } },
+} as const satisfies Prisma.AssetSelect;
+
+/** A person with their department or client. */
+const PARTY_SELECT = { name: true, department: { select: { name: true, kind: true } } } as const satisfies Prisma.EmployeeSelect;
+
+/** H4 plan call 3: a panel's history is the last 3 lifecycle events. */
+const HISTORY_PER_ASSET = 3;
+
+const money = (v: Prisma.Decimal | null): number | null => (v === null ? null : Number(v));
+const partyOf = (e: { name: string; department: { name: string; kind: "INTERNAL" | "CLIENT" } | null } | null): WorkParty | null =>
+  e ? { name: e.name, group: e.department ? { name: e.department.name, kind: e.department.kind } : null } : null;
+
+type AssetFacts = Prisma.AssetGetPayload<{ select: typeof ASSET_FACTS_SELECT }>;
+const assetFacts = (a: AssetFacts, history: ReadonlyMap<string, WorkHistoryEntry[]>) => ({
+  id: a.id, tag: a.tag, model: a.model, serial: a.serial, category: a.category?.name ?? null,
+  purchasedAt: a.purchasedAt, cost: money(a.cost), warrantyUntil: a.warrantyUntil, history: history.get(a.id) ?? [],
+});
+
+/**
+ * The last `HISTORY_PER_ASSET` lifecycle audit entries for every asset row read, in ONE query: a window per asset,
+ * on the (entityType, entityId, createdAt) index. The filter is lastLifecycleChange's own: lifecycle.*, register, create.
+ */
+async function lifecycleHistory(tags: ReadonlyMap<string, string>): Promise<Map<string, WorkHistoryEntry[]>> {
+  if (tags.size === 0) return new Map();
+  const rows = await prisma.$queryRaw<WorkAuditRow[]>(Prisma.sql`
+    SELECT "entityId", "action", "diff", "actorLabel", "createdAt" FROM (
+      SELECT e."entityId", e."action", e."diff", e."actorLabel", e."createdAt",
+             ROW_NUMBER() OVER (PARTITION BY e."entityId" ORDER BY e."createdAt" DESC, e."id" DESC) AS rn
+      FROM "AuditEntry" e
+      WHERE e."entityType" = 'asset' AND e."entityId" = ANY(${[...tags.keys()]}::text[])
+        AND (e."action" LIKE 'lifecycle.%' OR e."action" IN ('register', 'create'))
+    ) h
+    WHERE h.rn <= ${HISTORY_PER_ASSET}
+  `);
+  return historyByAsset(rows, tags, HISTORY_PER_ASSET);
+}
+
+/**
+ * Each asset's latest executed return — the last holder, their department or client, and the hand-back reason
+ * (returnAsset's `payload.reason`). One query for every asset id given; there is no assignment-history model.
+ */
+async function latestReturns(assetIds: string[]): Promise<Map<string, WorkReturnLike>> {
+  if (assetIds.length === 0) return new Map();
+  const rows = await prisma.approval.findMany({
+    where: { type: "lifecycle_return", state: "EXECUTED", assetId: { in: assetIds } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: {
+      assetId: true, createdAt: true, payload: true,
+      requestedBy: { select: { name: true } },
+      employee: { select: PARTY_SELECT },
+    },
+  });
+  return lastReturnByAsset(rows);
+}
+
 /**
  * The worklist (Phase 15, spec §5): grouped sections in a fixed order, each
  * row with the one action that clears it. Every row is a real record —
@@ -40,7 +101,7 @@ export async function worklist(
   role: Role,
   opts: { limit?: number; excludeOwnClaims?: boolean },
   now: Date = new Date(),
-): Promise<WorkGroup[]> {
+): Promise<WorkGroup<WorkItem>[]> {
   const scope = approvalClassWhere(role);
   // Phase 21 spec §4.2: one approval appears once on Home — a claim you hold
   // already shows (with its SLA and overdue mark) in "Claimed by you", so
@@ -63,13 +124,13 @@ export async function worklist(
       where: breachedWhere,
       orderBy: [{ slaAt: "asc" }, { id: "asc" }],
       take: CAP.small,
-      include: { asset: true, employee: true },
+      include: { asset: true, employee: true, requestedBy: { select: { name: true } } },
     }),
     prisma.approval.findMany({
       where: { AND: [{ state: "EXECUTION_FAILED" as const }, scope] },
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: CAP.small,
-      include: { asset: true, employee: true },
+      include: { asset: true, employee: true, requestedBy: { select: { name: true } } },
     }),
     // Phase 32 (spec §3): every leaver's real snapshot, worst first.
     leaverStates(),
@@ -78,21 +139,26 @@ export async function worklist(
       where: { status: "MISSING", cls: "IT" },
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: CAP.small,
-      select: { id: true, tag: true, model: true, updatedAt: true },
+      select: { ...ASSET_FACTS_SELECT, updatedAt: true, assignee: { select: PARTY_SELECT } },
     }),
     // custody that doesn't add up: DEPLOYED with nobody holding it
     prisma.asset.findMany({
       where: { status: "DEPLOYED", assigneeId: null, cls: "IT" },
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: CAP.small,
-      select: { id: true, tag: true, model: true, updatedAt: true },
+      select: { ...ASSET_FACTS_SELECT, updatedAt: true, assignee: { select: PARTY_SELECT } },
     }),
     // Phase 14 (spec §5.5): IT assets Purchasing registered, waiting for IT.
     prisma.asset.findMany({
       where: { cls: "IT", itVerifiedAt: null },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: CAP.small,
-      select: { id: true, tag: true, model: true, createdAt: true },
+      select: {
+        ...ASSET_FACTS_SELECT, createdAt: true,
+        purchaseOrder: { select: { id: true, refNo: true } },
+        // who registered it: the registration's author (createAsset writes one PurchaseRecord per registration)
+        purchaseRecord: { select: { createdBy: { select: { name: true } }, purchaseOrder: { select: { id: true, refNo: true } } } },
+      },
     }),
     prisma.userPreference.findUnique({
       where: { userId_key: { userId, key: DISMISS_PREF_KEY } },
@@ -103,7 +169,7 @@ export async function worklist(
       where: { cls: "IT", returnedAt: { not: null } },
       orderBy: [{ returnedAt: "asc" }, { id: "asc" }],
       take: CAP.large,
-      select: { id: true, tag: true, model: true, returnedAt: true },
+      select: { ...ASSET_FACTS_SELECT, returnedAt: true },
     }),
     // Repairs to chase — the same fields the Repairs saved view derives its
     // stage and down-clock from (src/lib/repairs.ts).
@@ -112,8 +178,8 @@ export async function worklist(
       orderBy: [{ defectiveSince: "asc" }, { id: "asc" }],
       take: CAP.large,
       select: {
-        id: true, tag: true, model: true, status: true, vendorId: true, rmaRef: true,
-        repairQuote: true, cost: true, defectiveSince: true, repairEndedAt: true, vendor: { select: { name: true } },
+        ...ASSET_FACTS_SELECT, status: true, vendorId: true, rmaRef: true,
+        repairQuote: true, defectiveSince: true, repairEndedAt: true, vendor: { select: { name: true } },
       },
     }),
     // Loans: ordered by due date (nulls first), limited to CAP.large
@@ -121,7 +187,7 @@ export async function worklist(
       where: { cls: "IT", status: "TEMPORARY" },
       orderBy: [{ loanDueAt: { sort: "asc", nulls: "first" } }, { id: "asc" }],
       take: CAP.large,
-      select: { id: true, tag: true, model: true, loanDueAt: true, assignee: { select: { name: true } } },
+      select: { ...ASSET_FACTS_SELECT, loanDueAt: true, assignee: { select: PARTY_SELECT } },
     }),
     // Phase 40 §6: purchase orders waiting for IT's check, newest first.
     prisma.purchaseOrder.findMany({
@@ -129,152 +195,94 @@ export async function worklist(
       orderBy: [{ submittedAt: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }, { id: "desc" }],
       take: CAP.large,
       select: {
-        id: true, refNo: true, submittedAt: true, updatedAt: true,
+        id: true, refNo: true, submittedAt: true, updatedAt: true, invoiceRef: true,
         requestedBy: { select: { name: true } },
         department: { select: { name: true } },
-        lines: { select: { description: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 },
-        _count: { select: { lines: true } },
+        vendor: { select: { name: true } },
+        // every line: the first names the order, all of them make its total (the /purchases list's Σ qty × unit price)
+        lines: { select: { description: true, qty: true, unitPrice: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       },
     }),
   ]);
 
-  const rows: WorkRow[] = [];
+  // H4 plan call 3: two batched reads for the panels, after the rows are known — every asset row's last lifecycle
+  // events (one windowed query) and the latest return for triage and missing rows (one query). Never one per row.
+  const tags = new Map<string, string>();
+  for (const a of [...triage, ...repairs, ...awaiting, ...loans, ...missing, ...orphaned]) tags.set(a.id, a.tag);
+  for (const a of [...breached, ...failed]) if (a.asset) tags.set(a.asset.id, a.asset.tag);
+  const [history, returns] = await Promise.all([
+    lifecycleHistory(tags),
+    latestReturns([...triage, ...missing, ...orphaned].map((a) => a.id)),
+  ]);
+  const historyOf = (assetId: string | null) => (assetId ? history.get(assetId) ?? [] : []);
 
-  for (const a of breached) {
-    const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
-    rows.push({
-      key: `queue:${a.id}`,
-      section: "queue",
-      title: `${a.refNo} · ${s.line1}`,
-      meta: `${slaLabel(a.slaAt, now).text} · ${a.priority.toLowerCase()}`,
-      href: `/approvals/${a.id}`,
-      action: "Open",
-      severity: daysSince(a.slaAt, now),
-      rank: 0,
-      ageDays: daysSince(a.slaAt, now),
-    });
-  }
+  const rows: WorkItem[] = [];
 
-  for (const a of failed) {
-    const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
-    rows.push({
-      key: `queue:${a.id}`,
-      section: "queue",
-      title: `${a.refNo} · ${s.line1}`,
-      meta: `execution failed ${daysSince(a.updatedAt, now)} d ago`,
-      href: `/approvals/${a.id}`,
-      action: "Open",
-      severity: daysSince(a.updatedAt, now),
-      rank: 1,
-      ageDays: daysSince(a.updatedAt, now),
-    });
-  }
+  const approvalLike = (a: (typeof breached)[number]) => ({
+    id: a.id, refNo: a.refNo, type: a.type, payload: a.payload, priority: a.priority, slaAt: a.slaAt,
+    createdAt: a.createdAt, updatedAt: a.updatedAt, workerError: a.workerError, requestedBy: a.requestedBy.name,
+    asset: a.asset ? { tag: a.asset.tag, cls: a.asset.cls } : null, employee: a.employee ? { name: a.employee.name } : null,
+    history: historyOf(a.assetId),
+  });
+  for (const a of breached) rows.push(approvalItem(approvalLike(a), "breached", now));
+  for (const a of failed) rows.push(approvalItem(approvalLike(a), "failed", now));
 
-  const todayISO = localDateISO(now);
   // Spec §3: each leaver's label and href come from offboardingNext over the
   // real snapshot (failed returns, M365 status), worst first.
   for (const e of orderByOffboardingAttention(leavers, "desc").slice(0, CAP.small)) {
-    rows.push(leaverRow({
+    rows.push(leaverItem({
       id: e.id, name: e.name, employeeNo: e.employeeNo, itemsOut: e.itemsOut,
       employment: e.employment, dueAt: e.dueAt, undecided: e.undecided, failed: e.failed, m365Status: e.m365, itAccess: e.itAccess,
-    }, todayISO));
+      department: e.department, started: e.started,
+    }, now));
   }
 
   rows.push(...hireWork.rows);
 
   for (const a of missing) {
-    rows.push({
-      key: `missing:${a.id}`,
-      section: "missing",
-      title: `${a.tag} is missing`,
-      meta: `${a.model} · custody lost ${daysSince(a.updatedAt, now)} d ago`,
-      href: `/inventory/${a.id}`,
-      action: "Investigate",
-      severity: daysSince(a.updatedAt, now),
-      ageDays: daysSince(a.updatedAt, now),
-      entity: { kind: "asset", id: a.id, label: a.tag },
-    });
+    rows.push(missingItem({
+      ...assetFacts(a, history), problem: "missing", updatedAt: a.updatedAt,
+      holder: partyOf(a.assignee), lastReturn: returns.get(a.id) ?? null,
+    }, now));
   }
 
   for (const a of orphaned) {
-    rows.push({
-      key: `missing:${a.id}`,
-      section: "missing",
-      title: `${a.tag} reads Deployed with no holder`,
-      meta: `${a.model} · assign it or return it to the pool`,
-      href: `/inventory/${a.id}`,
-      action: "Fix record",
-      severity: daysSince(a.updatedAt, now),
-      ageDays: daysSince(a.updatedAt, now),
-      // Ruling R6: no in-place control — assignAsset refuses anything but SPARE,
-      // so the fix lives on the record (Change status…).
-      entity: { kind: "asset", id: a.id, label: a.tag },
-    });
+    rows.push(missingItem({
+      ...assetFacts(a, history), problem: "orphaned", updatedAt: a.updatedAt,
+      holder: partyOf(a.assignee), lastReturn: returns.get(a.id) ?? null,
+    }, now));
   }
 
   for (const a of awaiting) {
-    rows.push({
-      key: `check:${a.id}`,
-      section: "check",
-      title: `${a.tag} · ${a.model}`,
-      meta: `registered by Purchasing · ${daysSince(a.createdAt, now)} d waiting`,
-      href: `/inventory/${a.id}`,
-      action: "Check",
-      severity: daysSince(a.createdAt, now),
-      ageDays: daysSince(a.createdAt, now),
-      control: { kind: "it-check", asset: { id: a.id, tag: a.tag } },
-      entity: { kind: "asset", id: a.id, label: a.tag },
-    });
+    rows.push(checkItem({
+      ...assetFacts(a, history), createdAt: a.createdAt,
+      registeredBy: a.purchaseRecord?.createdBy.name ?? null,
+      fromPo: a.purchaseOrder ?? a.purchaseRecord?.purchaseOrder ?? null,
+    }, now));
   }
 
   for (const a of triage) {
-    const n = daysSince(a.returnedAt!, now);
-    rows.push({
-      key: `triage:${a.id}`,
-      section: "triage",
-      title: `${a.tag} · ${a.model}`,
-      meta: `back ${n} d · triage it`,
-      href: `/inventory/${a.id}`,
-      action: "Triage",
-      severity: n,
-      ageDays: n,
-      control: { kind: "triage", asset: { id: a.id, tag: a.tag, model: a.model } },
-      entity: { kind: "asset", id: a.id, label: a.tag },
-    });
+    rows.push(triageItem({ ...assetFacts(a, history), returnedAt: a.returnedAt!, lastReturn: returns.get(a.id) ?? null }, now));
   }
 
   for (const a of repairs) {
-    const quote = a.repairQuote === null ? null : Number(a.repairQuote);
-    const cost = a.cost === null ? null : Number(a.cost);
-    const stage = repairStage({
-      status: a.status, vendorId: a.vendorId, rmaRef: a.rmaRef,
-      repairQuote: quote, cost, defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt,
-    }) ?? "to-assess";
-    const down = downDays({ status: a.status, defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt }, now) ?? 0;
-    const beyond = beyondRepair(quote, cost);
-    rows.push({
-      key: `repairs:${a.id}`,
-      section: "repairs",
-      title: `${a.tag} · ${a.model}`,
-      meta: `${REPAIR_STAGE_LABEL[stage]} · ${a.vendor?.name ?? "no vendor"}${a.rmaRef ? ` · ${a.rmaRef}` : ""} · down ${down} d${beyond ? " · beyond repair" : ""}`,
-      href: `/inventory/${a.id}`,
-      action: "Chase",
-      severity: down,
-      ageDays: down,
-      entity: { kind: "asset", id: a.id, label: a.tag },
-    });
+    rows.push(repairItem({
+      ...assetFacts(a, history), status: a.status, vendorId: a.vendorId, vendor: a.vendor?.name ?? null, rmaRef: a.rmaRef,
+      repairQuote: money(a.repairQuote), defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt,
+    }, now));
   }
 
   for (const a of loans) {
-    const r = loanRow({ id: a.id, tag: a.tag, model: a.model, loanDueAt: a.loanDueAt, holder: a.assignee?.name ?? null }, now);
+    const r = loanItem({ ...assetFacts(a, history), loanDueAt: a.loanDueAt, borrower: partyOf(a.assignee) }, now);
     if (r) rows.push(r);
   }
 
   for (const r of reviews) {
-    rows.push(purchaseReviewRow({
+    rows.push(purchaseReviewItem({
       id: r.id, refNo: r.refNo, submittedAt: r.submittedAt, updatedAt: r.updatedAt,
       requestedBy: r.requestedBy.name, department: r.department?.name ?? null,
-      firstLine: r.lines[0]?.description ?? null, lines: r._count.lines,
+      firstLine: r.lines[0]?.description ?? null, lines: r.lines.length,
+      vendor: r.vendor?.name ?? null, siNumber: r.invoiceRef, total: unitsValue(r.lines),
     }, now));
   }
 
@@ -296,13 +304,14 @@ export async function worklist(
  * ACTIVE employees who started within HIRE_WINDOW_DAYS with a required slot
  * still empty. `saturated` = the read hit its cap, so more may exist.
  */
-export async function hireWorkRows(now: Date): Promise<{ rows: WorkRow[]; saturated: boolean }> {
+export async function hireWorkRows(now: Date): Promise<{ rows: WorkItem[]; saturated: boolean }> {
   const hires = await prisma.employee.findMany({
     where: { employment: "ACTIVE", joinedAt: { gte: new Date(now.getTime() - HIRE_WINDOW_DAYS * DAY_MS) } },
     orderBy: [{ joinedAt: "asc" }, { id: "asc" }],
     take: CAP.small,
     select: {
       id: true, name: true, employeeNo: true, title: true, departmentId: true, joinedAt: true,
+      department: { select: { name: true, kind: true } },
       assets: { where: { cls: "IT" }, select: { id: true, tag: true, model: true, typeId: true, status: true } },
     },
   });
@@ -323,24 +332,20 @@ export async function hireWorkRows(now: Date): Promise<{ rows: WorkRow[]; satura
   ]);
   const hireExceptionsByEmployee = groupExceptionsByEmployee(hireExceptions);
 
-  const rows: WorkRow[] = [];
+  const rows: WorkItem[] = [];
   for (const e of hires) {
     const policy = resolvePolicy({ title: e.title, departmentId: e.departmentId }, policies);
     const exceptions = hireExceptionsByEmployee.get(e.id) ?? [];
     if (!policy && !exceptions.some((x) => x.kind === "ADD")) continue;
     const loadout = computeLoadout(effectiveSlots(policy?.slots ?? [], exceptions), e.assets);
     if (loadout.missingRequired === 0) continue;
-    rows.push({
-      key: `hires:${e.id}`,
-      section: "hires",
-      title: `${e.name} started ${daysSince(e.joinedAt, now)} d ago`,
-      meta: `${e.employeeNo} · ${loadout.missingRequired} required slot${loadout.missingRequired === 1 ? "" : "s"} empty · ${policy?.name ?? "personal loadout"}`,
-      href: `/employees/${e.id}#loadout`,
-      action: "Fill loadout",
-      severity: daysSince(e.joinedAt, now),
-      ageDays: daysSince(e.joinedAt, now),
-      entity: { kind: "employee", id: e.id, label: e.name },
-    });
+    // exactly the slots computeLoadout's missingRequired counts
+    const missingSlots = loadout.slots.filter((s) => !s.asset && s.slot.required && !s.coveredByLoan).map((s) => s.slot.name);
+    rows.push(hireItem({
+      id: e.id, name: e.name, employeeNo: e.employeeNo, title: e.title, joinedAt: e.joinedAt,
+      group: e.department ? { name: e.department.name, kind: e.department.kind } : null,
+      policyName: policy?.name ?? null, missingSlots,
+    }, now));
   }
   return { rows, saturated: hires.length === CAP.small };
 }

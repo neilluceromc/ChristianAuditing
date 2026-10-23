@@ -3,10 +3,16 @@
  * user chose, each row with the one action that clears it. Pure; the queries
  * live in home/queries.ts.
  */
+import type { ApprovalType, AssetClass, Priority } from "@prisma/client";
+import { auditSentence } from "./activity";
+import { summarizeApproval } from "./approval-execution";
+import { slaLabel } from "./approvals-list";
 import { addDays, daysUntil, dueStatus } from "./deadlines";
-import { fmtDate, localDateISO } from "./format";
+import { fmtDate, fmtDayMonth, fmtMoney, localDateISO } from "./format";
+import { PRIORITY_LABEL } from "./labels";
 import { offboardingNext, type LeaverState } from "./offboarding";
 import { since as waitingSince } from "./purchases-list";
+import { REPAIR_STAGE_LABEL, beyondRepair, downDays as repairDownDays, repairStage, type RepairStage } from "./repairs";
 
 export { DEFAULT_LOAN_DAYS } from "./lifecycle";
 /** A loan due within this many days is already on the list. */
@@ -69,12 +75,13 @@ export type WorkControl =
   | { kind: "loan-due"; asset: { id: string; tag: string }; loanDueAt: Date | null }
   | { kind: "assign"; asset: { id: string; tag: string; model: string } };
 
-export interface WorkGroup {
+/** `R` is WorkItem on the Worklist page (worklist()'s rows); Home reads the same groups as plain WorkRows. */
+export interface WorkGroup<R extends WorkRow = WorkRow> {
   section: WorkSection;
-  rows: WorkRow[];
+  rows: R[];
   total: number;
   capped: boolean;
-  hidden: WorkRow[];
+  hidden: R[];
   /** live SLA breaches (rank-0 queue rows) counted BEFORE Home's per-section limit; 0 for other sections */
   pastSla: number;
   /** final review I2: the oldest live row's age in days, taken BEFORE Home's per-section limit; 0 when none has an age */
@@ -188,14 +195,14 @@ export function workRowHref(row: WorkRow, canAct: boolean): string {
   return row.href;
 }
 
-export function groupWork(
-  rows: WorkRow[],
+export function groupWork<R extends WorkRow>(
+  rows: R[],
   dismissed: Set<string>,
   opts: { limit?: number },
   saturated: ReadonlySet<WorkSectionId> = new Set(),
-): WorkGroup[] {
+): WorkGroup<R>[] {
   const order = (a: WorkRow, b: WorkRow) => (a.rank ?? 0) - (b.rank ?? 0) || b.severity - a.severity;
-  return WORK_SECTIONS.flatMap((section) => {
+  return WORK_SECTIONS.flatMap((section): WorkGroup<R>[] => {
     const mine = rows.filter((r) => r.section === section.id);
     const live = mine.filter((r) => !dismissed.has(r.key)).sort(order);
     const hidden = mine.filter((r) => dismissed.has(r.key)).sort(order);
@@ -236,4 +243,508 @@ export function summaryChips(groups: WorkGroup[]): { id: WorkSectionId; label: s
 /** Rank-0 queue rows are SLA breaches (worklist()'s own ranking), counted before any row limit. */
 export function pastSlaCount(groups: WorkGroup[]): number {
   return groups.reduce((s, g) => s + g.pastSla, 0);
+}
+
+// ── Worklist split view (H4, plan calls 2, 3 and 13): every row carries its table columns and a details panel ──
+//
+// Each builder below returns the SAME WorkRow the worklist always built (Home reads it unchanged), plus `columns`
+// (that section's table cells, typed per section) and `detail` (the panel's facts, an optional note, and a short
+// history). Facts use real fields only; a key field with no value says "Not recorded" rather than vanishing.
+
+export type WorkGroupKind = "INTERNAL" | "CLIENT";
+/** A department (INTERNAL) or a client (CLIENT): the offshoring firm's two kinds of staff. */
+export interface WorkGroupRef { name: string; kind: WorkGroupKind }
+export interface WorkParty { name: string; group: WorkGroupRef | null }
+/** An asset's Item cell: model on top; category · tag under it. */
+export interface WorkItemCell { model: string; category: string | null; tag: string }
+/** `good` = still in force (a running warranty); `muted` = absent or over; `fault` = only an overdue loan or a breached SLA. */
+export interface WorkFact { label: string; value: string; tone?: "good" | "muted" | "fault"; mono?: true }
+/** The hand-back note (a return's reason) or a request's note; `by` = who recorded it. Absent when blank. */
+export interface WorkNote { label: string; text: string; by: string | null }
+export interface WorkHistoryEntry { at: Date; text: string }
+export interface WorkDetail { facts: WorkFact[]; note?: WorkNote; history: WorkHistoryEntry[] }
+export interface WorkSla { text: string; overdue: boolean }
+
+/** Plan call 2: each queue's table columns. Days are whole days; dates are the raw Date (the UI formats). */
+export interface WorkColumnsBySection {
+  /** `cost` is not a column: it feeds the summary's "Value at cost". */
+  triage: { item: WorkItemCell; lastHolder: WorkParty | null; returnedAt: Date; waitingDays: number; cost: number | null };
+  /** `vendor` null reads "Not sent". */
+  repairs: { item: WorkItemCell; vendor: string | null; stage: RepairStage; downDays: number };
+  check: { item: WorkItemCell; registeredBy: string | null; fromPo: { id: string; refNo: string } | null; waitingDays: number };
+  /** `summary` = the first line and "+N more"; `total` in pesos (Σ qty × unit price, the /purchases list's value). */
+  purchases: { po: { refNo: string; summary: string | null }; vendor: string | null; siNumber: string | null; total: number; waitingDays: number };
+  hires: { person: { name: string; employeeNo: string }; group: WorkGroupRef | null; startedAt: Date; missingSlots: number };
+  /** `dueDays` < 0 is late (the row is red); `status` is "8 days late", "due Fri", "no due date". */
+  loans: { item: WorkItemCell; borrower: WorkParty | null; dueAt: Date | null; dueDays: number | null; status: string; late: boolean };
+  missing: { item: WorkItemCell; problem: string; lastHolder: WorkParty | null; since: Date; sinceDays: number };
+  /** `sla.overdue` = breached (the row is red). */
+  queue: { what: string; who: string; waitingDays: number; sla: WorkSla | null };
+}
+export type WorkColumns = { [S in WorkSectionId]: { section: S } & WorkColumnsBySection[S] }[WorkSectionId];
+/** One section's columns, narrowed: `ColumnsOf<"triage">`. */
+export type ColumnsOf<S extends WorkSectionId> = Extract<WorkColumns, { section: S }>;
+
+/** A worklist row with its table cells and its details panel. Every WorkRow field is kept, so Home is unaffected. */
+export interface WorkItem extends WorkRow { columns: WorkColumns; detail: WorkDetail }
+
+/** The asset fields every asset section's facts read. `history` = the asset's last 3 lifecycle events, newest first. */
+export interface WorkAssetLike {
+  id: string;
+  tag: string;
+  model: string;
+  serial: string | null;
+  category: string | null;
+  purchasedAt: Date | null;
+  cost: number | null;
+  warrantyUntil: Date | null;
+  history: WorkHistoryEntry[];
+}
+
+/** The latest executed `lifecycle_return` approval on an asset: who handed it back, and the reason typed then. */
+export interface WorkReturnLike { holder: WorkParty | null; reason: string | null; recordedBy: string | null; at: Date }
+
+const DAY = 86_400_000;
+const NOT_RECORDED = "Not recorded";
+/** queries.ts's own rounding, so the new cells agree with the meta lines Home already shows. */
+const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY));
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+export const daysAgoText = (n: number): string => (n <= 0 ? "today" : `${plural(n, "day")} ago`);
+export const groupText = (g: WorkGroupRef): string => (g.kind === "CLIENT" ? `Client: ${g.name}` : g.name);
+export const partyText = (p: WorkParty): string => (p.group ? `${p.name} · ${groupText(p.group)}` : p.name);
+
+function fact(label: string, value: string | null, opts: { mono?: boolean; tone?: WorkFact["tone"] } = {}): WorkFact {
+  if (value === null) return { label, value: NOT_RECORDED, tone: "muted" };
+  return { label, value, ...(opts.tone ? { tone: opts.tone } : {}), ...(opts.mono ? { mono: true as const } : {}) };
+}
+
+/** Plan call 3: "until …" while the warranty runs (through its last Manila day), "ended …" after. */
+export function warrantyFact(until: Date | null, now: Date): WorkFact {
+  if (!until) return fact("Warranty", null);
+  return localDateISO(until) >= localDateISO(now)
+    ? { label: "Warranty", value: `until ${fmtDate(until)}`, tone: "good" }
+    : { label: "Warranty", value: `ended ${fmtDate(until)}`, tone: "muted" };
+}
+
+function boughtFact(a: Pick<WorkAssetLike, "purchasedAt" | "cost">): WorkFact {
+  const parts = [a.purchasedAt ? fmtDate(a.purchasedAt) : null, a.cost === null ? null : fmtMoney(a.cost)].filter((p) => p !== null);
+  return fact("Bought", parts.length ? parts.join(" · ") : null);
+}
+
+const itemCell = (a: Pick<WorkAssetLike, "model" | "category" | "tag">): WorkItemCell => ({ model: a.model, category: a.category, tag: a.tag });
+
+/** The detail, with `note` present only when its text is not blank. */
+function detailOf(facts: WorkFact[], history: WorkHistoryEntry[], note?: { label: string; text: string | null | undefined; by: string | null }): WorkDetail {
+  const text = note?.text?.trim();
+  return note && text ? { facts, note: { label: note.label, text, by: note.by }, history } : { facts, history };
+}
+
+const assetEntity = (a: { id: string; tag: string }) => ({ kind: "asset" as const, id: a.id, label: a.tag });
+
+const reasonOf = (payload: unknown): string | null => {
+  const r = payload && typeof payload === "object" ? (payload as { reason?: unknown }).reason : undefined;
+  return typeof r === "string" && r.trim() ? r.trim() : null;
+};
+
+export interface WorkReturnRow {
+  assetId: string | null;
+  createdAt: Date;
+  payload: unknown;
+  requestedBy: { name: string } | null;
+  employee: { name: string; department: { name: string; kind: WorkGroupKind } | null } | null;
+}
+
+/** The latest return per asset from one batched read (any order in; the newest createdAt wins). */
+export function lastReturnByAsset(rows: WorkReturnRow[]): Map<string, WorkReturnLike> {
+  const out = new Map<string, WorkReturnLike>();
+  for (const r of rows) {
+    if (!r.assetId) continue;
+    const seen = out.get(r.assetId);
+    if (seen && seen.at.getTime() >= r.createdAt.getTime()) continue;
+    out.set(r.assetId, {
+      holder: r.employee
+        ? { name: r.employee.name, group: r.employee.department ? { name: r.employee.department.name, kind: r.employee.department.kind } : null }
+        : null,
+      reason: reasonOf(r.payload),
+      recordedBy: r.requestedBy?.name ?? null,
+      at: r.createdAt,
+    });
+  }
+  return out;
+}
+
+export interface WorkAuditRow { entityId: string; action: string; diff: unknown; actorLabel: string; createdAt: Date }
+
+/**
+ * The last `per` lifecycle events per asset, newest first, from one batched audit read — each the same sentence
+ * every activity feed builds (`auditSentence`), without the tag the panel already shows.
+ */
+export function historyByAsset(rows: WorkAuditRow[], tags: ReadonlyMap<string, string>, per = 3): Map<string, WorkHistoryEntry[]> {
+  const grouped = new Map<string, WorkAuditRow[]>();
+  for (const r of rows) grouped.set(r.entityId, [...(grouped.get(r.entityId) ?? []), r]);
+  const out = new Map<string, WorkHistoryEntry[]>();
+  for (const [id, list] of grouped) {
+    out.set(id, list
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, per)
+      .map((r) => ({
+        at: r.createdAt,
+        text: auditSentence({ actorLabel: r.actorLabel, action: r.action, diff: r.diff, entityLabel: tags.get(id) ?? "" }, { omitEntity: true }),
+      })));
+  }
+  return out;
+}
+
+// ── the per-section builders ──
+
+export function triageItem(a: WorkAssetLike & { returnedAt: Date; lastReturn: WorkReturnLike | null }, now: Date): WorkItem {
+  const n = daysSince(a.returnedAt, now);
+  const holder = a.lastReturn?.holder ?? null;
+  return {
+    key: `triage:${a.id}`,
+    section: "triage",
+    title: `${a.tag} · ${a.model}`,
+    meta: `back ${n} d · triage it`,
+    href: `/inventory/${a.id}`,
+    action: "Triage",
+    severity: n,
+    ageDays: n,
+    control: { kind: "triage", asset: { id: a.id, tag: a.tag, model: a.model } },
+    entity: assetEntity(a),
+    columns: { section: "triage", item: itemCell(a), lastHolder: holder, returnedAt: a.returnedAt, waitingDays: n, cost: a.cost },
+    detail: detailOf([
+      fact("Serial", a.serial, { mono: true }),
+      fact("Last holder", holder ? partyText(holder) : null),
+      fact("Returned", `${fmtDate(a.returnedAt)} · ${daysAgoText(n)}`),
+      boughtFact(a),
+      warrantyFact(a.warrantyUntil, now),
+    ], a.history, { label: "Hand-back note", text: a.lastReturn?.reason, by: a.lastReturn?.recordedBy ?? null }),
+  };
+}
+
+export interface WorkRepairLike extends WorkAssetLike {
+  status: string;
+  vendorId: string | null;
+  vendor: string | null;
+  rmaRef: string | null;
+  repairQuote: number | null;
+  defectiveSince: Date | null;
+  repairEndedAt: Date | null;
+}
+
+export function repairItem(a: WorkRepairLike, now: Date): WorkItem {
+  const stage = repairStage({
+    status: a.status, vendorId: a.vendorId, rmaRef: a.rmaRef,
+    repairQuote: a.repairQuote, cost: a.cost, defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt,
+  }) ?? "to-assess";
+  const down = repairDownDays({ status: a.status, defectiveSince: a.defectiveSince, repairEndedAt: a.repairEndedAt }, now) ?? 0;
+  const beyond = beyondRepair(a.repairQuote, a.cost);
+  const facts: WorkFact[] = [
+    fact("Serial", a.serial, { mono: true }),
+    a.vendor ? fact("Vendor", a.vendor) : { label: "Vendor", value: "Not sent", tone: "muted" },
+  ];
+  if (a.rmaRef) facts.push(fact("RMA", a.rmaRef, { mono: true }));
+  if (a.repairQuote !== null) facts.push(fact("Quote", `${fmtMoney(a.repairQuote)}${beyond ? " · beyond repair" : ""}`));
+  if (a.defectiveSince) facts.push(fact("Down since", `${fmtDate(a.defectiveSince)} · ${plural(down, "day")}`));
+  facts.push(boughtFact(a), warrantyFact(a.warrantyUntil, now));
+  return {
+    key: `repairs:${a.id}`,
+    section: "repairs",
+    title: `${a.tag} · ${a.model}`,
+    meta: `${REPAIR_STAGE_LABEL[stage]} · ${a.vendor ?? "no vendor"}${a.rmaRef ? ` · ${a.rmaRef}` : ""} · down ${down} d${beyond ? " · beyond repair" : ""}`,
+    href: `/inventory/${a.id}`,
+    action: "Chase",
+    severity: down,
+    ageDays: down,
+    entity: assetEntity(a),
+    columns: { section: "repairs", item: itemCell(a), vendor: a.vendor, stage, downDays: down },
+    detail: detailOf(facts, a.history),
+  };
+}
+
+export function checkItem(
+  a: WorkAssetLike & { createdAt: Date; registeredBy: string | null; fromPo: { id: string; refNo: string } | null },
+  now: Date,
+): WorkItem {
+  const n = daysSince(a.createdAt, now);
+  return {
+    key: `check:${a.id}`,
+    section: "check",
+    title: `${a.tag} · ${a.model}`,
+    meta: `registered by Purchasing · ${n} d waiting`,
+    href: `/inventory/${a.id}`,
+    action: "Check",
+    severity: n,
+    ageDays: n,
+    control: { kind: "it-check", asset: { id: a.id, tag: a.tag } },
+    entity: assetEntity(a),
+    columns: { section: "check", item: itemCell(a), registeredBy: a.registeredBy, fromPo: a.fromPo, waitingDays: n },
+    detail: detailOf([
+      fact("Serial", a.serial, { mono: true }),
+      fact("Registered by", a.registeredBy),
+      a.fromPo ? fact("From PO", a.fromPo.refNo, { mono: true }) : { label: "From PO", value: "No PO", tone: "muted" },
+      fact("Registered", `${fmtDate(a.createdAt)} · ${daysAgoText(n)}`),
+      boughtFact(a),
+      warrantyFact(a.warrantyUntil, now),
+    ], a.history),
+  };
+}
+
+export interface PurchaseReviewItemLike extends PurchaseReviewLike { vendor: string | null; siNumber: string | null; total: number }
+
+export function purchaseReviewItem(r: PurchaseReviewItemLike, now: Date): WorkItem {
+  const row = purchaseReviewRow(r, now);
+  const waiting = row.ageDays ?? 0;
+  const summary = r.firstLine ? `${r.firstLine}${r.lines > 1 ? ` +${r.lines - 1} more` : ""}` : null;
+  return {
+    ...row,
+    columns: { section: "purchases", po: { refNo: r.refNo, summary }, vendor: r.vendor, siNumber: r.siNumber, total: r.total, waitingDays: waiting },
+    detail: detailOf([
+      fact("Requested by", r.requestedBy),
+      fact("Department", r.department),
+      fact("Vendor", r.vendor),
+      fact("SI number", r.siNumber, { mono: true }),
+      fact("Total", fmtMoney(r.total)),
+      fact("Lines", plural(r.lines, "line")),
+      fact("With IT since", `${fmtDate(r.submittedAt ?? r.updatedAt)} · ${daysAgoText(waiting)}`),
+    ], []),
+  };
+}
+
+export interface WorkHireLike {
+  id: string;
+  name: string;
+  employeeNo: string;
+  title: string;
+  joinedAt: Date;
+  group: WorkGroupRef | null;
+  /** the equipment list that applies; null = a personal loadout (exceptions only) */
+  policyName: string | null;
+  /** the required slots still empty, by slot name */
+  missingSlots: string[];
+}
+
+export function hireItem(e: WorkHireLike, now: Date): WorkItem {
+  const d = daysSince(e.joinedAt, now);
+  const m = e.missingSlots.length;
+  return {
+    key: `hires:${e.id}`,
+    section: "hires",
+    title: `${e.name} started ${d} d ago`,
+    meta: `${e.employeeNo} · ${m} required slot${m === 1 ? "" : "s"} empty · ${e.policyName ?? "personal loadout"}`,
+    href: `/employees/${e.id}#loadout`,
+    action: "Fill loadout",
+    severity: d,
+    ageDays: d,
+    entity: { kind: "employee", id: e.id, label: e.name },
+    columns: { section: "hires", person: { name: e.name, employeeNo: e.employeeNo }, group: e.group, startedAt: e.joinedAt, missingSlots: m },
+    detail: detailOf([
+      fact("Employee no.", e.employeeNo, { mono: true }),
+      e.group ? fact(e.group.kind === "CLIENT" ? "Client" : "Department", e.group.name) : fact("Department", null),
+      fact("Title", e.title),
+      fact("Started", `${fmtDate(e.joinedAt)} · ${daysAgoText(d)}`),
+      fact("Equipment list", e.policyName ?? "Personal loadout"),
+      fact("Missing", e.missingSlots.join(", ")),
+    ], []),
+  };
+}
+
+const weekdayFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Asia/Manila" });
+
+/** Plan call 2: the Loans Status cell, on the Manila calendar — "8 days late", "due today", "due Fri", "no due date". */
+export function loanStatus(dueAt: Date | null, now: Date): { text: string; late: boolean; days: number | null } {
+  if (dueAt === null) return { text: "no due date", late: false, days: null };
+  const days = daysUntil(dueAt, localDateISO(now));
+  if (days < 0) return { text: `${plural(-days, "day")} late`, late: true, days };
+  const text = days === 0 ? "due today" : days === 1 ? "due tomorrow" : days < 7 ? `due ${weekdayFmt.format(dueAt)}` : `due ${fmtDayMonth(dueAt)}`;
+  return { text, late: false, days };
+}
+
+/** loanRow's rule decides whether it is a row at all; null when the loan is not due soon. */
+export function loanItem(a: WorkAssetLike & { loanDueAt: Date | null; borrower: WorkParty | null }, now: Date): WorkItem | null {
+  const row = loanRow({ id: a.id, tag: a.tag, model: a.model, loanDueAt: a.loanDueAt, holder: a.borrower?.name ?? null }, now);
+  if (!row) return null;
+  const s = loanStatus(a.loanDueAt, now);
+  return {
+    ...row,
+    columns: { section: "loans", item: itemCell(a), borrower: a.borrower, dueAt: a.loanDueAt, dueDays: s.days, status: s.text, late: s.late },
+    detail: detailOf([
+      fact("Serial", a.serial, { mono: true }),
+      fact("Borrower", a.borrower ? partyText(a.borrower) : null),
+      a.loanDueAt ? fact("Due", fmtDate(a.loanDueAt)) : { label: "Due", value: "No due date", tone: "muted" },
+      fact("Status", s.text, s.late ? { tone: "fault" } : {}),
+      boughtFact(a),
+      warrantyFact(a.warrantyUntil, now),
+    ], a.history),
+  };
+}
+
+export interface WorkMissingLike extends WorkAssetLike {
+  /** missing = status MISSING; orphaned = DEPLOYED with nobody holding it */
+  problem: "missing" | "orphaned";
+  updatedAt: Date;
+  /** the current assignee, if the record still names one */
+  holder: WorkParty | null;
+  lastReturn: WorkReturnLike | null;
+}
+
+const PROBLEM_LABEL = { missing: "Missing", orphaned: "Deployed, no holder" } as const;
+
+export function missingItem(a: WorkMissingLike, now: Date): WorkItem {
+  const n = daysSince(a.updatedAt, now);
+  const lastHolder = a.holder ?? a.lastReturn?.holder ?? null;
+  const row = a.problem === "missing"
+    ? { title: `${a.tag} is missing`, meta: `${a.model} · custody lost ${n} d ago`, action: "Investigate" }
+    : { title: `${a.tag} reads Deployed with no holder`, meta: `${a.model} · assign it or return it to the pool`, action: "Fix record" };
+  return {
+    key: `missing:${a.id}`,
+    section: "missing",
+    ...row,
+    href: `/inventory/${a.id}`,
+    severity: n,
+    ageDays: n,
+    // Ruling R6: no in-place control — assignAsset refuses anything but SPARE, so the fix lives on the record.
+    entity: assetEntity(a),
+    columns: { section: "missing", item: itemCell(a), problem: PROBLEM_LABEL[a.problem], lastHolder, since: a.updatedAt, sinceDays: n },
+    detail: detailOf([
+      fact("Serial", a.serial, { mono: true }),
+      fact("Problem", PROBLEM_LABEL[a.problem]),
+      fact("Last holder", lastHolder ? partyText(lastHolder) : null),
+      fact("Since", `${fmtDate(a.updatedAt)} · ${plural(n, "day")}`),
+      boughtFact(a),
+      warrantyFact(a.warrantyUntil, now),
+    ], a.history,
+    // a Missing return's reason is the investigation's first lead; an orphaned record's last return says nothing about now
+    a.problem === "missing" ? { label: "Hand-back note", text: a.lastReturn?.reason, by: a.lastReturn?.recordedBy ?? null } : undefined),
+  };
+}
+
+export interface WorkApprovalLike {
+  id: string;
+  refNo: string;
+  type: ApprovalType;
+  payload: unknown;
+  priority: Priority;
+  slaAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  workerError: string | null;
+  requestedBy: string;
+  asset: { tag: string; cls: AssetClass } | null;
+  employee: { name: string } | null;
+  history: WorkHistoryEntry[];
+}
+
+/** A queue row: an SLA breach (rank 0) or an execution failure (rank 1), as the worklist always ranked them. */
+export function approvalItem(a: WorkApprovalLike, kind: "breached" | "failed", now: Date): WorkItem {
+  const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
+  const sla = slaLabel(a.slaAt, now);
+  const title = `${a.refNo} · ${s.line1}`;
+  const row = kind === "breached"
+    ? { meta: `${sla.text} · ${a.priority.toLowerCase()}`, rank: 0, age: daysSince(a.slaAt, now) }
+    : { meta: `execution failed ${daysSince(a.updatedAt, now)} d ago`, rank: 1, age: daysSince(a.updatedAt, now) };
+  const waiting = daysSince(a.createdAt, now);
+  const facts: WorkFact[] = [
+    fact("Requested by", a.requestedBy),
+    fact("Raised", `${fmtDate(a.createdAt)} · ${daysAgoText(waiting)}`),
+    fact("SLA", sla.text, sla.overdue ? { tone: "fault" } : {}),
+    fact("Priority", PRIORITY_LABEL[a.priority]),
+  ];
+  if (a.asset) facts.push(fact("Asset", a.asset.tag, { mono: true }));
+  if (a.employee) facts.push(fact("Employee", a.employee.name));
+  if (kind === "failed") facts.push(fact("Error", a.workerError));
+  return {
+    key: `queue:${a.id}`,
+    section: "queue",
+    title,
+    meta: row.meta,
+    href: `/approvals/${a.id}`,
+    action: "Open",
+    severity: row.age,
+    rank: row.rank,
+    ageDays: row.age,
+    columns: { section: "queue", what: title, who: a.requestedBy, waitingDays: waiting, sla },
+    detail: detailOf(facts, a.history, { label: "Request note", text: reasonOf(a.payload), by: a.requestedBy }),
+  };
+}
+
+export interface LeaverItemLike extends LeaverLike { department: string; started: Date | null }
+
+export function leaverItem(e: LeaverItemLike, now: Date): WorkItem {
+  const todayISO = localDateISO(now);
+  const row = leaverRow(e, todayISO);
+  const due = e.dueAt ? dueStatus(e.dueAt, todayISO) : null;
+  return {
+    ...row,
+    columns: {
+      section: "queue",
+      what: e.itemsOut > 0 ? `Leaving · ${plural(e.itemsOut, "item")} still out` : "Leaving · accounts still to close",
+      who: e.name,
+      waitingDays: e.started ? daysSince(e.started, now) : 0,
+      sla: due ? { text: due.text, overdue: due.overdue } : { text: "no completion date", overdue: false },
+    },
+    detail: detailOf([
+      fact("Employee no.", e.employeeNo, { mono: true }),
+      fact("Department", e.department),
+      fact("Items still out", String(e.itemsOut)),
+      e.dueAt && due
+        ? fact("Completion due", `${fmtDate(e.dueAt)} · ${due.text}`, due.overdue ? { tone: "fault" } : {})
+        : { label: "Completion due", value: "No completion date", tone: "muted" },
+      fact("Leaving since", e.started ? fmtDate(e.started) : null),
+      fact("Next step", row.action),
+    ], []),
+  };
+}
+
+// ── the summary line (plan call 13) ──
+
+/** `strong` = bold, never red (Over 90 days); `fault` = red (overdue loans, past SLA). */
+export interface WorkStat { label: string; value: string; tone?: "strong" | "fault" }
+
+const OVER_DAYS = 90;
+
+const colsOf = <S extends WorkSectionId>(rows: WorkItem[], s: S): Array<ColumnsOf<S>> =>
+  rows.map((r) => r.columns).filter((c): c is ColumnsOf<S> => c.section === s);
+
+const countStat = (label: string, n: number, tone?: WorkStat["tone"]): WorkStat =>
+  ({ label, value: String(n), ...(tone && n > 0 ? { tone } : {}) });
+
+/**
+ * The open queue's summary: Items (the section total, "+" when capped), then the queue's own figures, over the
+ * live rows read (today's hidden rows excluded).
+ */
+export function sectionStats(g: WorkGroup<WorkItem>): WorkStat[] {
+  const items: WorkStat = { label: "Items", value: `${g.total}${g.capped ? "+" : ""}` };
+  const oldest: WorkStat = { label: "Oldest", value: g.rows.length ? `${g.oldestDays} d` : "—" };
+  switch (g.section.id) {
+    case "triage": {
+      const c = colsOf(g.rows, "triage");
+      return [
+        items, oldest,
+        countStat("Over 90 days", c.filter((x) => x.waitingDays > OVER_DAYS).length, "strong"),
+        { label: "Value at cost", value: fmtMoney(c.reduce((sum, x) => sum + (x.cost ?? 0), 0)) },
+      ];
+    }
+    case "repairs": {
+      const c = colsOf(g.rows, "repairs");
+      return [
+        items,
+        { label: "Longest down", value: c.length ? `${Math.max(...c.map((x) => x.downDays))} d` : "—" },
+        countStat("With a vendor", c.filter((x) => x.vendor !== null).length),
+      ];
+    }
+    case "loans": {
+      const c = colsOf(g.rows, "loans");
+      return [
+        items,
+        countStat("Overdue", c.filter((x) => x.late).length, "fault"),
+        countStat("Due this week", c.filter((x) => x.dueDays !== null && x.dueDays >= 0 && x.dueDays <= LOAN_DUE_SOON_DAYS).length),
+      ];
+    }
+    case "queue":
+      return [items, countStat("Past SLA", g.pastSla, "fault")];
+    default:
+      return [items, oldest];
+  }
 }
