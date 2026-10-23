@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * Task 6 (spec §2, §5): Finance sends an asset back to the team that owns what's wrong (returnAsset), the department
@@ -256,5 +256,90 @@ describe("confirmAssetDetails on an asset from a PO", () => {
     expect((await confirmAssetDetails({ id: "0331" })).ok).toBe(true);
     expect(h.webhooks).toEqual(["purchase_order.approved", "purchase_request.completed"]);
     expect(t("purchaseOrder")[0].completedAt).toBeInstanceOf(Date);
+    // 2026-10-23: and Purchasing hears it, on the PO
+    expect(t("notification")).toEqual([expect.objectContaining({
+      team: "PURCHASING", kind: "CHANGED", title: "PO-0214: Finance approved all its assets", href: "/purchases/po1",
+      actorId: ANA.id, entityType: "purchase-order", entityId: "po1",
+    })]);
+  });
+});
+
+describe("confirmAssetDetails tells the team that corrected it (2026-10-23)", () => {
+  const T0 = new Date("2026-10-23T02:00:00Z");
+  let min = 0;
+  const tick = () => vi.setSystemTime(new Date(T0.getTime() + ++min * 60_000));
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    min = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const changed = () => t("notification").filter((n) => n.kind === "CHANGED");
+
+  it("sent back to IT, corrected by IT, approved: IT hears '{tag}: Finance accepted the correction', linked to it", async () => {
+    seedAsset("0340");
+    expect((await returnAsset({ id: "0340", team: "IT", fields: ["serial"] })).ok).toBe(true);
+    tick();
+    h.user = IVAN;
+    expect((await resubmitAssetToFinance({ id: "0340" })).ok).toBe(true); // no reply: still a correction
+    tick();
+    h.user = ANA;
+    expect((await confirmAssetDetails({ id: "0340" })).ok).toBe(true);
+    expect(changed()).toEqual([expect.objectContaining({
+      team: "IT", title: "BR-LT-0340: Finance accepted the correction", href: "/inventory/0340",
+      actorId: ANA.id, entityType: "asset", entityId: "0340",
+    })]);
+  });
+
+  it("Purchasing's correction rings Purchasing; an admin's rings the team it had gone back to", async () => {
+    seedAsset("0341");
+    seedAsset("0342");
+    await returnAsset({ id: "0341", team: "PURCHASING", fields: ["other"], note: "slip" });
+    await returnAsset({ id: "0342", team: "PURCHASING", fields: ["other"], note: "slip" });
+    tick();
+    h.user = PAT;
+    await resubmitAssetToFinance({ id: "0341" });
+    h.user = ADA;
+    await resubmitAssetToFinance({ id: "0342" });
+    tick();
+    h.user = ANA;
+    await confirmAssetDetails({ id: "0341" });
+    await confirmAssetDetails({ id: "0342" });
+    expect(changed().map((n) => [n.team, n.title])).toEqual([
+      ["PURCHASING", "BR-LT-0341: Finance accepted the correction"],
+      ["PURCHASING", "BR-LT-0342: Finance accepted the correction"],
+    ]);
+  });
+
+  it("an asset that was never sent back rings nobody; a refused approval writes nothing", async () => {
+    seedAsset("0343");
+    expect((await confirmAssetDetails({ id: "0343" })).ok).toBe(true);
+    expect(t("notification")).toEqual([]);
+
+    seedAsset("0344", { cost: null });
+    await returnAsset({ id: "0344", team: "IT", fields: ["serial"] });
+    tick();
+    h.user = IVAN;
+    await resubmitAssetToFinance({ id: "0344" });
+    tick();
+    h.user = ANA;
+    const before = t("notification").length;
+    await expectRefused(() => confirmAssetDetails({ id: "0344" }), { kind: "conflict" }); // no cost: approve refused
+    expect(t("notification")).toHaveLength(before);
+  });
+
+  it("the actor's own team is never rung by a CHANGED (notify's rule holds)", async () => {
+    // an IT person can't approve, so the rule is notify's own: Purchasing closing a PO short is no news to Purchasing
+    const { notify } = await import("@/server/notifications/notify");
+    const { prisma } = await import("@/server/db/client");
+    await notify(prisma as never, {
+      team: "PURCHASING", kind: "CHANGED", title: "x", href: "/x", actorId: PAT.id, entityType: "asset", entityId: "a",
+    });
+    await notify(prisma as never, {
+      team: "IT", kind: "CHANGED", title: "y", href: "/y", actorId: PAT.id, actorRole: "purchasing_staff", entityType: "asset", entityId: "a",
+    });
+    expect(t("notification").map((n) => n.title)).toEqual(["y"]);
   });
 });

@@ -20,6 +20,7 @@ import { financeViewWhere } from "@/server/modules/finance/queries";
 import { reviewGroupCount } from "@/server/modules/finance/groups";
 import { purchasingToRegisterCount } from "@/server/modules/purchases/to-register";
 import { worklistCount } from "./queries";
+import { SENT_BACK_COUNT_KEY, sentBackChipTeams, type SentBackChip } from "@/lib/sent-back-chip";
 
 /**
  * The view each list count stands for (spec §4.3: the count equals the page's row count for that URL). Asserted
@@ -219,4 +220,18 @@ export async function readNavCounts(keys: CountKey[], user: User): Promise<Parti
     ),
   ]);
   return Object.fromEntries([...entries, ...statusEntries]);
+}
+
+/**
+ * 2026-10-23: Inventory's "Sent back · N" chips — the viewer's own team's (an admin: each team's), only the teams with
+ * something sent back. The same counts and views as the sidebar's "Sent back" links, so they never disagree; like them,
+ * a failed read is 0, which hides the chip.
+ */
+export async function readSentBackChips(user: User): Promise<SentBackChip[]> {
+  const teams = sentBackChipTeams(user.role);
+  if (teams.length === 0) return [];
+  const counts = await readNavCounts(teams.map((t) => SENT_BACK_COUNT_KEY[t]), user);
+  return teams
+    .map((team) => ({ team, count: counts[SENT_BACK_COUNT_KEY[team]] ?? 0, href: NAV_COUNT_HREF[SENT_BACK_COUNT_KEY[team]] }))
+    .filter((c) => c.count > 0);
 }

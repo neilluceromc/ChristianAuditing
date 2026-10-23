@@ -9,8 +9,11 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { NotificationLink } from "./notification-bell";
 
-/** Task 7 (spec §7): the notifications page's list; opening an item marks it read for this person and goes to it. */
-export function NotificationList({ items }: { items: NotificationView[] }) {
+/**
+ * Task 7 (spec §7): the notifications page's list; opening an item marks it read for this person and goes to it.
+ * `showTeam`: an admin's list mixes every team's, so each item says its team.
+ */
+export function NotificationList({ items, showTeam = false }: { items: NotificationView[]; showTeam?: boolean }) {
   const [read, setRead] = useState<ReadonlySet<string>>(new Set());
   return (
     <ul className="divide-y divide-border rounded-(--radius-card) border border-border bg-surface">
@@ -20,6 +23,7 @@ export function NotificationList({ items }: { items: NotificationView[] }) {
           <li key={n.id}>
             <NotificationLink
               n={view}
+              showTeam={showTeam}
               onOpen={() => {
                 if (view.read) return;
                 setRead((s) => new Set(s).add(n.id));
@@ -33,7 +37,7 @@ export function NotificationList({ items }: { items: NotificationView[] }) {
   );
 }
 
-/** "Mark all read": every notification of the team shown, for this person only. An admin names the team. */
+/** "Mark all read": every notification shown (an admin: every team's, or the team picked), for this person only. */
 export function MarkAllReadButton({ team }: { team: Team | null }) {
   const router = useRouter();
   const toast = useToast();

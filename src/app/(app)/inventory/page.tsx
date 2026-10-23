@@ -1,7 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { prisma } from "@/server/db/client";
-import { regWhere } from "@/lib/registration";
 import type { AssetClass } from "@prisma/client";
 import { requireUser } from "@/server/auth/guards";
 import { localDateISO } from "@/lib/format";
@@ -39,6 +36,8 @@ import { RepairChips } from "@/components/inventory/repair-chips";
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-title";
 import { parseTeam, TEAM_LABEL } from "@/lib/notifications";
+import { readSentBackChips } from "@/server/modules/home/nav-counts";
+import { SentBackChips } from "@/components/inventory/sent-back-chips";
 
 /** Spec §5: the tab names the list the heading names — "Inventory", or "{Class} assets" for another class. */
 export async function generateMetadata({
@@ -112,15 +111,16 @@ export default async function InventoryPage({
   const stageSet = (state.filters.stage?.length ?? 0) > 0;
   // …nor in a Sent back view (Task 7 fix round 1): its rows span both classes, and the tiles are one class's.
 
-  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, needsCorrection, tileCounts] = await Promise.all([
+  const [{ rows, total, page, pageCount, attentionCount }, facets, visibleColumns, yearBuckets, sentBackChips, tileCounts] = await Promise.all([
     listAssets(state, purchaseYear, cls, now),
     facetOptions(state, purchaseYear, cls, now),
     getInventoryColumns(user.id),
     purchaseYearBuckets(state, cls),
-    prisma.asset.count({ where: { AND: [{ cls }, regWhere("needs-correction")] } }),
+    // 2026-10-23: the "Sent back · N" chips (replacing the red banner) — by the team it went back to, as the sidebar.
+    readSentBackChips(user),
     stageSet || sentBackTeam ? Promise.resolve({} as Record<string, number>) : inventoryTileCounts(state, purchaseYear, cls, now),
   ]);
-  // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (Show them).
+  // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (the Sent back view).
   const shownColumns = state.filters.reg?.length && !visibleColumns.includes("registration")
     ? [...visibleColumns, "registration"] : visibleColumns;
   const yearChips = purchaseYearChips(yearBuckets);
@@ -216,29 +216,18 @@ export default async function InventoryPage({
           </>
         }
       />
-      {needsCorrection > 0 && !(state.filters.reg?.length === 1 && state.filters.reg[0] === "needs-correction") && (
-        <div
-          role="status"
-          className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-(--radius-card) border px-4 py-2.5 text-[13px]"
-          style={{
-            background: "var(--st-fault-bg)",
-            borderColor: "var(--st-fault-border)",
-            borderLeft: "3px solid var(--st-fault-dot)",
-            color: "var(--st-fault-text)",
-          }}
-        >
-          <span className="font-semibold">{needsCorrection} need correction — Finance sent them back.</span>
-          <Link
-            href={"/inventory" + withViewClsQS(serializeListState(withFilter(clearFilters(state), "reg", ["needs-correction"]), INVENTORY_LIST_CONFIG), cls, defaultCls)}
-            className="underline hover:no-underline"
-          >
-            Show them
-          </Link>
-        </div>
-      )}
       <ListNavigationProvider>
         <div className="flex flex-col gap-4">
-          <InventoryViewPills state={state} purchaseYear={purchaseYear} cls={cls} defaultCls={defaultCls} classes={visible} />
+          <InventoryViewPills state={state} purchaseYear={purchaseYear} cls={cls} defaultCls={defaultCls} classes={visible}>
+            {sentBackChips.length > 0 && (
+              <SentBackChips
+                chips={sentBackChips}
+                active={sentBackTeam}
+                clearHref={"/inventory" + withViewClsQS("", cls, defaultCls)}
+                showTeam={user.role === "admin"}
+              />
+            )}
+          </InventoryViewPills>
           {tiles.length > 0 && <CountTiles tiles={tiles} label="Filter by status" />}
           {/* Phase 45 (spec §4.3): the filter row sticks to the top of the window, the table's head under it,
               and the footer to the bottom, while the list is on screen. */}

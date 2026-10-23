@@ -1,6 +1,8 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, Role } from "@prisma/client";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { lineProgress } from "@/lib/po-flow";
+import { notify } from "@/server/notifications/notify";
+import { FINANCE_WORDS } from "@/server/modules/finance/review-notify";
 
 /**
  * Spec §3 / Global Constraints (controller ruling R5): a purchase order is fully approved when every line is registered
@@ -12,8 +14,15 @@ import { lineProgress } from "@/lib/po-flow";
  * Once only: the PO's `completedAt` is stamped by a guarded write (still null), and nothing fires when it already was
  * — a legacy completed order keeps the stamp it was migrated with, and an approval undone and given again does not
  * fire twice. A plain module: it takes a transaction client, so it can't live in a "use server" file.
+ *
+ * 2026-10-23: that same once-only moment tells Purchasing ("{ref}: Finance approved all its assets", on the PO), by
+ * `actor` — so Purchasing closing the last units short itself is not news to Purchasing (notify's own-team rule).
  */
-export async function emitIfPoFullyApproved(tx: Prisma.TransactionClient, poId: string): Promise<boolean> {
+export async function emitIfPoFullyApproved(
+  tx: Prisma.TransactionClient,
+  poId: string,
+  actor: { id: string; role: Role },
+): Promise<boolean> {
   const po = await tx.purchaseOrder.findUnique({ where: { id: poId }, select: { id: true, refNo: true, state: true, completedAt: true } });
   if (!po || po.completedAt || po.state === "CANCELLED" || po.state === "SENT_BACK") return false;
 
@@ -32,5 +41,9 @@ export async function emitIfPoFullyApproved(tx: Prisma.TransactionClient, poId: 
   if (hit.count === 0) return false;
   await emitWebhook(tx, "purchase_order.approved", { purchaseOrderId: po.id, refNo: po.refNo });
   await emitWebhook(tx, "purchase_request.completed", { purchaseRequestId: po.id, refNo: po.refNo });
+  await notify(tx, {
+    team: "PURCHASING", kind: "CHANGED", title: FINANCE_WORDS.poApproved(po.refNo), href: `/purchases/${po.id}`,
+    actorId: actor.id, actorRole: actor.role, entityType: "purchase-order", entityId: po.id,
+  });
   return true;
 }

@@ -40,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // IT's only; both it and getApprovalsBadge fail each count to 0 rather than failing every page's shell.
   const keys = navCountKeys(sections);
   // Task 7 (purchase-orders spec §7): the bell's first count. A viewer has no team, so no bell (null); an admin's bell
-  // never rings (0). Like the nav counts, a failed read shows 0 rather than failing every page's shell.
+  // sums every team's (2026-10-23). Like the nav counts, a failed read shows 0 rather than failing every page's shell.
   const [approvals, counts, cris, unread] = await Promise.all([
     keys.includes("approvals") ? getApprovalsBadge(user.role) : Promise.resolve({ open: 0, overdue: 0 }),
     readNavCounts(keys.filter((k) => k !== "approvals"), user),
