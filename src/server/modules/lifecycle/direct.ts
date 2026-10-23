@@ -44,6 +44,8 @@ export interface DirectRecord {
   actor: Actor; asset: LifecycleAsset; change: LifecycleChange;
   type: "lifecycle_assign" | "lifecycle_return" | "lifecycle_change_status";
   payload: Prisma.InputJsonObject; employeeId?: string; action: string; extraDiff?: AuditDiff; now: Date;
+  /** Worklist H4: more columns for the same asset write (triage's note and its stamped updatedAt). */
+  extraUpdates?: Prisma.AssetUpdateInput;
 }
 
 /** The guards half of recordDirect: reads only, writes nothing. */
@@ -56,23 +58,24 @@ async function prepareDirect(tx: Tx, rec: DirectRecord): Promise<{ ok: true; pre
   return prepared;
 }
 
-/** The writes half of recordDirect: nothing here refuses. */
-async function commitDirect(tx: Tx, rec: DirectRecord, prepared: Prepared): Promise<AuditDiff> {
-  await commitLifecycle(tx, rec.asset.id, prepared, rec.now);
+/** The writes half of recordDirect: nothing here refuses. Returns the audit entry's diff and id. */
+async function commitDirect(tx: Tx, rec: DirectRecord, prepared: Prepared): Promise<{ diff: AuditDiff; auditId: string }> {
+  const write = rec.extraUpdates ? { ...prepared, updates: { ...prepared.updates, ...rec.extraUpdates } } : prepared;
+  await commitLifecycle(tx, rec.asset.id, write, rec.now);
   const approval = await createApproval(tx, {
     type: rec.type, payload: rec.payload, requestedById: rec.actor.id,
     assetId: rec.asset.id, employeeId: rec.employeeId,
     executed: { by: rec.actor.id, at: rec.now },
   });
   const diff: AuditDiff = { ...prepared.diff, ...(rec.extraDiff ?? {}) };
-  await writeAudit(tx, {
+  const auditId = await writeAudit(tx, {
     actorId: rec.actor.id, actorLabel: rec.actor.name,
     entityType: "asset", entityId: rec.asset.id, action: rec.action, diff,
   });
   await emitWebhook(tx, "approval.executed", {
     approvalId: approval.id, refNo: approval.refNo, type: approval.type, assetId: rec.asset.id, assetTag: rec.asset.tag,
   });
-  return diff;
+  return { diff, auditId };
 }
 
 /**
@@ -80,10 +83,12 @@ async function commitDirect(tx: Tx, rec: DirectRecord, prepared: Prepared): Prom
  * record of the decision) + the asset audit entry + the same webhook the worker
  * emits. All in the caller's transaction.
  */
-export async function recordDirect(tx: Tx, rec: DirectRecord): Promise<{ ok: true; diff: AuditDiff } | { ok: false; error: string }> {
+export async function recordDirect(
+  tx: Tx, rec: DirectRecord,
+): Promise<{ ok: true; diff: AuditDiff; auditId: string } | { ok: false; error: string }> {
   const p = await prepareDirect(tx, rec);
   if (!p.ok) return p;
-  return { ok: true, diff: await commitDirect(tx, rec, p.prepared) };
+  return { ok: true, ...(await commitDirect(tx, rec, p.prepared)) };
 }
 
 // ── the cores (Phase 41, spec §6) ───────────────────────────────────────────

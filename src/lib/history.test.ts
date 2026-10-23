@@ -31,6 +31,13 @@ describe("historyRows — one row per FIELD, not per save (README 7c)", () => {
     const rows = historyRows([{ id: "e3", actorLabel: "x", action: "update", createdAt: at, diff: { cost: { from: 55000, to: null } } }], emptyNames());
     expect(rows[0]).toMatchObject({ field: "Cost", from: "55000", to: "—" });
   });
+  it("Worklist H4: a triage's version and its undo's reference are never rows of their own", () => {
+    const rows = historyRows([{
+      id: "e5", actorLabel: "x", action: "lifecycle.triage", createdAt: at,
+      diff: { triage: { from: null, to: "Keep as spare" }, version: { from: null, to: at.toISOString() }, undoes: { from: null, to: "e1" } },
+    }], emptyNames());
+    expect(rows.map((r) => r.field)).toEqual(["Triage"]);
+  });
   it("shows an unmapped action as its own code", () => {
     const rows = historyRows([{ id: "e4", actorLabel: "x", action: "something.new", createdAt: at, diff: null }], emptyNames());
     expect(rows[0].action).toBe("something.new");

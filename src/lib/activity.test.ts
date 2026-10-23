@@ -51,6 +51,10 @@ describe("auditSentence — subject-first, one sentence (README 4b)", () => {
     })).toBe("J. Sarmiento put BR-LT-0201 in place of BR-LT-0148 for EMP-0097");
     expect(auditSentence({ ...base, action: "lifecycle.triage", diff: { triage: { from: null, to: "Keep as spare" } } }))
       .toBe("J. Sarmiento triaged BR-LT-0148: Keep as spare");
+    // Worklist H4: the undo names the decision it took back
+    const undone = { ...base, action: "lifecycle.triage.undone", diff: { triage: { from: "Send to repair", to: null }, undoes: { from: null, to: "aud1" } } };
+    expect(auditSentence(undone)).toBe("J. Sarmiento undid the triage of BR-LT-0148: Send to repair");
+    expect(actionLabel("lifecycle.triage.undone")).toBe("Triage undone");
   });
   it("Phase 26 holds read as sentences", () => {
     const base = { actorLabel: "J. Sarmiento", entityLabel: "BR-HS-0502" };

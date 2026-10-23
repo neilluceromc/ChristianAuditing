@@ -9,6 +9,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "import-create": "Imported (new)", "import-update": "Imported (update)",
   "lifecycle.assign": "Assigned", "lifecycle.return": "Returned", "lifecycle.change-status": "Status changed",
   "lifecycle.replace": "Replaced", "lifecycle.triage": "Triaged", "loan.due-changed": "Loan due date changed",
+  // Worklist H4: a triage decision taken back by its decider within 15 minutes
+  "lifecycle.triage.undone": "Triage undone",
   // Phase 27 fix wave (I-1): the approvals worker's own actions (`<APPROVAL_TYPE_LABEL> executed`,
   // worker/execute-approval.ts) — without these the Action facet listed a raw string and split "Assigned" in two.
   "lifecycle.transfer": "Asset transferred",
@@ -443,6 +445,11 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       return omitEntity
         ? `${actor}triaged: ${String(diff?.triage?.to ?? "?")}${suffix}`
         : `${actor}triaged ${entry.entityLabel}: ${String(diff?.triage?.to ?? "?")}${suffix}`;
+    // Worklist H4: the undone entry names the decision it took back ("Keep as spare")
+    case "lifecycle.triage.undone":
+      return omitEntity
+        ? `${actor}undid the triage: ${String(diff?.triage?.from ?? "?")}${suffix}`
+        : `${actor}undid the triage of ${entry.entityLabel}: ${String(diff?.triage?.from ?? "?")}${suffix}`;
     // Phase 26 (spec §4.1): holds are placed and released on the asset.
     case "reservation.placed": {
       const until = diff?.expiresAt?.to;

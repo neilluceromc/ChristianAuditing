@@ -19,6 +19,8 @@ import {
 import { orderByOffboardingAttention } from "@/lib/offboarding";
 import { leaverStates } from "@/server/modules/offboarding/queries";
 import { reviewGroups, type ReviewGroup } from "@/server/modules/finance/groups";
+import { manilaDayStart } from "@/lib/cris-limits";
+import { CLEARED_ACTIONS, TRIAGE_UNDONE, clearedCount } from "@/lib/triage-undo";
 
 const DAY_MS = 86_400_000;
 const daysSince = (d: Date, now: Date) => Math.max(0, Math.round((now.getTime() - d.getTime()) / DAY_MS));
@@ -464,6 +466,22 @@ export async function worklistCount(userId: string, role: Role, now: Date = new 
   ]);
   const hireCount = hires.rows.filter((r) => !hidden.has(r.key)).length;
   return triage + repairs + check + loans + missing + orphaned + breached + failed + leavers + hireCount + reviews;
+}
+
+/**
+ * Worklist H4: the header's "Cleared today {n}" — this person's worklist decisions since Manila midnight (a triage,
+ * an IT check, a loan's due date), less each one an undo took back. One read of the audit log.
+ */
+export async function clearedToday(userId: string, now: Date = new Date()): Promise<number> {
+  const rows = await prisma.auditEntry.findMany({
+    where: {
+      actorId: userId, entityType: "asset",
+      action: { in: [...CLEARED_ACTIONS, TRIAGE_UNDONE] },
+      createdAt: { gte: manilaDayStart(now) },
+    },
+    select: { id: true, action: true, diff: true },
+  });
+  return clearedCount(rows);
 }
 
 export interface ClaimRow {

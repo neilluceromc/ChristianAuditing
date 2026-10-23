@@ -4,7 +4,7 @@ import type { AuditDiff } from "@/lib/audit-diff";
 /**
  * The audit write happens in the SAME transaction as the domain write —
  * callers pass their TransactionClient. AuditEntry is append-only by DB
- * trigger; nothing here ever updates or deletes.
+ * trigger; nothing here ever updates or deletes. Returns the new entry's id.
  */
 export async function writeAudit(
   tx: Prisma.TransactionClient,
@@ -20,8 +20,8 @@ export async function writeAudit(
     /** Phase 47: the note, comment or reason that came with the action; null when the action carries none. */
     reason?: string | null;
   },
-): Promise<void> {
-  await tx.auditEntry.create({
+): Promise<string> {
+  const row = await tx.auditEntry.create({
     data: {
       ...entry,
       diff: entry.diff && Object.keys(entry.diff).length
@@ -29,4 +29,6 @@ export async function writeAudit(
         : undefined,
     },
   });
+  // Worklist H4: the entry's id, for an Undo that names the decision it takes back (a test double may return nothing).
+  return row?.id;
 }

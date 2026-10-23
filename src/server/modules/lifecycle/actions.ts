@@ -13,7 +13,6 @@ import {
   conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult,
 } from "@/server/action-result";
 import { cleanReason, reasonOptional } from "@/lib/reason";
-import type { AuditDiff } from "@/lib/audit-diff";
 import { parseListState, type ListState } from "@/lib/url-state";
 import { ASSET_STATUSES, BULK_MAX, INVENTORY_LIST_CONFIG, buildAssetWhere, parsePurchaseYear } from "@/lib/inventory-list";
 import { statusFamily } from "@/lib/status";
@@ -21,22 +20,15 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, defaultClassFor, isAssignable, isDirectLifecycle, isStatusOf, parseCls, statusLabel,
 } from "@/lib/asset-class";
 import {
-  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, TRIAGE_LABEL, loanDueFor, reasonRequiredFor, triageInputSchema, triageNeedsReason,
+  RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, loanDueFor, reasonRequiredFor, triageInputSchema,
 } from "@/lib/lifecycle";
 import {
   assetSelect, assignCore, assignSchema, dateStr, loadDirect, recordDirect, replaceCore, replaceSchema,
 } from "./direct";
 import { revalidateAsset } from "./revalidate";
+import { eachAlone, triageCore, undoTriageCore, type BulkResult, type TriageDone, type TriageUndone } from "./triage";
+import { TRIAGE_BULK_MAX, UNDOABLE_TRIAGE } from "@/lib/triage-undo";
 import { rememberPicks } from "@/server/recent-picks";
-
-/**
- * Thrown inside a `$transaction` callback to force a rollback of every write
- * made so far in that transaction. Prisma's interactive transactions only
- * roll back on a thrown exception — a plain `return` from the callback
- * commits whatever writes already happened. Caught just outside the
- * `$transaction` call and converted back into a `conflict()` result.
- */
-class DirectRefusal extends Error {}
 
 const reasonOpt = reasonOptional();
 
@@ -185,72 +177,84 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
 // ── triageAsset ─────────────────────────────────────────────────────────────
 // Phase 40 (spec §8): the schema lives in lib/lifecycle (triageInputSchema) so its reason rule is unit-tested;
 // a missing decision, or Dispose/Donate without a reason of at least 2 characters, is refused before any write.
+// Worklist H4: the decision and its write are triageCore (triage.ts), shared with triageMany; the result adds the
+// model and the audit id the toast's Undo names.
 
-export async function triageAsset(input: unknown): Promise<ActionResult<{ tag: string; status: string }>> {
+export async function triageAsset(input: unknown): Promise<ActionResult<TriageDone>> {
   const user = await actionUser();
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = triageInputSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const d = parsed.data;
-  const now = new Date();
-  let out: { tag: string; status: string } | null = null;
-  let failure: ActionResult<never> | null | undefined;
-  try {
-    failure = await prisma.$transaction(async (tx) => {
-      const loaded = await loadDirect(tx, user, d.assetId);
-      if ("failure" in loaded) return loaded.failure;
-      const { asset } = loaded;
-      const notWaiting = conflict(`${asset.tag} is not waiting for triage.`);
-      if (asset.returnedAt === null) return notWaiting;
-      // Claim first, state-guarded, before anything is recorded: of two concurrent triages of the same
-      // device, the second blocks on the row lock, then finds nothing still waiting and is refused.
-      // `asset` keeps the pre-claim snapshot, so prepareLifecycle still diffs returnedAt → null.
-      const claim = await tx.asset.updateMany({
-        where: { id: asset.id, status: asset.status, returnedAt: { not: null } },
-        data: { returnedAt: null },
-      });
-      if (claim.count === 0) return notWaiting;
-      const full = await tx.asset.findUniqueOrThrow({ where: { id: asset.id }, select: { notes: true } });
-      const notes = d.note ? (full.notes ? `${full.notes}\n${d.note}` : d.note) : undefined;
-      // The asset has no disposal-reason column. For Dispose/Donate the text is the decision's reason
-      // (`reason`, the key other reasoned actions use); for Keep/Repair it is an optional `note`. Either way
-      // it also rides the EXECUTED approval's payload and the asset's notes, as the note always did.
-      const textKey = triageNeedsReason(d.outcome) ? "reason" : "note";
-      const triageDiff: AuditDiff = {
-        triage: { from: null, to: TRIAGE_LABEL[d.outcome] },
-        ...(d.note ? { [textKey]: { from: null, to: d.note } } : {}),
-      };
-      if (d.outcome === asset.status) {
-        // Keep as spare: only the flag moves (claimed above). No approval row — nothing about the
-        // asset's lifecycle changed, so there is no decision to record as one.
-        if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
-        await writeAudit(tx, {
-          actorId: user.id, actorLabel: user.name, entityType: "asset", entityId: asset.id,
-          action: "lifecycle.triage", diff: { ...triageDiff, returnedAt: { from: asset.returnedAt, to: null } },
-        });
-      } else {
-        const r = await recordDirect(tx, {
-          actor: user, asset, now, type: "lifecycle_change_status", action: "lifecycle.triage",
-          change: { kind: "change-status", status: d.outcome },
-          payload: { from: { status: asset.status }, to: { status: d.outcome }, reason: d.note || "triage" },
-          extraDiff: triageDiff,
-        });
-        // the claim is already written: throw, so the rollback undoes it (a plain return would commit it)
-        if (!r.ok) throw new DirectRefusal(r.error);
-        if (notes !== undefined) await tx.asset.update({ where: { id: asset.id }, data: { notes } });
-      }
-      out = { tag: asset.tag, status: d.outcome };
-      return null;
-    });
-  } catch (err) {
-    if (err instanceof DirectRefusal) return conflict(err.message);
-    throw err;
-  }
-  if (failure) return failure;
-  revalidateAsset(d.assetId, []);
-  return ok(out!);
+  const r = await triageCore(user, parsed.data);
+  if (r.ok) revalidateWork([parsed.data.assetId]);
+  return r;
+}
+
+function revalidateWork(assetIds: string[]) {
+  for (const id of assetIds) revalidateAsset(id, []);
+  revalidatePath("/inventory/work");
+}
+
+// ── triageMany, undoTriage, undoTriageMany (Worklist H4) ────────────────────
+const triageManySchema = z.object({
+  assetIds: z.array(z.string().min(1)).min(1, "Nothing is selected").max(TRIAGE_BULK_MAX, `Select ${TRIAGE_BULK_MAX} or fewer`),
+  outcome: z.enum(UNDOABLE_TRIAGE),
+});
+
+/**
+ * Keep as spare or Send to repair for several items: one triageCore per item, each in its own transaction, so a
+ * row someone else decided meanwhile fails alone ("8 done, 1 couldn't"). `auditIds` are the successful decisions,
+ * in `done`'s order — what the toast's Undo passes to undoTriageMany.
+ */
+export async function triageMany(input: unknown): Promise<ActionResult<BulkResult>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = triageManySchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { assetIds, outcome } = parsed.data;
+  const { done, failed, results } = await eachAlone(assetIds, (assetId) => triageCore(user, { assetId, outcome }));
+  if (done.length) revalidateWork(done);
+  return ok({ done, failed, auditIds: results.map((r) => r.auditId) });
+}
+
+const undoSchema = z.object({ auditId: z.string().min(1) });
+
+/** Undo the person's own Keep as spare or Send to repair, named by its audit id (triageAsset's `auditId`). */
+export async function undoTriage(input: unknown): Promise<ActionResult<TriageUndone>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = undoSchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const r = await undoTriageCore(user, parsed.data.auditId);
+  if (r.ok) revalidateWork([r.data.id]);
+  return r;
+}
+
+const undoManySchema = z.object({
+  auditIds: z.array(z.string().min(1)).min(1, "Nothing to undo").max(TRIAGE_BULK_MAX, `Select ${TRIAGE_BULK_MAX} or fewer`),
+});
+
+/**
+ * The bulk toast's Undo: undoTriageCore per decision, each in its own transaction. `done` lists the ASSET ids put
+ * back; `failed` names each decision (its audit id) that couldn't be, with the refusal's words.
+ */
+export async function undoTriageMany(input: unknown): Promise<ActionResult<{ done: string[]; failed: Array<{ id: string; reason: string }> }>> {
+  const user = await actionUser();
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = undoManySchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { failed, results } = await eachAlone(parsed.data.auditIds, (auditId) => undoTriageCore(user, auditId));
+  const done = results.map((r) => r.id);
+  if (done.length) revalidateWork(done);
+  return ok({ done, failed });
 }
 
 /**
