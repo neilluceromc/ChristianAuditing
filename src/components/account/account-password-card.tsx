@@ -73,8 +73,9 @@ export function AccountPasswordCard({ passwordChangedAt }: { passwordChangedAt: 
     <Card>
       <CardHeader title="Password" />
       <CardBody className="flex flex-col gap-3">
-        {/* Fix round 1 (M4): the status region is always rendered, so the message is announced when it appears. */}
-        <div role="status" data-testid="password-status">
+        {/* Fix round 1 (M4): the status region is always rendered, so the message is announced when it appears. While
+            empty it takes back the column's gap (Task 5), so it leaves no space above the first line. */}
+        <div role="status" data-testid="password-status" className="empty:-mt-3">
           {saved && (
             <Banner tone="settled" live="off">
               {PASSWORD_CHANGED_COPY}

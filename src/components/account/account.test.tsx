@@ -195,7 +195,9 @@ describe("AccountPasswordCard", () => {
 
   it("keeps an empty status region rendered, so the saved message is announced when it appears (fix round 1, M4)", () => {
     const html = renderToStaticMarkup(<AccountPasswordCard passwordChangedAt={null} />);
-    expect(html).toContain('<div role="status" data-testid="password-status"></div>');
+    // Task 5 (found by e2e): while empty it takes back the column gap above it, so the card's first line isn't pushed
+    // down 12 px by an invisible box.
+    expect(html).toContain('<div role="status" data-testid="password-status" class="empty:-mt-3"></div>');
   });
 
   it("a password never changed says so", () => {
