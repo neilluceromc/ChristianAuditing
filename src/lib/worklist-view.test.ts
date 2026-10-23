@@ -3,7 +3,7 @@ import {
   BULK, COLUMNS, DEFAULT_SORT, NO_FILTERS, PER_PAGE, bulkCheckedToast, bulkToast, bulkTriageToast, capNote, categoryChips, decisionToast,
   emptyQueue, filterRows, filtersActive, filtersFor, headerCounts, isRed, nextSort, pageFrom, pageLabel, pageOfKey, paginate,
   queueFrom, queueTabs, recordHref, selectAfter, sortRows, workHref,
-  focusAfterDecision, isChangedElsewhere, refusalToast, undoReport,
+  focusAfterDecision, isChangedElsewhere, refusalToast, undoReport, focusIsFree, drawerStays, refusedRowLeft,
 } from "./worklist-view";
 import { allRows, approval, groupsOf, leaver, loan, triage, check, hire, purchase } from "./worklist-view.fixtures";
 import type { WorkItem } from "./worklist";
@@ -262,5 +262,33 @@ describe("fix round 1", () => {
     expect(focusAfterDecision("triage:t2", false)).toEqual({ kind: "drawer", selector: `[data-worklist-drawer] :is(${actions})` });
     expect(focusAfterDecision(null, true)).toEqual({ kind: "empty", selector: "[data-worklist-empty]" });
     expect(focusAfterDecision(null, false)).toEqual({ kind: "empty", selector: "[data-worklist-empty]" });
+  });
+});
+
+describe("Task 4 carried fixes", () => {
+  it("2: focus never leaves a text field the person is typing in", () => {
+    expect(focusIsFree(null)).toBe(true);
+    expect(focusIsFree({ tagName: "BODY" })).toBe(true);
+    expect(focusIsFree({ tagName: "BUTTON" })).toBe(true);
+    expect(focusIsFree({ tagName: "TR" })).toBe(true);
+    expect(focusIsFree({ tagName: "INPUT", type: "checkbox" })).toBe(true);
+    expect(focusIsFree({ tagName: "INPUT", type: "search" })).toBe(false);
+    expect(focusIsFree({ tagName: "INPUT", type: "text" })).toBe(false);
+    expect(focusIsFree({ tagName: "INPUT" })).toBe(false);
+    expect(focusIsFree({ tagName: "TEXTAREA" })).toBe(false);
+    expect(focusIsFree({ tagName: "SELECT" })).toBe(false);
+    expect(focusIsFree({ tagName: "DIV", isContentEditable: true })).toBe(false);
+  });
+
+  it("4: the drawer closes for good once no row is left", () => {
+    expect(drawerStays(true, "triage:t1")).toBe(true);
+    expect(drawerStays(true, null)).toBe(false);
+    expect(drawerStays(false, "triage:t1")).toBe(false);
+  });
+
+  it("1: a refused row the refresh dropped sends focus on", () => {
+    expect(refusedRowLeft("triage:t1", new Set(["triage:t2"]))).toBe(true);
+    expect(refusedRowLeft("triage:t1", new Set(["triage:t1"]))).toBe(false);
+    expect(refusedRowLeft(null, new Set())).toBe(false);
   });
 });

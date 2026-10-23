@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/cn";
 import type { WorkFilters } from "@/lib/worklist-view";
+import { busyProps, unlessBusy } from "./triage-actions";
 
 /** A 32 px control with a 44 px hit area (Global Constraints): the ::after reaches 6 px above and below. */
 const HIT_44 = "relative after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-['']";
@@ -39,8 +40,8 @@ export function QueueFilters({
           <span className="flex-1 text-[13.5px] font-medium text-fg">{label}</span>
           {bulk.map((b, i) => (
             <Button
-              key={b.id} size="md" variant={i === 0 ? "primary" : "secondary"} className={cn("h-9", HIT_44)}
-              loading={busy && i === 0} disabled={busy} onClick={() => onBulk(b.id)}
+              key={b.id} size="md" variant={i === 0 ? "primary" : "secondary"} className={cn("h-9 aria-disabled:cursor-default aria-disabled:opacity-55", HIT_44)}
+              {...busyProps(busy)} onClick={unlessBusy(busy, () => onBulk(b.id))}
             >
               {b.label}
             </Button>

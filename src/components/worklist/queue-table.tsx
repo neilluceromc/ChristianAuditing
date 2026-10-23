@@ -209,7 +209,11 @@ function Cells({ item, selected, columns }: { item: WorkItem; selected: boolean;
     <>
       {cellsOf(item, selected).map((cell, i) => (
         <td key={columns[i]?.key ?? i} className={cn(TD, cell.first && FIRST, cell.cls)}>
-          <span className={cn("sm:hidden", cell.first ? "sr-only" : "mr-1 text-[11px] text-fg-muted")}>{columns[i]?.label}</span>
+          <span className={cn("sm:hidden", cell.first ? "sr-only" : "mr-1 text-[11px] text-fg-muted")}>
+            {columns[i]?.label}
+            {/* read as "Waiting: 200 days", never "Waiting200 days" */}
+            <span className="sr-only">: </span>
+          </span>
           {cell.node}
         </td>
       ))}

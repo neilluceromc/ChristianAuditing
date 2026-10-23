@@ -6,7 +6,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { sectionStats, WORK_SECTIONS, type WorkGroup, type WorkItem, type WorkSectionId } from "@/lib/worklist";
 import {
   BULK, COLUMNS, DEFAULT_SORT, FILTERED_EMPTY, NO_FILTERS, TAB_LABEL, capNote, categoryChips, emptyQueue, filterRows, filtersActive,
-  focusAfterDecision,
+  drawerStays, focusAfterDecision, focusIsFree, refusedRowLeft,
   filtersFor, headerCounts, nextSort, pageLabel, pageOfKey, paginate, queueTabs, selectAfter, sortRows, workHref,
   type WorkFilters, type WorkSort,
 } from "@/lib/worklist-view";
@@ -76,6 +76,8 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   const reveal = useRef<{ key: string; wait: boolean } | null>(initial.sel ? { key: initial.sel, wait: false } : null);
   /** a decision took a row off: once the answer is in, focus goes where focusAfterDecision says (fix round 1, I1) */
   const focusNext = useRef(false);
+  /** a row refused as changed elsewhere: when the refresh drops it, focus (on its panel) must move on too */
+  const refused = useRef<string | null>(null);
   const tableBox = useRef<HTMLElement>(null);
   const panelBox = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -87,10 +89,16 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   const slice = paginate(list, page);
   const selected = slice.rows.find((r) => r.key === sel) ?? slice.rows[0] ?? null;
   const selKey = selected?.key ?? null;
+  // no row left to show: the drawer closes for good, so an Undo that brings one back doesn't reopen it unasked
+  if (drawer && !drawerStays(drawer, selKey)) setDrawer(false);
 
   // a refreshed list no longer holding a row a decision took off: forget it, so it can come back one day
   useEffect(() => {
     const present = new Set(groups.flatMap((g) => g.rows.map((r) => r.key)));
+    if (refusedRowLeft(refused.current, present)) {
+      refused.current = null;
+      focusNext.current = true;
+    }
     setGone((g) => (g.size && [...g].some((k) => !present.has(k)) ? new Set([...g].filter((k) => present.has(k))) : g));
   }, [groups]);
 
@@ -136,6 +144,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
     clear: (keys) => {
       const { list: now, selKey: at } = latest.current;
       focusNext.current = true;
+      refused.current = null;
       const drop = new Set(keys);
       setGone((g) => new Set([...g, ...keys]));
       setChecked((c) => new Set([...c].filter((k) => !drop.has(k))));
@@ -148,6 +157,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
     moveOn: (key) => {
       const { list: now, selKey: at } = latest.current;
       focusNext.current = true;
+      refused.current = key;
       select(selectAfter(now, new Set([key]), at), now.filter((r) => r.key !== key));
     },
   });
@@ -161,6 +171,8 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
     const target = focusAfterDecision(selKey, wide);
     // a frame later: the drawer (and its own focus handling) has settled, and the next row's panel is mounted
     requestAnimationFrame(() => {
+      // someone typing (the search box, a reason) keeps their place: the answer never pulls focus away
+      if (!focusIsFree(document.activeElement as HTMLInputElement | null)) return;
       const el = document.querySelector<HTMLElement>(target.selector) ?? document.getElementById(titleId);
       el?.focus();
     });
@@ -168,6 +180,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
 
   function pick(q: WorkSectionId) {
     reveal.current = null;
+    refused.current = null;
     setQueue(q); setPage(1); setSel(null); setFilters(NO_FILTERS); setSort(DEFAULT_SORT[q]); setChecked(new Set()); setDrawer(false);
   }
 

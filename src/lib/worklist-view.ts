@@ -373,6 +373,31 @@ export function focusAfterDecision(next: string | null, wide: boolean): { kind: 
     : { kind: "drawer", selector: `[data-worklist-drawer] :is(${PANEL_ACTIONS})` };
 }
 
+/** Input types that take no typing: focus may move on from them. */
+const NOT_TYPED = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
+
+/**
+ * May a decision's answer move focus? Not while the person is typing — in the search box or any other text field,
+ * a select or an editable region — since the call can take a second and they may have moved on (Task 4, carried 2).
+ */
+export function focusIsFree(active: { tagName: string; type?: string; isContentEditable?: boolean } | null): boolean {
+  if (!active) return true;
+  if (active.isContentEditable) return false;
+  const tag = active.tagName.toUpperCase();
+  if (tag === "TEXTAREA" || tag === "SELECT") return false;
+  if (tag === "INPUT") return NOT_TYPED.has((active.type ?? "text").toLowerCase());
+  return true;
+}
+
+/** The drawer stays open only while it has a row to show: once the last row clears, an Undo must not reopen it unasked. */
+export const drawerStays = (open: boolean, selected: string | null): boolean => open && selected !== null;
+
+/**
+ * A refused row (changed elsewhere) the refresh has now dropped: focus, which sat on its panel, must move on to the
+ * next row or the empty state (Task 4, carried 1). True when `key` was being watched and the list no longer holds it.
+ */
+export const refusedRowLeft = (key: string | null, present: ReadonlySet<string>): boolean => key !== null && !present.has(key);
+
 /**
  * A bulk decision's toast: one item reads like a single decision; several read "{n} items · …"; any that failed add
  * the report "{done} done, {failed} couldn't (changed by someone else)" as the detail. None done is an error.

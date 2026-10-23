@@ -173,7 +173,7 @@ describe("table", () => {
   });
   it("Over 90 days reads bold and never red", () => {
     const html = table(rows, null);
-    expect(html).toMatch(/font-semibold text-fg"><span[^>]*>Waiting<\/span>200 days</);
+    expect(html).toMatch(/font-semibold text-fg"><span[^>]*>Waiting<span class="sr-only">: <\/span><\/span>200 days</);
     expect(html).not.toContain("st-fault");
   });
   it("a queue without ticks has no checkboxes", () => {
@@ -184,13 +184,13 @@ describe("table", () => {
       <QueueTable label="Loans" columns={COLUMNS.loans} rows={[loan(true), loan(false)]} sort={null} onSort={vi.fn()} selected={null}
         onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()} onCheckAll={vi.fn()} empty={null} />,
     );
-    expect([...loans.matchAll(/st-fault-text\)"><span[^>]*>[^<]*<\/span>([^<]*)</g)].map((m) => m[1])).toEqual(["8 days late"]);
+    expect([...loans.matchAll(/st-fault-text\)"><span[^>]*>[^<]*<span class="sr-only">: <\/span><\/span>([^<]*)</g)].map((m) => m[1])).toEqual(["8 days late"]);
     const queue = renderToStaticMarkup(
       <QueueTable label="Approvals" columns={COLUMNS.queue} rows={[approval("breached"), approval("failed")]} sort={null} onSort={vi.fn()}
         selected={null} onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()}
         onCheckAll={vi.fn()} empty={null} />,
     );
-    expect([...queue.matchAll(/st-fault-text\)"><span[^>]*>[^<]*<\/span>([^<]*)</g)].map((m) => m[1])).toEqual(["3 d overdue"]);
+    expect([...queue.matchAll(/st-fault-text\)"><span[^>]*>[^<]*<span class="sr-only">: <\/span><\/span>([^<]*)</g)].map((m) => m[1])).toEqual(["3 d overdue"]);
     expect(text(queue)).toContain("Execution failed");
   });
 });
@@ -358,8 +358,27 @@ describe("fix round 1", () => {
       <QueueTable label="Triage" columns={COLUMNS.triage} rows={[triage("t1", 142)]} sort={null} onSort={vi.fn()} selected={null}
         onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()} onCheckAll={vi.fn()} empty={null} />,
     );
-    const labels = [...html.matchAll(/<span class="([^"]*sm:hidden[^"]*)">([^<]*)<\/span>/g)].map((m) => [m[2], m[1].includes("sr-only")]);
+    const labels = [...html.matchAll(/<span class="([^"]*sm:hidden[^"]*)">([^<]*)<span class="sr-only">: <\/span><\/span>/g)]
+      .map((m) => [m[2], m[1].includes("sr-only")]);
     expect(labels).toEqual([["Item", true], ["Last holder", false], ["Returned", false], ["Waiting", false]]);
+  });
+  it("Task 4 (3): a stacked label and its value read with a separator — \"Waiting: 142 days\"", () => {
+    const html = renderToStaticMarkup(
+      <QueueTable label="Triage" columns={COLUMNS.triage} rows={[triage("t1", 142)]} sort={null} onSort={vi.fn()} selected={null}
+        onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()} onCheckAll={vi.fn()} empty={null} />,
+    );
+    const read = html.replace(/<[^>]+>/g, "");
+    expect(read).toContain("Waiting: 142 days");
+    expect(read).not.toMatch(/Waiting\d/);
+  });
+  it("Task 4 (5): busy bulk buttons stay focusable — aria-disabled, never disabled", () => {
+    const html = renderToStaticMarkup(
+      <QueueFilters queue="Triage" chips={[]} offers={{ category: false, over90: false }} filters={NO_FILTERS} onFilters={vi.fn()}
+        checked={2} bulk={[{ id: "SPARE", label: "Keep as spares" }, { id: "DEFECTIVE", label: "Send to repair" }]}
+        onBulk={vi.fn()} onClearChecks={vi.fn()} busy />,
+    );
+    expect(html).not.toMatch(/<button[^>]*disabled=""/);
+    expect(html.match(/aria-disabled="true"/g)).toHaveLength(2);
   });
   it("M5: the loan dialog is titled to match the Set due date button", () => {
     expect(loanDueTitle("BR-LT-0210")).toBe("Set the due date for BR-LT-0210");
