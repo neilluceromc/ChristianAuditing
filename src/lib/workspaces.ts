@@ -484,7 +484,12 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
           views: [
             { label: "All users", href: "/admin/users" },
             { label: "Waiting for approval", href: "/admin/users?status=PENDING", count: "pendingSignups" },
-            { label: "Disabled", href: "/admin/users?disabled=1", count: "usersDisabled" },
+            // Task 4: the Disabled status (approved and turned off). The old ?disabled=1 is its alias: the page
+            // redirects it here.
+            {
+              label: "Disabled", href: "/admin/users?status=DISABLED", count: "usersDisabled",
+              match: [{ status: "DISABLED" }, { disabled: "1" }],
+            },
           ],
         },
       ],

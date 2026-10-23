@@ -26,8 +26,12 @@ export type RecoverResult = { ok: true; tempPassword: string; name: string } | {
 const NOT_PERMANENT = "That email isn't the permanent admin's. This command only recovers the permanent admin's account.";
 const USAGE = "Usage: npm run admin:recover -- --email <the permanent admin's email>";
 
-/** The Account settings wrong-password bucket (sign-in-limit.ts's currentPasswordKey; upper-case on purpose). */
-const currentPasswordKey = (userId: string) => `CURRENT:${userId}`;
+/**
+ * The Account settings wrong-password bucket (sign-in-limit.ts's currentPasswordKey; upper-case on purpose). A copy,
+ * not an import: sign-in-limit.ts pulls in the app's db client and the `@/` alias, which this tsx command avoids.
+ * admin-recover-key.test.ts pins the two equal.
+ */
+export const currentPasswordKey = (userId: string) => `CURRENT:${userId}`;
 
 /** The core, without printing: sets the temporary password on the permanent admin's account, in one transaction. */
 export async function recoverPermanentAdmin(db: RecoverDb, rawEmail: string): Promise<RecoverResult> {

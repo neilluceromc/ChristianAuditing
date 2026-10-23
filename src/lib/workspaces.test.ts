@@ -531,7 +531,7 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
   it("Admin: Users & access, Webhooks and Feature flags views, and Audit log under records", () => {
     expect(views("admin", "admin", "Users & access")).toEqual([
       ["All users", "/admin/users"], ["Waiting for approval", "/admin/users?status=PENDING"],
-      ["Disabled", "/admin/users?disabled=1"],
+      ["Disabled", "/admin/users?status=DISABLED"],
     ]);
     expect(views("admin", "admin", "Webhooks")).toEqual([
       ["Endpoints", "/admin/webhooks"], ["Failed deliveries", "/admin/webhooks/deliveries?state=DEAD"],

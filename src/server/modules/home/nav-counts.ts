@@ -12,7 +12,7 @@ import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { parseCls } from "@/lib/asset-class";
 import { parseFin } from "@/lib/registration";
 import { FLAG_SPECS } from "@/lib/admin-flags";
-import { filterFlags, parseFlagsState, parseUsersDisabled, parseUsersFilter, usersListWhere, usersWhere } from "@/lib/admin-lists";
+import { filterFlags, parseFlagsState, parseUsersFilter, usersListWhere } from "@/lib/admin-lists";
 import { deliveryTabWhere, parseDeliveryTab } from "@/lib/webhooks";
 import { localDateISO } from "@/lib/format";
 import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
@@ -49,7 +49,8 @@ export const NAV_COUNT_HREF = {
   finToConfirmPurchasing: "/finance/assets?cls=PURCHASING&fin=with-finance",
   // Task 6 (spec §5): Finance's group queue; the page lists exactly reviewGroups(), which reviewGroupCount counts.
   finGroupsToReview: "/finance/review",
-  usersDisabled: "/admin/users?disabled=1",
+  // Users & access (Task 4): the Disabled status; ?disabled=1 still works on the page but is no longer this view
+  usersDisabled: "/admin/users?status=DISABLED",
   // Users & access (spec §4.4): the sign-ups waiting for an admin
   pendingSignups: "/admin/users?status=PENDING",
   deadDeliveries: "/admin/webhooks/deliveries?state=DEAD",
@@ -143,9 +144,9 @@ const toConfirm = (key: "finToConfirmIt" | "finToConfirmPurchasing") => () => {
   return prisma.asset.count({ where: financeViewWhere(parseCls(params.get("cls")) ?? "IT", parseFin(params.get("fin"))!) });
 };
 
-// /admin/users: parseUsersDisabled → usersWhere; listUsers counts it.
+// /admin/users: parseUsersFilter → usersListWhere; listUsers counts it.
 const usersDisabled = () =>
-  prisma.user.count({ where: usersWhere(parseUsersDisabled(paramsOf("usersDisabled").get("disabled"))) });
+  prisma.user.count({ where: usersListWhere(parseUsersFilter(paramsOf("usersDisabled"))) });
 
 // Users & access (spec §4.4) /admin/users: parseUsersFilter → usersListWhere; listUsers counts it (and its
 // pendingCount is the same where).

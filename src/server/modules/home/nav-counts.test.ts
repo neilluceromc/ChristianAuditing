@@ -276,7 +276,11 @@ describe("readNavCounts: the Phase 46 counts (spec §4.3), each the page's own p
     expect(await readNavCounts(["usersDisabled", "deadDeliveries", "flagsUnavailable"], admin)).toEqual({
       usersDisabled: 4, deadDeliveries: 7, flagsUnavailable: FLAG_SPECS.filter((f) => f.unavailable).length,
     });
-    expect(h.user).toHaveBeenCalledWith({ where: { disabled: true } });
+    // Task 4: the Disabled view is ?status=DISABLED, counted with the list's own where (approved and turned off).
+    expect(h.user).toHaveBeenCalledWith({
+      where: usersListWhere(parseUsersFilter(new URL(NAV_COUNT_HREF.usersDisabled, "http://nav.local").searchParams)),
+    });
+    expect(h.user).toHaveBeenCalledWith({ where: { AND: [{ approvalState: "APPROVED", disabled: true }] } });
     expect(h.delivery).toHaveBeenCalledWith({ where: { status: { in: ["DEAD"] } } });
   });
 

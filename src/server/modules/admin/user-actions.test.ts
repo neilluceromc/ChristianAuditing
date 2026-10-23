@@ -569,4 +569,17 @@ describe("approveSignup and declineSignup", () => {
     expect(h.updateManyCalls).toEqual([]);
     expect(await updateUser({ id: "pend", name: "Ana B. Lim", expectedUpdatedAt: iso("pend") })).toMatchObject({ ok: true });
   });
+
+  // Task 4 (Task 3 re-review #A): the old role-only action holds the same line as updateUser.
+  it("setUserRole refuses a sign-up that isn't approved, with the same copy, and writes nothing", async () => {
+    for (const state of ["PENDING", "DECLINED"] as const) {
+      row("pend").approvalState = state;
+      expect(await setUserRole({ userId: "pend", role: "admin" })).toEqual({
+        ok: false, kind: "conflict", message: "This sign-up hasn't been approved — choose the role when you approve it.",
+      });
+      expect(row("pend")).toMatchObject({ role: "viewer", sessionVersion: 0 });
+    }
+    expect(h.updateManyCalls).toEqual([]);
+    expect(h.audits).toEqual([]);
+  });
 });

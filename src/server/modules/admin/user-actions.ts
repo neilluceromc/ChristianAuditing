@@ -306,6 +306,8 @@ export async function setUserRole(
     // request, because the token's role no longer matches.
     const signsOutActor = selfRoleChangeWarning(target, nextRole, actor.id) !== null;
     if (target.role === nextRole) return ok({ changed: false, signsOutActor }); // no-op: don't pollute the trail
+    // As updateUser: a sign-up's role is set by Approve (approveSignup), never on its own.
+    if (target.approvalState !== "APPROVED") return conflict(ROLE_NEEDS_APPROVAL);
 
     const written = await tx.user.updateMany({
       where: { id: target.id, role: target.role, isPermanentAdmin: false },

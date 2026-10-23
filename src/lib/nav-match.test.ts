@@ -84,7 +84,9 @@ const CASES: Array<[WorkspaceId, Role, string, string | null, string | null]> = 
   ["admin", "admin", "/admin/users?status=PENDING", "Users & access", "Waiting for approval"],
   ["admin", "admin", "/admin/users?status=PENDING&q=ana", "Users & access", "Waiting for approval"],
   ["admin", "admin", "/admin/users?status=DECLINED", "Users & access", null],
-  ["admin", "admin", "/admin/users?disabled=1&page=2", "Users & access", "Disabled"],
+  // Task 4: the Disabled view is the status filter; the old ?disabled=1 is its alias (the page redirects it).
+  ["admin", "admin", "/admin/users?status=DISABLED&page=2", "Users & access", "Disabled"],
+  ["admin", "admin", "/admin/users?disabled=1", "Users & access", "Disabled"],
   ["admin", "admin", "/admin/users?disabled=0", "Users & access", null],
   ["admin", "admin", "/admin/webhooks", "Webhooks", "Endpoints"],
   ["admin", "admin", "/admin/webhooks/deliveries", "Webhooks", "All deliveries"],
