@@ -525,14 +525,16 @@ test.describe("the A3 form in a browser", () => {
     await expect(invoice).toContainText("PDF");
     await expect(docs).toContainText("2 of 4 attached");
 
-    // Preview opens the held file in a new tab (the PNG: headless Chromium downloads a PDF instead of showing it)
-    const popup = page.waitForEvent("popup");
+    // Preview opens the held file in the Preview dialog, from its own object URL, marked as not saved yet
     await receipt.getByRole("button", { name: "Preview" }).click();
-    const tab = await popup;
-    // (a noopener tab showing an image never fires "load" to Playwright: read the page itself)
-    await expect.poll(() => tab.evaluate(() => location.href).catch(() => "")).toMatch(/^blob:http/);
-    await expect.poll(() => tab.evaluate(() => document.querySelector("img")?.naturalWidth ?? 0)).toBe(120);
-    await tab.close();
+    const viewer = page.getByRole("dialog", { name: "Official receipt", exact: true });
+    await expect(viewer).toBeVisible();
+    await expect(viewer).toContainText("Not saved yet");
+    const held = viewer.getByRole("img", { name: "official-receipt.png" });
+    await expect(held).toHaveAttribute("src", /^blob:http/);
+    await expect.poll(() => held.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(120);
+    await viewer.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(viewer).toHaveCount(0);
 
     // Replace swaps what is held; Remove takes it back
     const chooser = page.waitForEvent("filechooser");
@@ -564,9 +566,14 @@ test.describe("the A3 form in a browser", () => {
     await waitForHydration(invoice.getByRole("button", { name: "Replace" }));
     await expect.poll(() => invoice.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(120);
 
-    // Preview is the stored file, inline
-    const href = await invoice.getByRole("link", { name: "Preview" }).getAttribute("href");
+    // Preview is the stored file, inline: the dialog's Open in new tab is the inline route
+    await invoice.getByRole("button", { name: "Preview" }).click();
+    const viewer = page.getByRole("dialog", { name: "Sales invoice", exact: true });
+    await expect(viewer).toBeVisible();
+    const href = await viewer.getByRole("link", { name: "Open in new tab" }).getAttribute("href");
     expect(href).toMatch(/\?inline=1$/);
+    await viewer.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(viewer).toHaveCount(0);
     const res = await page.request.get(href!);
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toBe("image/png");

@@ -290,7 +290,8 @@ test.describe.serial("suppliers", () => {
     await waitForHydration(vendorBox);
     await vendorBox.click();
     await vendorBox.fill("Bayside");
-    await expect(page.getByText("No vendor matches.")).toBeVisible();
+    // the list's own line (the combobox also announces it in an sr-only status, so the text alone matches twice)
+    await expect(page.locator("p").filter({ hasText: /^No vendor matches\.$/ })).toBeVisible();
     await expect(page.getByRole("option", { name: /Bayside Networks/ })).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${vendor.id}`);
