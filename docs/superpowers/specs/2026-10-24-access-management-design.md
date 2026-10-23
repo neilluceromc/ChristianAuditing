@@ -23,7 +23,7 @@ CRIS still runs on staging "quick sign-in", and that shortcut is due to be remov
    - The person must choose their own password at their next sign-in.
    - Email reset links come later, after an email service is set up.
 4. **Account settings let people change their own password only.**
-5. **Only an admin creates accounts.** Self sign-up is removed for now.
+5. **Sign-up stays, and every sign-up waits for an admin to approve it** (owner, 2026-10-24: "sign up is not removed… Wait for an admin to approve the account"). Admins can also create accounts directly from Users & access.
 6. **The look is the V2 mockup:**
    - a list with a details panel on a laptop;
    - details slide in from the right on a tablet;
@@ -32,6 +32,7 @@ CRIS still runs on staging "quick sign-in", and that shortcut is due to be remov
    - Reset password as ask-then-show-once;
    - Disable with an inline confirm;
    - an "Unsaved changes" bar.
+7. **Three wrong passwords pause sign-in** (owner, 2026-10-24: "too many wrong password only has 3 failed tries").
 
 ## 3. What exists today (survey, 2026-10-24)
 
@@ -81,6 +82,10 @@ Fields added to `User`:
 - **`passwordChangedAt DateTime?`**: when the password was last set, by the person or by an admin.
 - **`lastSignInAt DateTime?`**: set on every successful sign-in, by any provider.
 - **`sessionVersion Int @default(0)`**: carried in the JWT. The guards compare it with the database and sign the person out when they differ.
+- **`approvalState` enum `ApprovalState { APPROVED PENDING DECLINED }`, default `APPROVED`**, plus `approvalDecidedAt DateTime?` and `approvalDecidedById String?`.
+  - A sign-up creates the account `PENDING`. A `PENDING` or `DECLINED` account can't sign in.
+  - This is kept separate from `disabled`, so "waiting for approval" never looks like a deliberately disabled account.
+  - The migration sets existing accounts to `APPROVED`. Existing disabled accounts that came from earlier sign-ups (audit `signup`, never enabled) become `PENDING` **(my call)**.
 
 Existing rows get the defaults. Existing passwords stay valid, and nobody is forced to change. The owner chose to leave existing accounts as they are (2026-10-24), including the shared seed password. Handling those accounts is the owner's job; the handover notes call out the risk.
 
@@ -126,13 +131,14 @@ Rename the page to **Users & access**. Rebuild it per the `Users2`, `Tablet2` an
 
 **List**
 - Role tabs with counts (All, Admin, IT, Purchasing, Finance, Viewer). On a phone they become a select.
-- A status filter: Any, Active, Must set password, Disabled.
+- A status filter: Any, Waiting for approval, Active, Must set password, Disabled, Declined.
+- When any sign-ups are waiting, a **"Waiting for approval · N"** chip sits above the list and opens that filter. The admin nav item for Users & access shows the same count.
 - Search across name, email, employee number and department.
 - Rows show:
   - avatar initials, name and email;
   - role;
   - the employee record (`EMP-1042`, and Department or "Client: X");
-  - status (Active, Must set password, Disabled), as a dot plus words;
+  - status (Waiting for approval, Active, Must set password, Disabled, Declined), as a dot plus words;
   - last sign-in, as a relative time, or "Never".
 - Sorted by name, paged when long.
 - On a phone, rows are cards.
@@ -146,6 +152,14 @@ Rename the page to **Users & access**. Rebuild it per the `Users2`, `Tablet2` an
 - **Sign-in:** status, last sign-in, password (the date the person set it, or "Temporary, given {date}"), and "Account created {date} by {admin}". It has **Reset password…**.
 - **Account:** **Disable account…** with an inline confirm: "Disable {name}? They're signed out now and can't sign in. Their history stays." **Enable account** needs no confirm.
 - An **Unsaved changes** bar (Discard / Save) appears only when a field differs. A save writes every changed field in one action.
+
+**Approving a sign-up.** A `PENDING` account's panel replaces Sign-in and Account with an **Approve sign-up** section:
+- the name, email and "Signed up {date}" as the person entered them;
+- the role, defaulting to Viewer, which the admin picks;
+- the employee record, a suggested match by name where one exists;
+- **Approve** sets `APPROVED`, enables the account, saves the role and link, and writes audit `user.approve`;
+- **Decline** asks once, then sets `DECLINED` and writes audit `user.decline`. A declined person can't sign in. An admin can later Approve them from the Declined filter.
+- The person keeps the password they chose at sign-up, so `mustChangePassword` stays false.
 
 **Add user** is a side sheet, full screen on a phone:
 - Full name and work email. The email must be on the allowed domain, with the domain shown in the hint.
@@ -166,7 +180,7 @@ Rename the page to **Users & access**. Rebuild it per the `Users2`, `Tablet2` an
 - Admins can reset each other's passwords, except the permanent admin's.
 
 **Audit**
-- New codes: `user.create`, `user.update` (name, email or employee link, with the diff), `password.reset` (by an admin) and `password.change` (by the person).
+- New codes: `user.create`, `user.approve`, `user.decline`, `user.update` (name, email or employee link, with the diff), `password.reset` (by an admin) and `password.change` (by the person).
 - The existing `role-change`, `disable` and `enable` stay.
 - All of them are registered in the audit labels and sentences.
 - The panel links "See this person's access history →" to Activity, filtered to that user.
@@ -191,20 +205,22 @@ Per the `Account2` and `PhoneAccount2` boards.
 
 **Where it's linked:** an "Account settings" link in the account menu, before Sign out, and in the mobile drawer. Its route rule allows every role.
 
-### 4.6 Sign-up removed, sign-in hardened
+### 4.6 Sign-up with approval, and sign-in hardened
 
-**Sign-up**
-- Remove the `/signup` page, the "Create an account" link and the steps.
-- Remove the `signUp` action and its tests, and drop `/signup` from the public auth paths.
-- The login card says: "Need an account? Ask your admin."
-- Accounts that are disabled because they came from earlier sign-ups stay as disabled users.
-- The `allowed_domain` flag stays, because Add user and email edits use it. Its admin label becomes "Allowed email domain".
+**Sign-up stays** (owner, 2026-10-24).
+- The `/signup` page, the "Create an account" link and the steps stay as they are. The `allowed_domain` flag still limits which emails can sign up.
+- Every sign-up now waits for approval. The account is created `PENDING` with role Viewer, and the `SIGNUP_REQUIRES_APPROVAL` switch is retired **(my call: the owner wants approval always)**.
+- The sign-up done step says: **"Wait for an admin to approve your account."**, followed by "You can sign in once it's approved."
+- Signing in to a `PENDING` account shows **"Your account is waiting for an admin to approve it."**
+- Signing in to a `DECLINED` account shows **"Your sign-up wasn't approved. Ask an admin if you think this is a mistake."**
+  - Neither message is shown unless the password is right, so neither reveals that an account exists.
+- Each new sign-up raises the admin nav count (§4.4). No email is sent.
 
-**Sign-in rate limit (my call; it protects the new password-only accounts)**
-- After 10 failed attempts for one email within 15 minutes, further attempts are refused for 15 minutes with: "Too many tries — wait 15 minutes or ask an admin to reset your password."
+**Sign-in rate limit** (owner: 3 tries)
+- After **3** failed attempts for one email within 15 minutes, further attempts are refused for 15 minutes with: "Too many tries — wait 15 minutes or ask an admin to reset your password."
 - Failures are counted per lower-cased email, whether or not an account exists, so the message never reveals which emails have accounts. They go in a new small table, `SignInAttempt` (`emailKey`, `createdAt`), because `RateEvent` needs a user **(my call)**.
 - Rows older than a day are pruned by the existing worker tick.
-- An admin reset clears the count.
+- A successful sign-in, or an admin reset, clears the count.
 
 **Other sign-in changes**
 - `lastSignInAt` is written on every successful sign-in.
@@ -215,7 +231,6 @@ Per the `Account2` and `PhoneAccount2` boards.
 - Per-person function permissions or custom roles (a later major update).
 - Email reset links, or any email sending.
 - Microsoft sign-in.
-- Self sign-up.
 - Two-factor sign-in.
 - People editing their own name, email or other profile details.
 - Deleting accounts. Disable stays the way to remove access, and history is kept.
@@ -246,5 +261,6 @@ Per the `Account2` and `PhoneAccount2` boards.
   - role change → access changes;
   - disable → signed out;
   - account settings password change;
-  - removed sign-up (`/signup` 404s or redirects to login);
+  - sign-up → "Wait for an admin to approve your account" → sign-in refused while pending → admin approves with a role and employee link → sign-in works; decline → refused with the declined copy;
+  - three wrong passwords → paused, then works after the window;
   - axe in light and dark at 375 px and 1440 px.
