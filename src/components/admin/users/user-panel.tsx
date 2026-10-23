@@ -149,7 +149,8 @@ export function UserPanel({
   const [approveEmployee, setApproveEmployee] = useState<ComboOption | null>(null);
   /** the newer version the person chose to keep editing over */
   const [keptOver, setKeptOver] = useState<string | null>(null);
-  const [focusReq, setFocusReq] = useState<string[] | null>(null);
+  /** a focus move to make after the next render; `invited` lets the discard question take focus from outside (N-2) */
+  const [focusReq, setFocusReq] = useState<{ selectors: string[]; invited?: boolean } | null>(null);
   const lastAction = useRef<PanelAction | null>(null);
 
   const changes = draftChanges(base, draft);
@@ -178,15 +179,15 @@ export function UserPanel({
   const switchReason = locked ?? (!row.disabled && !turnOff.allowed ? turnOff.reason : null);
   const at = new Date(now);
   const set = (patch: Partial<PanelDraft>) => setDraft((d) => ({ ...d, ...patch }));
-  const focus = (selectors: string[]) => setFocusReq(selectors);
+  const focus = (selectors: string[]) => setFocusReq({ selectors });
 
   // Focus requests run after the render that shows their target.
   useEffect(() => {
     if (!focusReq) return;
     const root = rootRef.current;
     const active = document.activeElement;
-    if (root && panelMayTakeFocus(!active || active === document.body, !!active && root.contains(active))) {
-      for (const selector of focusReq) {
+    if (root && panelMayTakeFocus(!active || active === document.body, !!active && root.contains(active), focusReq.invited)) {
+      for (const selector of focusReq.selectors) {
         const el = root.querySelector<HTMLElement>(selector);
         if (el && !el.matches(":disabled")) {
           el.focus();
@@ -200,12 +201,12 @@ export function UserPanel({
   // An action's answer: the row refreshed (done) or a refusal showed.
   useEffect(() => {
     if (!lastAction.current) return;
-    setFocusReq(focusAfterAction(lastAction.current, "done"));
+    setFocusReq({ selectors: focusAfterAction(lastAction.current, "done") });
     lastAction.current = null;
   }, [row.updatedAt]);
   useEffect(() => {
     if (!notice || !lastAction.current) return;
-    setFocusReq(focusAfterAction(lastAction.current, "refused"));
+    setFocusReq({ selectors: focusAfterAction(lastAction.current, "refused") });
     lastAction.current = null;
   }, [notice]);
 
@@ -214,11 +215,11 @@ export function UserPanel({
   }, [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
-  // The discard question takes focus when it appears.
+  // The discard question takes focus when it appears — even from the row just picked outside the panel (N-2).
   const [wasAsking, setWasAsking] = useState(asking);
   if (asking !== wasAsking) {
     setWasAsking(asking);
-    if (asking) setFocusReq(focusOnOpen("discard"));
+    if (asking) setFocusReq({ selectors: focusOnOpen("discard"), invited: true });
   }
 
   function act(action: PanelAction, run: () => void) {
@@ -538,7 +539,7 @@ export function UserPanel({
       </div>
 
       {asking && (
-        <div role="group" aria-labelledby={`${titleId}-ask`} data-discard-prompt="" className="flex shrink-0 flex-col gap-2.5 border-t px-5 py-3"
+        <div role="alertdialog" aria-labelledby={`${titleId}-ask`} data-discard-prompt="" className="flex shrink-0 flex-col gap-2.5 border-t px-5 py-3"
           style={{ background: "var(--st-attention-bg)", borderColor: "var(--st-attention-border)" }}
         >
           <p id={`${titleId}-ask`} className="text-[12.5px] text-fg">

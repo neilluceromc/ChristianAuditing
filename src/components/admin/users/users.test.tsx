@@ -407,3 +407,23 @@ describe("fix round 1, Minor 5: unsaved drafts are never dropped silently", () =
   });
 });
 
+describe("fix round 2", () => {
+  it("N-1: a shown temporary password asks for focus; its field is labelled and Copy is a focus target", () => {
+    const box = render(<TempPasswordBox password="Cedar-3388-lumen" takeFocus />);
+    expect(box).toContain("data-takes-focus");
+    expect(box).toContain('data-focus="temp-copy"');
+    expect(box).toMatch(/<label for="([^"]+)"[^>]*>Temporary password<\/label>/);
+    expect(render(<TempPasswordBox password="Cedar-3388-lumen" />)).not.toContain("data-takes-focus");
+    const done = render(
+      <AddUserForm domain={null} onClose={noop} onCreated={noop} initialDone={{ id: "u", name: "Ana Lim", tempPassword: "Maple-4207-river" }} />,
+    );
+    expect(done).toContain("data-takes-focus");
+    expect(render(<ResetPasswordBody name="Nina Reyes" temp="Cedar-3388-lumen" error={null} />)).toContain("data-takes-focus");
+  });
+
+  it("N-2: the discard question is an alertdialog, so it is announced when it takes focus", () => {
+    const html = panel({ row: userRow(), leaving: true, initial: { draft: { role: "viewer" } } });
+    expect(html).toMatch(/role="alertdialog"[^>]*aria-labelledby="[^"]+"[^>]*data-discard-prompt/);
+  });
+});
+

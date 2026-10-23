@@ -39,6 +39,14 @@ export async function runUserAction<T>(
   if (res.kind === "conflict") deps.refresh();
 }
 
+/**
+ * Fix round 2 (N-3): the page's pending move away (a row picked, or the drawer closed, while drafts differed). Once the
+ * drafts match the row again there is nothing to discard: the move is forgotten, so a later edit doesn't ask at once.
+ */
+export function leavingAfterDirtyChange<L>(leaving: L | null, dirty: boolean): L | null {
+  return dirty ? leaving : null;
+}
+
 export type RunAction = <T>(row: UserRow, action: () => Promise<ActionResult<T>>, done: (data: T) => string) => void;
 
 /**

@@ -53,9 +53,18 @@ export function focusAfterAction(action: PanelAction, outcome: "done" | "refused
 }
 
 /**
- * May the panel move focus now? Only when focus is lost (on the page body) or already inside the panel: never out of
- * the search box or another row the person has moved on to.
+ * Fix round 2 (N-1): a temporary password just shown (Reset's second step, Add user's created step). The labelled
+ * read-only field first, so the label and the password are read out; its Copy button if the field can't take focus.
  */
-export function panelMayTakeFocus(activeIsBody: boolean, activeInPanel: boolean): boolean {
-  return activeIsBody || activeInPanel;
+export function focusOnPasswordShown(): string[] {
+  return ["[data-temp-password]", focusSel("temp-copy")];
+}
+
+/**
+ * May the panel move focus now? Only when focus is lost (on the page body) or already inside the panel: never out of
+ * the search box or another row the person has moved on to — unless the move is `invited` (fix round 2, N-2): the
+ * discard question raised by that very pick, which has to be answered before the page can move on.
+ */
+export function panelMayTakeFocus(activeIsBody: boolean, activeInPanel: boolean, invited = false): boolean {
+  return invited || activeIsBody || activeInPanel;
 }

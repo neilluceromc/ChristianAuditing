@@ -70,7 +70,7 @@ export function ResetPasswordBody({ name, temp, error }: { name: string; temp: s
   if (temp) {
     return (
       <div className="flex flex-col gap-3">
-        <TempPasswordBox password={temp} label={`${name}'s temporary password`} />
+        <TempPasswordBox password={temp} label={`${name}'s temporary password`} takeFocus />
         <p className="text-[12.5px] text-fg-secondary">Shown once. They choose their own at their next sign-in.</p>
       </div>
     );

@@ -13,7 +13,7 @@ import { usersListHref, type UsersFilter } from "@/lib/admin-lists";
 import type { UserRow, UsersList } from "@/server/modules/admin/queries";
 import { AddUserSheet } from "./add-user-sheet";
 import { ResetPasswordDialog } from "./reset-password-dialog";
-import { panelHandlers, runUserAction, type RunAction } from "./panel-actions";
+import { leavingAfterDirtyChange, panelHandlers, runUserAction, type RunAction } from "./panel-actions";
 import { UserPanel, type PanelNotice } from "./user-panel";
 import { UsersTable } from "./users-table";
 import { UsersToolbar } from "./users-toolbar";
@@ -82,6 +82,11 @@ export function UsersView({
   const [dirty, setDirty] = useState(false);
   /** where the page was asked to go while drafts differed (null = close the details) */
   const [leaving, setLeaving] = useState<{ to: string | null } | null>(null);
+  // Stable (the panel's effect depends on it). Drafts back to the row: no pending move is left to ask about (N-3).
+  const onDirtyChange = useCallback((next: boolean) => {
+    setDirty(next);
+    setLeaving((l) => leavingAfterDirtyChange(l, next));
+  }, []);
 
   const select = useCallback(
     (id: string | null, force = false) => {
@@ -116,7 +121,7 @@ export function UsersView({
       notice={notice?.userId === row.id ? notice.notice : null}
       onClose={onClose}
       onClearNotice={() => setNotice(null)}
-      onDirtyChange={setDirty}
+      onDirtyChange={onDirtyChange}
       leaving={leaving !== null}
       onLeave={(discard) => {
         const to = leaving?.to ?? null;

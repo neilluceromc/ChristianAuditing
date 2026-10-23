@@ -12,7 +12,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/server/modules/admin/user-actions", () => h);
 vi.mock("@/server/modules/admin/employee-link-search", () => ({ searchLinkableEmployees: vi.fn() }));
 
-import { panelHandlers, runUserAction, type ActionDeps, type RunAction } from "./panel-actions";
+import { leavingAfterDirtyChange, panelHandlers, runUserAction, type ActionDeps, type RunAction } from "./panel-actions";
 import { draftChanges } from "./user-panel";
 
 const row = {
@@ -111,3 +111,15 @@ describe("draftChanges: one Save writes every changed field", () => {
     expect(draftChanges(row, { ...saved, employee: { value: "emp-2", label: "Ana Lim" } })).toEqual({ employeeId: "emp-2" });
   });
 });
+
+// Fix round 2 (N-3): a pending move away is forgotten once the drafts match the row again, so a later edit doesn't
+// ask "Discard unsaved changes?" with nowhere to go.
+describe("leavingAfterDirtyChange", () => {
+  it("clears the pending move when the drafts stop differing, and keeps it while they still do", () => {
+    expect(leavingAfterDirtyChange({ to: "ana" }, false)).toBeNull();
+    expect(leavingAfterDirtyChange({ to: null }, false)).toBeNull();
+    expect(leavingAfterDirtyChange({ to: "ana" }, true)).toEqual({ to: "ana" });
+    expect(leavingAfterDirtyChange(null, true)).toBeNull();
+  });
+});
+

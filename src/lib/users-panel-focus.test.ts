@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { focusAfterAction, focusOnClose, focusOnOpen, focusSel, panelMayTakeFocus } from "./users-panel-focus";
+import {
+  focusAfterAction, focusOnClose, focusOnOpen, focusOnPasswordShown, focusSel, panelMayTakeFocus,
+} from "./users-panel-focus";
 
 /* Users & access (Task 4 fix round 1, I-1): focus follows every inline step in the details panel. */
 
@@ -56,5 +58,20 @@ describe("panelMayTakeFocus", () => {
     expect(panelMayTakeFocus(true, false)).toBe(true);
     expect(panelMayTakeFocus(false, true)).toBe(true);
     expect(panelMayTakeFocus(false, false)).toBe(false);
+  });
+});
+
+// Fix round 2 (N-1): a temporary password that appears is focused, so its label and value are read out.
+describe("focusOnPasswordShown", () => {
+  it("the password field first (labelled, read with its value), then its Copy button", () => {
+    expect(focusOnPasswordShown()).toEqual(["[data-temp-password]", '[data-focus="temp-copy"]']);
+  });
+});
+
+// Fix round 2 (N-2): the discard question is invited to take focus from wherever the move away started.
+describe("panelMayTakeFocus, invited", () => {
+  it("an invited move (the discard question) may take focus from outside the panel, e.g. the row just picked", () => {
+    expect(panelMayTakeFocus(false, false, true)).toBe(true);
+    expect(panelMayTakeFocus(false, false, false)).toBe(false);
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { focusOnPasswordShown } from "@/lib/users-panel-focus";
 
 /**
  * Users & access (spec §4.4, Global Constraints): a temporary password, shown once with Copy ("Copied ✓" after).
@@ -12,15 +13,35 @@ export function TempPasswordBox({
   password,
   label = "Temporary password",
   copiedDefault = false,
+  takeFocus = false,
 }: {
   password: string;
   label?: string;
+  /**
+   * Fix round 2 (N-1): focus moves here as it appears (Reset's second step, Add user's created step), so the label and
+   * the password are read out instead of focus falling to the page as the button that asked for it goes away.
+   */
+  takeFocus?: boolean;
   /** tests only: render the copied state */
   copiedDefault?: boolean;
 }) {
   const id = useId();
   const field = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(copiedDefault);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!takeFocus) return;
+    for (const selector of focusOnPasswordShown()) {
+      const el = root.current?.querySelector<HTMLElement>(selector);
+      if (el) {
+        el.focus();
+        break;
+      }
+    }
+    // mount only: the box appears once per password
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function copy() {
     try {
@@ -34,7 +55,7 @@ export function TempPasswordBox({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div ref={root} className="flex flex-col gap-1.5" data-takes-focus={takeFocus ? "" : undefined}>
       <label htmlFor={id} className="text-xs font-medium text-fg">{label}</label>
       <div className="flex gap-2">
         <input
@@ -48,7 +69,7 @@ export function TempPasswordBox({
           onFocus={(e) => e.currentTarget.select()}
           className="h-11 min-w-0 flex-1 rounded-(--radius-card) border border-border bg-surface-subtle px-3 font-mono text-[15px] tracking-[0.03em] text-fg focus:outline-none focus-visible:border-accent"
         />
-        <Button type="button" variant="secondary" className="h-11 shrink-0" onClick={copy}>
+        <Button type="button" variant="secondary" className="h-11 shrink-0" data-focus="temp-copy" onClick={copy}>
           {copied ? "Copied ✓" : "Copy"}
         </Button>
       </div>

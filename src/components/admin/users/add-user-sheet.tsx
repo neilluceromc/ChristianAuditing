@@ -114,7 +114,7 @@ export function AddUserForm({
         {header}
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
           <p role="status" className="text-[14px] font-medium text-fg">{accountCreated(done.name)}</p>
-          <TempPasswordBox password={done.tempPassword} />
+          <TempPasswordBox password={done.tempPassword} takeFocus />
           <p className="text-[12px] text-fg-muted">
             Shown once. Give it to them in person or by chat. They choose their own the first time they sign in.
           </p>
