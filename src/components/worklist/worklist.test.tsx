@@ -7,7 +7,7 @@ import { TRIAGE_REASON_MESSAGE } from "@/lib/lifecycle";
 import {
   allRows, approval, check, groupsOf, hire, leaver, loan, missing, purchase, repair, triage,
 } from "@/lib/worklist-view.fixtures";
-import { WorklistView, type WorklistInitial } from "./worklist-view";
+import { ROW_HEIGHT, SCREEN_HEIGHT, WorklistView, type WorklistInitial } from "./worklist-view";
 import { DetailsPanel } from "./details-panel";
 import { QueueFilters } from "./queue-filters";
 import { QueuePager, QueueTable } from "./queue-table";
@@ -382,5 +382,15 @@ describe("fix round 1", () => {
   });
   it("M5: the loan dialog is titled to match the Set due date button", () => {
     expect(loanDueTitle("BR-LT-0210")).toBe("Set the due date for BR-LT-0210");
+  });
+});
+
+describe("Task 4: the one screen leaves Cris's corner clear without scrolling the document", () => {
+  it("the screen and its rows give up Cris's clearance (--cris-clear), so #main's extra room never adds a scroll", () => {
+    expect(SCREEN_HEIGHT).toBe("sm:h-[calc(100dvh-100px-var(--cris-clear,0px))]");
+    expect(ROW_HEIGHT).toContain("calc((100dvh-404px-var(--cris-clear,0px))/10)");
+    const html = page([triage("t1", 3)]);
+    expect(html).toContain(SCREEN_HEIGHT);
+    expect(html).toContain("sm:[--wl-row:clamp(32px,calc((100dvh-404px-var(--cris-clear,0px))/10),52px)]");
   });
 });

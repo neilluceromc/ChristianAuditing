@@ -36,10 +36,16 @@ function useWide(): boolean {
 
 /**
  * Row height: ten rows fill what the header, tabs, summary, filters, table head and pager leave of the viewport
- * (about 400 px of chrome under the app's 52 px top bar and the main region's padding) — 50 px at 900 px tall, 32 px
- * at 720 px. Below 640 px the rows stack at their own height and the page may scroll.
+ * (about 404 px of chrome under the app's 52 px top bar and the main region's padding; 400 left the table 2 px short at
+ * 1440×900 in Task 4's browser check) — 49.6 px at 900 px tall. Below 640 px the rows stack at their own height and the page may scroll.
+ *
+ * While Cris shows in the corner, #main ends with Cris's clearance (`--cris-clear`, 88 px, cris-widget.css) so no
+ * page's last row sits under Cris. The screen gives that room up too, or the document would scroll by exactly that
+ * much (found by Task 4's browser check at 1440×900).
  */
-const ROW_HEIGHT = "[--wl-row:auto] sm:[--wl-row:clamp(32px,calc((100dvh-400px)/10),52px)]";
+export const ROW_HEIGHT = "[--wl-row:auto] sm:[--wl-row:clamp(32px,calc((100dvh-404px-var(--cris-clear,0px))/10),52px)]";
+/** The one screen: the viewport less the top bar, main's padding and Cris's clearance (see ROW_HEIGHT). */
+export const SCREEN_HEIGHT = "sm:h-[calc(100dvh-100px-var(--cris-clear,0px))]";
 
 export interface WorklistInitial { q: WorkSectionId; page: number; sel: string | null }
 
@@ -230,7 +236,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   );
 
   return (
-    <div className={`flex flex-col gap-3 sm:h-[calc(100dvh-100px)] ${ROW_HEIGHT}`}>
+    <div className={`flex flex-col gap-3 ${SCREEN_HEIGHT} ${ROW_HEIGHT}`}>
       <header className="flex shrink-0 flex-wrap items-baseline gap-x-4 gap-y-1">
         <h1 className="text-xl font-semibold leading-tight tracking-[-0.015em] text-fg">Worklist</h1>
         <span className="text-[13.5px] text-fg-muted">
