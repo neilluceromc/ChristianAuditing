@@ -25,7 +25,7 @@ export function SentBackChips({
 }) {
   if (chips.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5" role="navigation" aria-label="Sent back">
+    <div className="flex flex-wrap items-center gap-1.5" role="navigation" aria-label="Sent back">
       {chips.map((c) => {
         const on = c.team === active;
         return (

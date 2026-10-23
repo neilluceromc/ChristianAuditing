@@ -120,7 +120,7 @@ export default async function InventoryPage({
     readSentBackChips(user),
     stageSet || sentBackTeam ? Promise.resolve({} as Record<string, number>) : inventoryTileCounts(state, purchaseYear, cls, now),
   ]);
-  // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (Show them).
+  // Final review I-2: a saved column preference must not hide Registration while the reg filter is on (the Sent back view).
   const shownColumns = state.filters.reg?.length && !visibleColumns.includes("registration")
     ? [...visibleColumns, "registration"] : visibleColumns;
   const yearChips = purchaseYearChips(yearBuckets);
