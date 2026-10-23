@@ -22,10 +22,17 @@ vi.mock("next-auth", () => ({ AuthError: class AuthError extends Error {} }));
 vi.mock("./index", () => ({ signIn: h.signIn, signOut: vi.fn(), auth: vi.fn() }));
 vi.mock("./guards", () => ({ requireUser: vi.fn() }));
 vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn() }));
+// Users & access: the pause and the password check have their own tests (sign-in-limit, actions); here they pass.
+vi.mock("./sign-in-limit", () => ({
+  signInPaused: async () => false,
+  recordSignInFailure: async () => {},
+  clearSignInFailures: async () => {},
+}));
+vi.mock("./password-check", () => ({ passwordMatches: async () => true }));
 vi.mock("../db/client", () => ({
   prisma: {
     featureFlag: { findUnique: async () => null },
-    user: { findUnique: h.userFindUnique, count: async () => 0, create: vi.fn() },
+    user: { findUnique: h.userFindUnique, count: async () => 0, create: vi.fn(), update: vi.fn() },
     auditEntry: { create: vi.fn() },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
@@ -60,7 +67,9 @@ beforeEach(() => {
   h.signIn.mockResolvedValue(undefined);
   h.cookieSet.mockReset();
   h.userFindUnique.mockReset();
-  h.userFindUnique.mockResolvedValue({ role: "finance_staff" });
+  h.userFindUnique.mockResolvedValue({
+    id: "u1", role: "finance_staff", passwordHash: "hash", disabled: false, approvalState: "APPROVED",
+  });
   vi.stubEnv("QUICK_LOGIN_EMAILS", "fin@thebackroomop.com");
   vi.stubEnv("VERCEL", "");
 });

@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   notifications: [] as Note[],
   reads: [] as Array<{ notificationId: string; userId: string }>,
   notificationWheres: [] as unknown[],
+  attemptWheres: [] as unknown[],
 }));
 
 vi.mock("../server/db/client", () => {
@@ -39,6 +40,12 @@ vi.mock("../server/db/client", () => {
           return { count: gone.length };
         },
       },
+      signInAttempt: {
+        deleteMany: async ({ where }: { where: unknown }) => {
+          h.attemptWheres.push(where);
+          return { count: 4 };
+        },
+      },
       metricSnapshot: {
         deleteMany: async ({ where }: { where: unknown }) => {
           h.snapshotWheres.push(where);
@@ -56,6 +63,7 @@ beforeEach(() => {
   h.notifications = [];
   h.reads = [];
   h.notificationWheres = [];
+  h.attemptWheres = [];
 });
 
 describe("pruneRetention: MetricSnapshot", () => {
@@ -102,5 +110,14 @@ describe("pruneRetention: notifications (Task 7, spec §7)", () => {
     expect(sql).toMatch(
       /ALTER TABLE "NotificationRead" ADD CONSTRAINT "NotificationRead_notificationId_fkey" FOREIGN KEY \("notificationId"\) REFERENCES "Notification"\("id"\) ON DELETE CASCADE/,
     );
+  });
+});
+
+describe("pruneRetention: sign-in attempts (Users & access spec §4.6)", () => {
+  it("drops SignInAttempt rows older than 24 hours in one statement, and reports how many", async () => {
+    const now = new Date("2026-10-24T03:00:00Z");
+    const r = await pruneRetention(now);
+    expect(h.attemptWheres).toEqual([{ createdAt: { lt: new Date("2026-10-23T03:00:00Z") } }]);
+    expect(r.signInAttempts).toBe(4);
   });
 });

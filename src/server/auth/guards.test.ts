@@ -8,8 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const h = vi.hoisted(() => ({
-  session: null as { user?: { id?: string; role?: string } } | null,
-  user: null as { id: string; role: string; disabled: boolean } | null,
+  session: null as { user?: { id?: string; role?: string; sessionVersion?: number } } | null,
+  user: null as { id: string; role: string; disabled: boolean; sessionVersion?: number; approvalState?: string } | null,
   auth: vi.fn(),
   findUnique: vi.fn(),
   /** Every cache() store, so a test can start a fresh "request". */
@@ -39,12 +39,13 @@ vi.mock("@/server/db/client", () => ({ prisma: { user: { findUnique: h.findUniqu
 import { actionRole, actionUser, requireRole, requireUser } from "./guards";
 
 const newRequest = () => h.stores.forEach((s) => s.clear());
+const ACTIVE = { id: "u1", role: "it_staff", disabled: false, sessionVersion: 0, approvalState: "APPROVED" };
 
 beforeEach(() => {
   newRequest();
   vi.clearAllMocks();
-  h.session = { user: { id: "u1", role: "it_staff" } };
-  h.user = { id: "u1", role: "it_staff", disabled: false };
+  h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 0 } };
+  h.user = { ...ACTIVE };
   h.auth.mockImplementation(async () => h.session);
   h.findUnique.mockImplementation(async () => h.user);
 });
@@ -68,10 +69,10 @@ describe("requireUser — today's semantics", () => {
     h.user = null;
     await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
     newRequest();
-    h.user = { id: "u1", role: "it_staff", disabled: true };
+    h.user = { ...ACTIVE, disabled: true };
     await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
     newRequest();
-    h.user = { id: "u1", role: "admin", disabled: false };
+    h.user = { ...ACTIVE, role: "admin" };
     await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
   });
 });
@@ -105,7 +106,7 @@ describe("requireUser — once per request (Phase 43)", () => {
   });
 
   it("a redirect is the same redirect for every caller in the request", async () => {
-    h.user = { id: "u1", role: "it_staff", disabled: true };
+    h.user = { ...ACTIVE, disabled: true };
     await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
     await expect(requireRole("it_staff")).rejects.toThrow("REDIRECT /logout");
     expect(h.findUnique).toHaveBeenCalledTimes(1);
@@ -114,7 +115,7 @@ describe("requireUser — once per request (Phase 43)", () => {
   it("a new request reads again — nothing is remembered across requests", async () => {
     await requireUser();
     newRequest();
-    h.user = { id: "u1", role: "it_staff", disabled: true };
+    h.user = { ...ACTIVE, disabled: true };
     await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
     expect(h.findUnique).toHaveBeenCalledTimes(2);
   });
@@ -124,9 +125,44 @@ describe("actionUser / actionRole — unchanged", () => {
   it("return the user, or null for a signed-out, disabled or role-changed one", async () => {
     expect(await actionUser()).toEqual(h.user);
     expect(await actionRole("admin")).toBeNull();
-    h.user = { id: "u1", role: "it_staff", disabled: true };
+    h.user = { ...ACTIVE, disabled: true };
     expect(await actionUser()).toBeNull();
     h.session = null;
+    expect(await actionUser()).toBeNull();
+  });
+});
+
+describe("session version and approval (Users & access spec §4.2, Review Focus #1)", () => {
+  it("logs out when the token's sessionVersion is behind", async () => {
+    h.user = { ...ACTIVE, sessionVersion: 2 };
+    h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 1 } };
+    await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    expect(await actionUser()).toBeNull();
+  });
+
+  it("logs out a token that is ahead of the database too: only an exact match stays in", async () => {
+    h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 1 } };
+    await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    expect(await actionUser()).toBeNull();
+  });
+
+  it("keeps a token whose sessionVersion matches", async () => {
+    h.user = { ...ACTIVE, sessionVersion: 3 };
+    h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 3 } };
+    expect(await requireUser()).toEqual(h.user);
+    expect(await actionUser()).toEqual(h.user);
+  });
+
+  it("logs out a PENDING account", async () => {
+    h.user = { ...ACTIVE, approvalState: "PENDING" };
+    await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    expect(await actionUser()).toBeNull();
+    expect(await actionRole("it_staff")).toBeNull();
+  });
+
+  it("logs out a DECLINED account", async () => {
+    h.user = { ...ACTIVE, approvalState: "DECLINED" };
+    await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
     expect(await actionUser()).toBeNull();
   });
 });

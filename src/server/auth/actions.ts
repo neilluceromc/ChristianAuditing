@@ -6,9 +6,12 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { auth, signIn, signOut } from "./index";
 import { requireUser } from "./guards";
+import { passwordMatches } from "./password-check";
+import { clearSignInFailures, recordSignInFailure, signInPaused } from "./sign-in-limit";
 import { prisma } from "../db/client";
 import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
+import { SIGN_IN_COPY } from "@/lib/sign-in-copy";
 import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 import { saveUiPref } from "@/server/ui-prefs";
@@ -25,20 +28,41 @@ function safeNext(raw: FormDataEntryValue | null): string | undefined {
   return safeNextPath(raw);
 }
 
+/**
+ * Users & access (spec §4.6). In order: a paused email is refused before its password is checked; the password is
+ * checked once (bcrypt, the dummy hash for an unknown email); a wrong one is counted; a right one for an account
+ * still waiting, or declined, gets its own copy and is not counted; a right one for an active account clears the
+ * count, stamps lastSignInAt and signs in. Auth.js's signIn then runs the provider's authorize(), which checks the
+ * password again: that second compare is the provider's own gate and happens only on success.
+ */
 export async function signInWithCredentials(
   _prev: AuthFormState,
   formData: FormData,
 ): Promise<AuthFormState> {
+  const email = normalizeEmail(String(formData.get("email") ?? "")).slice(0, 320);
+  const password = String(formData.get("password") ?? "");
+  if (!email || !password) return { error: SIGN_IN_COPY.wrong };
+  if (await signInPaused(email)) return { error: SIGN_IN_COPY.paused };
+
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, passwordHash: true, disabled: true, approvalState: true },
+  });
+  if (!(await passwordMatches(password, user?.passwordHash))) {
+    await recordSignInFailure(email);
+    return { error: SIGN_IN_COPY.wrong };
+  }
+  // The right password from here on: only now may the copy say the account exists.
+  if (user?.approvalState === "PENDING") return { error: SIGN_IN_COPY.pending };
+  if (user?.approvalState === "DECLINED") return { error: SIGN_IN_COPY.declined };
+  if (!user || user.disabled) return { error: SIGN_IN_COPY.wrong };
+
+  await clearSignInFailures(email);
+  await prisma.user.update({ where: { id: user.id }, data: { lastSignInAt: new Date() } });
   try {
-    await signIn("credentials", {
-      email: String(formData.get("email") ?? ""),
-      password: String(formData.get("password") ?? ""),
-      redirect: false,
-    });
+    await signIn("credentials", { email, password, redirect: false });
   } catch (err) {
-    if (err instanceof AuthError) {
-      return { error: "Wrong email or password — or the account is disabled." };
-    }
+    if (err instanceof AuthError) return { error: SIGN_IN_COPY.wrong };
     throw err;
   }
   // Follow-up spec §7.1: every sign-in lands on Home unless a safe `next` link brought the person here. The role's
@@ -56,6 +80,8 @@ export async function quickSignIn(formData: FormData): Promise<void> {
     if (err instanceof AuthError) redirect("/login?quick=refused");
     throw err;
   }
+  // Users & access (spec §4.1): every successful sign-in, by any provider, stamps lastSignInAt.
+  await prisma.user.update({ where: { email }, data: { lastSignInAt: new Date() } });
   redirect(safeNext(formData.get("next")) ?? "/"); // Home, like every sign-in (spec §7.1)
 }
 

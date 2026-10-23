@@ -21,17 +21,28 @@ export type SessionUser = User;
  */
 export const requireUser = cache(readRequestUser);
 
+type TokenUser = { role: Role; sessionVersion: number };
+
+/**
+ * Users & access (spec §4.2): the account's row no longer matches the token. A changed role (the JWT freezes it at
+ * sign-in, and middleware gates routes on it), a bumped sessionVersion (a password reset or change, a role change,
+ * turning the account off, an email change: "signed out everywhere"), or an account that is not APPROVED.
+ */
+function staleToken(user: User, token: TokenUser): boolean {
+  return user.role !== token.role || user.sessionVersion !== token.sessionVersion || user.approvalState !== "APPROVED";
+}
+
 async function readRequestUser(): Promise<User> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  // Stale JWT (user deleted/disabled/role-changed) goes to /logout, which
+  // Stale JWT (user deleted/disabled/role-changed/signed out everywhere/not approved) goes to /logout, which
   // CLEARS the cookie — a bare /login redirect would loop: middleware sees a
   // "signed-in" token on /login and bounces straight back to the landing.
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
   if (!user || user.disabled) redirect("/logout");
-  // The JWT freezes role at sign-in; if an admin has since changed it, force
-  // re-auth so middleware's (token-based) gating can't drift from the DB.
-  if (user.role !== session.user.role) redirect("/logout");
+  // The JWT freezes role and sessionVersion at sign-in; if either has since moved, force re-auth so
+  // middleware's (token-based) gating can't drift from the DB.
+  if (staleToken(user, session.user)) redirect("/logout");
   return user;
 }
 
@@ -50,7 +61,7 @@ export async function actionUser(): Promise<User | null> {
   const session = await auth();
   if (!session?.user?.id) return null;
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (!user || user.disabled || user.role !== session.user.role) return null;
+  if (!user || user.disabled || staleToken(user, session.user)) return null;
   return user;
 }
 

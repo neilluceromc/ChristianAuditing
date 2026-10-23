@@ -52,6 +52,8 @@ export const AUDIT_ACTIONS = [
   "supplier.bank.added", "supplier.bank.removed", "supplier.bank.revealed",
   // admin: accounts, flags, webhooks
   "signup", "bootstrap", "role-change", "disable", "enable",
+  // Users & access (spec §4.4, §4.5): admin account actions, approvals, password reset and the person's own change
+  "user.create", "user.approve", "user.decline", "user.update", "password.reset", "password.change",
   "flag-enable", "flag-disable", "flag-value", "cris-settings",
   "endpoint-enable", "endpoint-disable", "endpoint-delete", "rotate-secret", "replay",
 ] as const;

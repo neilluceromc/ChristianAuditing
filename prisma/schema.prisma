@@ -17,6 +17,15 @@ enum Role {
   viewer
 }
 
+/// Users & access (spec §4.1): a sign-up waits PENDING until an admin approves or declines it. Kept apart from
+/// `disabled`, so "waiting for approval" never looks like a deliberately turned-off account. Named apart from
+/// ApprovalState, which is the approvals queue's.
+enum AccountApprovalState {
+  APPROVED
+  PENDING
+  DECLINED
+}
+
 /// Phase 13. Lives on the category. Each asset also carries a copy (Asset.cls,
 /// default IT); the asset_class_invariants trigger holds the two equal on every
 /// write that touches it. See spec §2.
@@ -180,6 +189,23 @@ model User {
   isPermanentAdmin         Boolean                 @default(false)
   disabled                 Boolean                 @default(false)
   entraObjectId            String?                 @unique
+  /// Users & access (spec §4.1): one account per employee; optional for shared or service accounts.
+  employeeId               String?                 @unique
+  employee                 Employee?               @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  /// True after an admin creates the account or resets its password; the person picks their own at next sign-in.
+  mustChangePassword       Boolean                 @default(false)
+  passwordChangedAt        DateTime?
+  lastSignInAt             DateTime?
+  /// Carried in the JWT; the guards sign out any token whose copy differs (spec §4.2). Bump with bumpSessionVersion.
+  sessionVersion           Int                     @default(0)
+  approvalState            AccountApprovalState    @default(APPROVED)
+  approvalDecidedAt        DateTime?
+  approvalDecidedById      String?
+  approvalDecidedBy        User?                   @relation("approvalDecidedBy", fields: [approvalDecidedById], references: [id], onDelete: SetNull)
+  approvalsDecided         User[]                  @relation("approvalDecidedBy")
+  createdById              String?
+  createdBy                User?                   @relation("userCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  usersCreated             User[]                  @relation("userCreatedBy")
   createdAt                DateTime                @default(now())
   updatedAt                DateTime                @default(now()) @updatedAt
   preferences              UserPreference[]
@@ -224,6 +250,16 @@ model UserPreference {
   value  Json
 
   @@unique([userId, key])
+}
+
+/// Users & access (spec §4.6): one failed sign-in per row, keyed by the lower-cased email whether or not an account
+/// exists (RateEvent needs a user). Three in 15 minutes pause the email; the worker prunes rows older than a day.
+model SignInAttempt {
+  id        String   @id @default(cuid())
+  emailKey  String
+  createdAt DateTime @default(now())
+
+  @@index([emailKey, createdAt])
 }
 
 model RateEvent {
@@ -419,6 +455,8 @@ model Employee {
   /// "None" | "Cloudflare WARP" | "OpenVPN" | any other name (1–40); null = not recorded.
   vpn              String?
   notes            EmployeeNote[]
+  /// Users & access (spec §4.1): the sign-in account linked to this person, if any.
+  user             User?
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @default(now()) @updatedAt
 

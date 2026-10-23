@@ -703,3 +703,25 @@ describe("PO form redesign (spec §5) — category create, confirm and replace r
     }
   });
 });
+
+describe("Users & access audit codes (spec §4.4, §4.5)", () => {
+  const user = { actorLabel: "M. Cruz", diff: null as unknown, entityLabel: "Nina Reyes" };
+  it.each([
+    ["user.create", "Account created", "M. Cruz created Nina Reyes's account", "M. Cruz created the account"],
+    ["user.approve", "Sign-up approved", "M. Cruz approved Nina Reyes's sign-up", "M. Cruz approved the sign-up"],
+    ["user.decline", "Sign-up declined", "M. Cruz declined Nina Reyes's sign-up", "M. Cruz declined the sign-up"],
+    ["password.reset", "Password reset", "M. Cruz reset Nina Reyes's password", "M. Cruz reset the password"],
+    ["password.change", "Password changed", "M. Cruz changed their password", "M. Cruz changed their password"],
+  ])("%s reads as words", (action, label, sentence, phrase) => {
+    expect(ACTION_LABELS[action]).toBe(label);
+    expect(auditSentence({ ...user, action })).toBe(sentence);
+    expect(auditSentence({ ...user, action }, { omitEntity: true })).toBe(phrase);
+  });
+
+  it("user.update names the fields it changed", () => {
+    const diff = { name: { from: "Nina", to: "Nina Reyes" }, email: { from: "a@b.co", to: "c@b.co" } };
+    expect(ACTION_LABELS["user.update"]).toBe("Account updated");
+    expect(auditSentence({ ...user, action: "user.update", diff })).toBe("M. Cruz updated email, name on Nina Reyes's account");
+    expect(auditSentence({ ...user, action: "user.update", diff }, { omitEntity: true })).toBe("M. Cruz updated email, name");
+  });
+});
