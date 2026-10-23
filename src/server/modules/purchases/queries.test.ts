@@ -38,8 +38,8 @@ describe("stateCounts", () => {
 describe("getPurchase (PO form redesign)", () => {
   it("carries the PO number, paid by, typed totals, the line units, and only the documents not removed", async () => {
     const at = new Date("2026-10-22T02:00:00Z");
-    const doc = (id: string, kind: string, supersededAt: Date | null) => ({
-      id, kind, fileName: `${id}.pdf`, createdAt: at, uploadedBy: { name: "Pat Lim" }, supersededAt,
+    const doc = (id: string, kind: string, supersededAt: Date | null, uploadedBy: { name: string } | null = { name: "Pat Lim" }) => ({
+      id, kind, fileName: `${id}.pdf`, createdAt: at, uploadedBy, supersededAt,
     });
     h.po = {
       id: "po1", refNo: "PO-0214", state: "WITH_IT", createdAt: at, submittedAt: null, reviewedAt: null, completedAt: null,
@@ -51,7 +51,7 @@ describe("getPurchase (PO form redesign)", () => {
       sentBackBy: null, sentBackNote: null, sentBackFields: [], sentBackAt: null, sentBackByUser: null,
       _count: { assets: 0 }, requestedBy: { name: "Pat Lim" }, reviewedBy: null, department: null,
       vendor: { id: "v1", name: "Octagon", archivedAt: null },
-      documents: [doc("si-2", "invoice", null), doc("si-1", "invoice", at), doc("ws", "warranty-slip", null)],
+      documents: [doc("si-2", "invoice", null), doc("si-1", "invoice", at), doc("ws", "warranty-slip", null, null)],
       lines: [{
         id: "ln1", description: "Laptop", specs: null, categoryId: "cat-lt", category: { name: "Laptops", cls: "IT" },
         qty: 1, unitPrice: new Prisma.Decimal("9100"), unit: "pc", closedShort: 0, closedShortReason: null,
@@ -67,5 +67,10 @@ describe("getPurchase (PO form redesign)", () => {
     });
     expect(p!.units[0].unit).toBe("pc");
     expect(p!.documents.map((d) => d.id)).toEqual(["si-2", "ws"]);
+    // Document preview: each file carries its upload time (ISO) and uploader (a name, or null), beside the old `at`
+    expect(p!.documents.map((d) => [d.uploadedAt, d.uploadedBy, d.at])).toEqual([
+      ["2026-10-22T02:00:00.000Z", "Pat Lim", "22 Oct 2026"],
+      ["2026-10-22T02:00:00.000Z", null, "22 Oct 2026"],
+    ]);
   });
 });

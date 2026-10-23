@@ -242,6 +242,8 @@ export default async function FinanceAssetPage({
                 doc={openDoc.file}
                 title={openDoc.title}
                 closeHref={assetPageHref(d.id, state, { doc: null })}
+                uploadedAt={openDoc.file.uploadedAt}
+                uploadedBy={openDoc.file.uploadedBy}
               />
             )}
             <AssetTabs

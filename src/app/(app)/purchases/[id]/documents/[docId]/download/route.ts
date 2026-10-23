@@ -1,11 +1,7 @@
-import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { readUpload } from "@/server/storage";
-import { contentDisposition, UPLOAD_TYPES } from "@/server/uploads";
-
-/** The types a browser may show in place (Task 6: Finance's group review previews the PO's PDFs and images). */
-const INLINE = new Set([".pdf", ".png", ".jpg", ".jpeg"]);
+import { fileResponse } from "@/server/uploads";
 
 /**
  * Mirrors the supplier document route (spec §3): no class check here — any
@@ -27,13 +23,5 @@ export async function GET(
   const bytes = await readUpload(doc.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });
 
-  const ext = path.extname(doc.fileName).toLowerCase();
-  const inline = INLINE.has(ext) && new URL(req.url).searchParams.get("inline") === "1";
-  return new Response(new Uint8Array(bytes), {
-    headers: {
-      "content-type": UPLOAD_TYPES[ext] ?? "application/octet-stream",
-      "content-disposition": contentDisposition(doc.fileName, inline ? "inline" : "attachment"),
-      "x-content-type-options": "nosniff",
-    },
-  });
+  return fileResponse(bytes, doc.fileName, req);
 }

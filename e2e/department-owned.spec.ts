@@ -220,7 +220,8 @@ test.describe("documents by class", () => {
     }).toPass({ timeout: 20_000 });
     await page.getByLabel("Document kind").selectOption("accountability-form");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await expect(page.getByRole("link", { name: "orcr.pdf" })).toBeVisible();
+    // the file name opens its Preview (a button); the icon beside it downloads
+    await expect(page.getByRole("button", { name: "orcr.pdf", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Mark signed" }).click();
     // D-: getByText("SIGNED") without exact:true also matches the "Mark
     // signed" button's OWN label (substring match, case-insensitive) —

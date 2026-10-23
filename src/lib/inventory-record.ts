@@ -1,5 +1,7 @@
 import type { AssetClass } from "@prisma/client";
 import { ATTACHMENT_DOC_PREFIX, ATTACHMENT_KINDS, type AttachmentKind } from "@/lib/asset-notes";
+import { fmtDate } from "@/lib/format";
+import { uploadStamp } from "@/lib/upload-meta";
 
 /*
  * Phase 47 (Task 8, spec §4.2a): the Inventory record's tab bar and the Notes / Attachments routes' URL state.
@@ -83,4 +85,23 @@ export function splitDocuments<T extends { kind: string }>(rows: readonly T[]): 
   const attachments: T[] = [];
   for (const r of rows) (r.kind.startsWith(ATTACHMENT_DOC_PREFIX) ? attachments : documents).push(r);
   return { documents, attachments };
+}
+
+/**
+ * One row of the asset's Documents page (the page loader maps each AssetDocument through it): the date the list has
+ * always shown, plus when the file was uploaded (ISO) and by whom (a name, or null for a system or imported row).
+ */
+export function assetDocumentRow(
+  assetId: string,
+  d: { id: string; kind: string; fileName: string; signed: boolean; createdAt: Date; uploadedBy: { name: string } | null },
+): {
+  id: string; kind: string; fileName: string; signed: boolean;
+  uploadedAt: string; uploadedBy: string | null; at: string; downloadHref: string;
+} {
+  return {
+    id: d.id, kind: d.kind, fileName: d.fileName, signed: d.signed,
+    ...uploadStamp(d.createdAt, d.uploadedBy),
+    at: fmtDate(d.createdAt),
+    downloadHref: `/inventory/${assetId}/documents/${d.id}/download`,
+  };
 }

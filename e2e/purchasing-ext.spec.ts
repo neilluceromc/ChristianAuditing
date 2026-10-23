@@ -180,7 +180,8 @@ test.describe.serial("purchasing extensions", () => {
     await waitForPoForm(page);
     await vendorBox(page).click();
     await vendorBox(page).fill("Old Line");
-    await expect(page.getByText("No vendor matches.")).toBeVisible();
+    // the list's own line (the combobox also announces it in an sr-only status, so the text alone matches twice)
+    await expect(page.locator("p").filter({ hasText: /^No vendor matches\.$/ })).toBeVisible();
     await expect(page.getByRole("option", { name: /Old Line Trading/ })).toHaveCount(0);
 
     await page.goto(`/purchases/suppliers/${quezon.id}`);

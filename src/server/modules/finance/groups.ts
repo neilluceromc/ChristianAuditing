@@ -6,6 +6,7 @@ import { groupUndoCheck, manilaTime, UNDO_WINDOW_MS } from "@/lib/finance-undo";
 import { DOCUMENT_KIND_LABEL, REQUEST_DOCUMENT_LABEL } from "@/lib/documents";
 import { fmtDate } from "@/lib/format";
 import { assetDocHref } from "@/lib/finance-asset-page";
+import { isPreviewable, uploadStamp } from "@/lib/upload-meta";
 import type { PoState } from "@/lib/po-flow";
 import { TOTAL_KEYS, type TotalKey } from "@/lib/po-totals";
 
@@ -154,7 +155,10 @@ export interface GroupDoc {
   kind: string;
   label: string;
   fileName: string;
-  uploadedBy: string;
+  /** When the file was uploaded (ISO), for the "Uploaded …" line; `at` is the old date. */
+  uploadedAt: string;
+  /** The uploader's name, or null for a row nobody uploaded (system or import). */
+  uploadedBy: string | null;
   at: string;
   downloadHref: string;
   /** For PDFs and images: the same route with `inline=1`. */
@@ -197,7 +201,6 @@ export interface GroupDetail {
 const num = (d: Prisma.Decimal | null | undefined) => (d === null || d === undefined ? null : Number(d));
 const TOTALS_SELECT = Object.fromEntries(TOTAL_KEYS.map((k) => [k, true])) as Record<TotalKey, true>;
 const NO_TOTALS = Object.fromEntries(TOTAL_KEYS.map((k) => [k, null])) as Record<TotalKey, null>;
-const PREVIEWABLE = /\.(pdf|png|jpe?g)$/i;
 
 /**
  * Everything the group's review page shows: the money (the PO's for a PO group — money lives on the PO, spec §5 —
@@ -267,8 +270,8 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
       const href = `/purchases/${po.id}/documents/${d.id}/download`;
       return {
         id: d.id, kind: d.kind, label: REQUEST_DOCUMENT_LABEL[d.kind as keyof typeof REQUEST_DOCUMENT_LABEL] ?? d.kind,
-        fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "Unknown", at: fmtDate(d.createdAt),
-        downloadHref: href, previewHref: PREVIEWABLE.test(d.fileName) ? `${href}?inline=1` : null,
+        fileName: d.fileName, ...uploadStamp(d.createdAt, d.uploadedBy), at: fmtDate(d.createdAt),
+        downloadHref: href, previewHref: isPreviewable(d.fileName) ? `${href}?inline=1` : null,
       };
     });
   } else {
@@ -280,9 +283,9 @@ export async function groupDetail(recordId: string): Promise<GroupDetail | null>
         if (seen.has(d.checksum)) continue;
         seen.add(d.checksum);
         docs.push({
-          id: d.id, kind: d.kind, label: DOCUMENT_KIND_LABEL[d.kind as keyof typeof DOCUMENT_KIND_LABEL] ?? d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "Unknown",
-          at: fmtDate(d.createdAt), downloadHref: assetDocHref(a.id, d.id),
-          previewHref: PREVIEWABLE.test(d.fileName) ? assetDocHref(a.id, d.id, true) : null,
+          id: d.id, kind: d.kind, label: DOCUMENT_KIND_LABEL[d.kind as keyof typeof DOCUMENT_KIND_LABEL] ?? d.kind, fileName: d.fileName,
+          ...uploadStamp(d.createdAt, d.uploadedBy), at: fmtDate(d.createdAt), downloadHref: assetDocHref(a.id, d.id),
+          previewHref: isPreviewable(d.fileName) ? assetDocHref(a.id, d.id, true) : null,
         });
       }
     }

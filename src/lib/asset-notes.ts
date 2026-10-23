@@ -146,5 +146,7 @@ export interface AssetAttachmentView {
   fileName: string;
   size: number | null;
   createdAt: Date;
+  /** `createdAt` as an ISO string, for the "Uploaded …" line (document preview). */
+  uploadedAt: string;
   uploadedBy: string | null;
 }

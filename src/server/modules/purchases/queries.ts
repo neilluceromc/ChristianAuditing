@@ -1,6 +1,7 @@
 import type { AssetClass, PaidBy, Prisma, PurchaseOrderState, Team } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { uploadStamp } from "@/lib/upload-meta";
 import { dwellLine, purchaseWhere } from "@/lib/purchases-list";
 import { bounceBack, type ThreadNote } from "@/lib/purchase-thread";
 import { derivePoProgress, lineProgress, type poProgress } from "@/lib/po-flow";
@@ -77,7 +78,8 @@ export interface PurchaseDetail {
   department: { id: string; name: string } | null;
   supplier: { id: string; name: string; archived: boolean } | null;
   /** The PO's documents still in their slots, newest first: a removed (superseded) one is left out… */
-  documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
+  /** `uploadedAt` (ISO) and `uploadedBy` (a name, or null for a system row) feed the "Uploaded …" line; `at` is the old date. */
+  documents: Array<{ id: string; kind: string; fileName: string; uploadedAt: string; uploadedBy: string | null; at: string; downloadHref: string }>;
   /** …and counted here: it stays on record (append-only). */
   supersededCount: number;
   /** Migration 38: the PO's money (purchasedAt as YYYY-MM-DD for the date input; fees as a number). */
@@ -300,7 +302,7 @@ export async function getPurchase(id: string): Promise<PurchaseDetail | null> {
     department: r.department ? { id: r.department.id, name: r.department.name } : null,
     supplier: r.vendor ? { id: r.vendor.id, name: r.vendor.name, archived: r.vendor.archivedAt !== null } : null,
     documents: r.documents.filter((d) => d.supersededAt === null).map((d) => ({
-      id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
+      id: d.id, kind: d.kind, fileName: d.fileName, ...uploadStamp(d.createdAt, d.uploadedBy),
       at: fmtDate(d.createdAt), downloadHref: `/purchases/${r.id}/documents/${d.id}/download`,
     })),
     supersededCount: r.documents.filter((d) => d.supersededAt !== null).length,

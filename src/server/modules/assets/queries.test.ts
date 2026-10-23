@@ -119,8 +119,8 @@ describe("assetAttachments (read on canSeeClass)", () => {
       { id: "d1", assetId: "a-it", kind: "attachment:photo", fileName: "p.jpg", size: null, createdAt: created, uploadedBy: null },
     ];
     expect(await assetAttachments("a-it")).toEqual([
-      { id: "d2", kind: "quotation", fileName: "q.pdf", size: 900, createdAt: created, uploadedBy: "Ana Cruz" },
-      { id: "d1", kind: "photo", fileName: "p.jpg", size: null, createdAt: created, uploadedBy: null },
+      { id: "d2", kind: "quotation", fileName: "q.pdf", size: 900, createdAt: created, uploadedAt: "2026-10-20T02:00:00.000Z", uploadedBy: "Ana Cruz" },
+      { id: "d1", kind: "photo", fileName: "p.jpg", size: null, createdAt: created, uploadedAt: "2026-10-20T02:00:00.000Z", uploadedBy: null },
     ]);
     expect(h.docQueries[0]).toMatchObject({
       where: { assetId: "a-it", kind: { startsWith: "attachment:" } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],

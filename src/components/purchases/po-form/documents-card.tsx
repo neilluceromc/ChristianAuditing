@@ -3,8 +3,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { PO_DOCUMENT_SLOTS, type PoDocumentSlot } from "@/lib/documents";
-import { checkUploadMeta, fileExtension, UPLOAD_TYPES } from "@/lib/upload-meta";
+import { checkUploadMeta, UPLOAD_TYPES } from "@/lib/upload-meta";
+import { previewKindOf, uploadedLine } from "@/lib/file-preview";
 import { Button, IconButton } from "@/components/ui/button";
+import { HeldPreviewButton, PreviewButton } from "@/components/files/file-preview-dialog";
 import { FormError } from "@/components/ui/form-field";
 import { Spinner } from "@/components/ui/spinner";
 import { FLAGGED_HINT, RING, SectionCard } from "./fields";
@@ -30,23 +32,23 @@ export const SLOT_COPY: Record<PoDocumentSlot, { title: string; hint: (si: strin
   "warranty-slip": { title: "Warranty slip", hint: () => "Helps IT with repairs later." },
 };
 
-const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg"]);
-const isImage = (name: string) => IMAGE_EXT.has(fileExtension(name).toLowerCase());
+const isImage = (name: string) => previewKindOf(name) === "image";
 
-/** Opens a file held in the browser in a new tab (its own object URL, let go once the tab has had time to read it). */
-function previewFile(file: File) {
-  const url = URL.createObjectURL(file);
-  window.open(url, "_blank", "noopener");
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+/** A stored document, as a slot previews it: its download route, the same with `?inline=1`, and its upload stamp. */
+export interface StoredPreview {
+  href: string;
+  inlineHref: string;
+  uploadedAt?: string | null;
+  uploadedBy?: string | null;
 }
 
 /** What a filled slot shows. */
 export interface SlotShown {
   fileName: string;
-  /** After the name: "0.8 MB", "on file", "Ana Cruz · 22 Oct 2026". */
-  detail: string;
-  /** Preview: the stored document's inline URL, or the file held in the browser. */
-  preview: string | File;
+  /** Under the name: "0.8 MB", "Uploaded 22 Oct 2026 09:41 · Ana Cruz", "on file"; null shows no second line. */
+  detail: string | null;
+  /** Preview (the dialog): the stored document, or the file held in the browser ("Not saved yet"). */
+  preview: StoredPreview | File;
 }
 
 /** A held file's thumbnail: its own object URL, let go when the file changes or the slot goes. */
@@ -86,7 +88,7 @@ function Paper({ pdf }: { pdf?: boolean }) {
 
 function Thumb({ shown }: { shown: SlotShown }) {
   if (!isImage(shown.fileName)) return <Paper pdf />;
-  return shown.preview instanceof File ? <HeldImage file={shown.preview} /> : <Img src={shown.preview} />;
+  return shown.preview instanceof File ? <HeldImage file={shown.preview} /> : <Img src={shown.preview.inlineHref} />;
 }
 
 export interface DocSlotProps {
@@ -175,19 +177,16 @@ export function DocSlot({ kind, required, si = "", shown, onPick, onRemove, erro
           </div>
           <div className="flex flex-col gap-1 px-3.5 py-3">
             <span id={`${id}-title`} className="text-sm font-medium text-fg">{title}</span>
-            <span id={`${id}-file`} className="truncate text-xs text-fg-muted" title={shown.fileName}>{shown.fileName} · {shown.detail}</span>
+            <span id={`${id}-file`} className="truncate text-xs text-fg-muted" title={shown.fileName}>{shown.fileName}</span>
+            {shown.detail && <span className="truncate text-[11.5px] text-fg-muted" title={shown.detail}>{shown.detail}</span>}
             <div className="mt-1.5 flex items-center gap-1">
-              {typeof shown.preview === "string" ? (
-                <a
-                  href={shown.preview} target="_blank" rel="noreferrer" aria-describedby={`${id}-title`}
-                  className="inline-flex items-center rounded-(--radius-btn) px-2.5 py-1.5 text-[11.5px] font-medium text-fg-secondary hover:bg-surface-subtle"
-                >
-                  Preview
-                </a>
+              {shown.preview instanceof File ? (
+                <HeldPreviewButton file={shown.preview} title={title} describedBy={`${id}-title`} />
               ) : (
-                <Button type="button" variant="ghost" size="sm" aria-describedby={`${id}-title`} onClick={() => previewFile(shown.preview as File)}>
-                  Preview
-                </Button>
+                <PreviewButton
+                  title={title} fileName={shown.fileName} href={shown.preview.href} inlineHref={shown.preview.inlineHref}
+                  uploadedAt={shown.preview.uploadedAt} uploadedBy={shown.preview.uploadedBy} describedBy={`${id}-title`}
+                />
               )}
               {onPick && (
                 <Button
@@ -275,6 +274,9 @@ export interface OnFileDoc {
   fileName: string;
   /** Its download route; Preview adds `?inline=1`. */
   href: string;
+  /** When it was uploaded (ISO) and by whom (null: nobody, a system or imported row), for its "Uploaded …" line. */
+  uploadedAt?: string;
+  uploadedBy?: string | null;
 }
 
 export interface DocumentsCardProps {
@@ -314,7 +316,11 @@ export function DocumentsCard({ files, onFiles, onFile, si, strict, errors, flag
             const shown: SlotShown | null = held
               ? { fileName: held.name, detail: fileSize(held.size), preview: held }
               : stored
-                ? { fileName: stored.fileName, detail: "on file", preview: `${stored.href}?inline=1` }
+                ? {
+                  fileName: stored.fileName,
+                  detail: uploadedLine(stored.uploadedAt, stored.uploadedBy) ?? "on file",
+                  preview: { href: stored.href, inlineHref: `${stored.href}?inline=1`, uploadedAt: stored.uploadedAt, uploadedBy: stored.uploadedBy },
+                }
                 : null;
             return (
               <DocSlot

@@ -209,4 +209,36 @@ describe("PO form redesign (task 7): the PO's own money on the group review", ()
     await groupDetail("rec7");
     expect((h.recordArgs as unknown as Args).select.purchaseOrder.select.documents.where).toEqual({ supersededAt: null });
   });
+
+  it("each document carries its upload time (ISO) and uploader (a name or null), beside the old date and the hrefs", async () => {
+    h.record = record(po({
+      documents: [
+        { id: "d1", kind: "invoice", fileName: "si.PDF", createdAt: REG, uploadedBy: { name: "Pia Lim" } },
+        { id: "d2", kind: "other", fileName: "notes.docx", createdAt: EARLY, uploadedBy: null },
+      ],
+    }));
+    const g = await groupDetail("rec7");
+    expect(g!.docs.map((d) => ({ id: d.id, uploadedAt: d.uploadedAt, uploadedBy: d.uploadedBy, at: d.at, previewHref: d.previewHref }))).toEqual([
+      { id: "d1", uploadedAt: "2026-10-20T01:00:00.000Z", uploadedBy: "Pia Lim", at: "20 Oct 2026", previewHref: "/purchases/po7/documents/d1/download?inline=1" },
+      { id: "d2", uploadedAt: "2026-10-18T01:00:00.000Z", uploadedBy: null, at: "18 Oct 2026", previewHref: null },
+    ]);
+  });
+
+  it("a direct registration's documents carry the same upload time and uploader", async () => {
+    h.record = {
+      ...record(null),
+      assets: [{
+        id: "a1", tag: "BR-LT-0501", serial: null, brand: null, model: "Latitude", cls: "IT", cost: D(50000), itVerifiedAt: REG,
+        financeConfirmedAt: null, financeReturnedAt: null, financeReturnedTo: null, financeNotCapitalised: false,
+        financeReturnFields: [], financeReturnReason: null, financeResubmitNote: null,
+        vendorId: "v1", invoiceRef: "44511", receiptRef: null, purchasedAt: REG,
+        documents: [{ id: "d9", kind: "invoice", fileName: "si.jpg", checksum: "c9", createdAt: REG, uploadedBy: { name: "Ivan Tan" } }],
+      }],
+    };
+    const g = await groupDetail("rec7");
+    expect(g!.docs).toEqual([expect.objectContaining({
+      id: "d9", uploadedAt: "2026-10-20T01:00:00.000Z", uploadedBy: "Ivan Tan", at: "20 Oct 2026",
+      previewHref: "/inventory/a1/documents/d9/download?inline=1",
+    })]);
+  });
 });

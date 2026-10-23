@@ -7,6 +7,7 @@ import { buildSupplierWhere } from "@/lib/supplier-list";
 import { VENDOR_CONTRACT_STATUSES, CONTRACT_STATUS_LABEL } from "@/lib/supplier-schema";
 import { provenanceOf, type Provenance } from "@/lib/provenance";
 import { fmtDate } from "@/lib/format";
+import { uploadStamp } from "@/lib/upload-meta";
 import type { FacetOption } from "@/server/modules/inventory/queries";
 
 export interface SupplierRow {
@@ -76,7 +77,8 @@ export interface SupplierDetail {
   createdAt: Date;
   updatedAt: Date;
   bankAccounts: Array<{ id: string; label: string; bankName: string; accountName: string; accountLast4: string }>;
-  documents: Array<{ id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string }>;
+  /** `uploadedAt` (ISO) and `uploadedBy` (a name, or null for a system row) feed the "Uploaded …" line; `at` is the old date. */
+  documents: Array<{ id: string; kind: string; fileName: string; uploadedAt: string; uploadedBy: string | null; at: string; downloadHref: string }>;
   requests: {
     rows: Array<{ id: string; refNo: string; state: PurchaseOrderState; department: string | null; requester: string; updatedAt: Date }>;
     page: number; pageCount: number; total: number;
@@ -152,7 +154,7 @@ export async function getSupplier(
       id: b.id, label: b.label, bankName: b.bankName, accountName: b.accountName, accountLast4: b.accountLast4,
     })),
     documents: v.documents.map((d) => ({
-      id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
+      id: d.id, kind: d.kind, fileName: d.fileName, ...uploadStamp(d.createdAt, d.uploadedBy),
       at: fmtDate(d.createdAt), downloadHref: `/purchases/suppliers/${id}/documents/${d.id}/download`,
     })),
     requests: {

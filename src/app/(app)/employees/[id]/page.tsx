@@ -9,7 +9,7 @@ import { computeLoadout, effectiveSlots, profilePrimary, profileTiles, resolvePo
 import { canSeeClass, isDirectLifecycle } from "@/lib/asset-class";
 import { SPARE_INCLUDE, spareWhere, toSpareOption } from "@/lib/spare-candidates";
 import { fmtDate, fmtRelativeDays, localDateISO } from "@/lib/format";
-import { uncoveredItems, type AckItem } from "@/lib/acknowledgement";
+import { ackRow, uncoveredItems, type AckItem } from "@/lib/acknowledgement";
 import { isRecentTransfer } from "@/lib/transfer-schema";
 import { defaultOffboardingDue, minOffboardingDue } from "@/lib/deadlines";
 import { toSearchParams } from "@/lib/url-state";
@@ -83,7 +83,8 @@ export default async function EmployeePage({
       where: { employeeId: id },
       orderBy: [{ signedAt: "desc" }, { id: "desc" }],
       take: 20,
-    }),
+      include: { recordedBy: { select: { name: true } } },
+    }).then((rows) => rows.map(ackRow)), // each with uploadedAt (createdAt) and uploadedBy (recordedBy) beside signedAt
     // Phase 39 (spec §2.5): the side card shows the latest 3; the count is the tab's badge.
     getTransfers(id, 3),
     prisma.employeeTransfer.count({ where: { employeeId: id } }),

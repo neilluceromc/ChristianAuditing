@@ -363,10 +363,13 @@ test.describe.serial("stock lots", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 10_000 });
 
     // lots-card.tsx renders a lot's documents as a SEPARATE row beneath the
-    // lot's own row (never nested inside it), so the link is found within
-    // the Lots card as a whole, not the lot's own `getByRole("row")`.
-    const link = cardSection(page, "Lots").getByRole("link", { name: /delivery-receipt\.pdf/ });
-    await expect(link).toBeVisible({ timeout: 10_000 });
+    // lot's own row (never nested inside it), so the list is found within
+    // the Lots card as a whole, not the lot's own `getByRole("row")`. The
+    // file name is plain text beside Preview (the dialog) and Download.
+    const lotDocs = cardSection(page, "Lots").getByRole("list", { name: "Lot documents" });
+    await expect(lotDocs).toContainText("delivery-receipt.pdf", { timeout: 10_000 });
+    const link = lotDocs.getByRole("link", { name: "Download", exact: true });
+    await expect(link).toBeVisible();
     const href = await link.getAttribute("href");
     expect(href).toMatch(/^\/stock\/lots\/[^/]+\/documents\/[^/]+\/download$/);
 

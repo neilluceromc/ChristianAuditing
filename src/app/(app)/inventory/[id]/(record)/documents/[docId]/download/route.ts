@@ -1,20 +1,13 @@
-import path from "node:path";
 import { requireUser } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { readUpload } from "@/server/storage";
 import { canSeeClass } from "@/lib/asset-class";
-import { contentDisposition } from "@/server/uploads";
-
-const TYPES: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-};
+import { fileResponse } from "@/server/uploads";
 
 /**
  * Phase 47 (spec §4.4): `?inline=1` sends `Content-Disposition: inline` so the asset page can preview a PDF in an
- * iframe or an image in an <img> — for exactly the types above (PDF, PNG, JPG); anything else still downloads.
+ * iframe or an image in an <img> — for exactly the PREVIEWABLE types (PDF, PNG, JPG; `fileResponse`); anything
+ * else still downloads.
  */
 export async function GET(
   req: Request,
@@ -32,13 +25,5 @@ export async function GET(
   const bytes = await readUpload(doc.path);
   if (!bytes) return new Response("File missing from the uploads volume", { status: 404 });
 
-  const type = TYPES[path.extname(doc.fileName).toLowerCase()];
-  const inline = type !== undefined && new URL(req.url).searchParams.get("inline") === "1";
-  return new Response(new Uint8Array(bytes), {
-    headers: {
-      "content-type": type ?? "application/octet-stream",
-      "content-disposition": contentDisposition(doc.fileName, inline ? "inline" : "attachment"),
-      "x-content-type-options": "nosniff",
-    },
-  });
+  return fileResponse(bytes, doc.fileName, req);
 }

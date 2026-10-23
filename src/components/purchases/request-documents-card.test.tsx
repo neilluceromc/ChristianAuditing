@@ -16,15 +16,15 @@ import { RequestDocumentsCard, type RequestDocumentRow } from "./request-documen
  * purchase-order and other kinds, in today's upload table.
  */
 
-const row = (id: string, kind: string, fileName: string): RequestDocumentRow => ({
-  id, kind, fileName, uploadedBy: "Ana Cruz", at: "22 Oct 2026", downloadHref: `/purchases/po1/documents/${id}/download`,
+const row = (id: string, kind: string, fileName: string, uploadedBy: string | null = "Ana Cruz"): RequestDocumentRow => ({
+  id, kind, fileName, uploadedBy, uploadedAt: "2026-10-22T01:41:00.000Z", downloadHref: `/purchases/po1/documents/${id}/download`,
 });
 // newest first, as getPurchase lists them
 const docs = [
   row("d4", "invoice", "si-new.jpg"),
   row("d3", "quotation", "quote.pdf"),
   row("d2", "invoice", "si-old.pdf"),
-  row("d1", "warranty-slip", "warranty.pdf"),
+  row("d1", "warranty-slip", "warranty.pdf", null),
 ];
 const render = (extra: Partial<Parameters<typeof RequestDocumentsCard>[0]> = {}) =>
   renderToStaticMarkup(<RequestDocumentsCard requestId="po1" docs={docs} canUpload invoiceRequired si="44511" {...extra} />);
@@ -34,9 +34,15 @@ describe("RequestDocumentsCard (the PO page)", () => {
   it("the four slots show the newest document of each kind, with Preview, Replace and Remove", () => {
     const html = render();
     const t = text(html);
-    expect(t).toContain("si-new.jpg · Ana Cruz · 22 Oct 2026");
-    expect(t).toContain("warranty.pdf · Ana Cruz · 22 Oct 2026");
-    expect(html).toContain('href="/purchases/po1/documents/d4/download?inline=1"');
+    expect(t).toContain("si-new.jpg Uploaded 22 Oct 2026 09:41 · Ana Cruz");
+    // nobody uploaded it (a system or imported row): the time alone
+    expect(t).toContain("warranty.pdf Uploaded 22 Oct 2026 09:41 Preview");
+    expect(t).not.toMatch(/system|Unknown/);
+    // the thumbnail is the stored image, inline; Preview opens the dialog, never a new tab
+    expect(html).toMatch(/<img[^>]*src="\/purchases\/po1\/documents\/d4\/download\?inline=1"/);
+    expect(html).toMatch(/<button[^>]*><span[^>]*>Preview<span class="sr-only"> si-new.jpg<\/span><\/span><\/button>/);
+    expect(html).toMatch(/<button[^>]*><span[^>]*>Preview<span class="sr-only"> warranty.pdf<\/span><\/span><\/button>/);
+    expect(html).not.toContain('target="_blank"');
     expect(html).toContain('aria-label="Remove sales invoice"');
     expect(html).toContain('aria-label="Remove warranty slip"');
     // the empty two are drop zones with their hints
@@ -51,13 +57,21 @@ describe("RequestDocumentsCard (the PO page)", () => {
     const html = render();
     const other = html.slice(html.indexOf("Other documents"));
     const t = text(other);
-    expect(t).toContain("Quotation quote.pdf");
-    expect(t).toContain("Sales invoice · earlier si-old.pdf");
+    expect(t).toContain("Quotation quote.pdf Ana Cruz 22 Oct 2026 09:41");
+    expect(t).toContain("Sales invoice · earlier si-old.pdf Ana Cruz 22 Oct 2026 09:41");
+    expect(other).toMatch(/<button[^>]*>Preview<span class="sr-only"> quote.pdf<\/span><\/button>/);
+    expect(other).toMatch(/<button[^>]*>Preview<span class="sr-only"> si-old.pdf<\/span><\/button>/);
     expect(t).not.toContain("si-new.jpg");
     const options = [...other.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]);
     expect(options).toEqual(["quotation", "purchase-order", "other"]);
     expect(other).toContain('aria-label="Document kind"');
     expect(other).toContain('aria-label="Document file"');
+  });
+
+  it("a slot document with no upload time: no empty line under its name", () => {
+    const html = render({ docs: [{ ...row("d9", "invoice", "si.pdf"), uploadedAt: "" }] });
+    expect(html).not.toMatch(/<span[^>]*title=""[^>]*><\/span>/);
+    expect(html).not.toContain("Uploaded");
   });
 
   it("an empty sales invoice slot is Required on a PO from the new form, and names the SI number", () => {
@@ -73,7 +87,7 @@ describe("RequestDocumentsCard (the PO page)", () => {
     expect(html).not.toContain("Remove sales invoice");
     expect(html).not.toMatch(/>Replace</);
     expect(text(html).match(/Not attached/g)).toHaveLength(2);
-    expect(html).toContain('href="/purchases/po1/documents/d4/download?inline=1"'); // Preview still works
+    expect(html).toMatch(/<button[^>]*><span[^>]*>Preview<span class="sr-only"> si-new.jpg<\/span><\/span><\/button>/); // Preview still works
     expect(html).toContain('href="/purchases/po1/documents/d3/download"'); // and Download
   });
 });

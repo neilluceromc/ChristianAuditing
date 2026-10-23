@@ -3,16 +3,20 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table, THead, TBody, Th, Tr, Td } from "@/components/ui/table";
 import { Pill } from "@/components/ui/pill";
 import { fmtDate, fmtMoneyExact } from "@/lib/format";
+import { uploadedLine } from "@/lib/file-preview";
+import { LOT_DOCUMENT_LABEL } from "@/lib/stock-schema";
+import { PreviewButton } from "@/components/files/file-preview-dialog";
 import type { ItemLots } from "@/server/modules/stock/queries";
 import { WriteOffDialog } from "./write-off-dialog";
 import { SetCostDialog } from "./set-cost-dialog";
-import { LotDocumentDialog, LOT_DOCUMENT_LABEL } from "./lot-document-dialog";
+import { LotDocumentDialog } from "./lot-document-dialog";
 
 /**
  * Spec §6.4: open lots in `itemLots`'s own consumption order (expired first),
  * each row's manager actions self-contained client islands; closed lots
  * collapse to a footer count; a lot's documents render as a second row
- * beneath it (download links with kind pills), never a nested table.
+ * beneath it (each with its kind pill, when and by whom it was uploaded,
+ * Preview and Download), never a nested table.
  */
 export function LotsCard({
   itemCode,
@@ -77,18 +81,24 @@ export function LotsCard({
                   {l.documents.length > 0 && (
                     <Tr>
                       <Td colSpan={cols} className="bg-surface-subtle">
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1">
-                          {l.documents.map((d) => (
-                            <a
-                              key={d.id}
-                              href={d.downloadHref}
-                              className="inline-flex items-center gap-1.5 text-[11px] text-accent hover:underline"
-                            >
-                              <Pill>{LOT_DOCUMENT_LABEL[d.kind as keyof typeof LOT_DOCUMENT_LABEL] ?? d.kind}</Pill>
-                              {d.fileName}
-                            </a>
-                          ))}
-                        </div>
+                        <ul aria-label="Lot documents" className="flex flex-col gap-1 py-1">
+                          {l.documents.map((d) => {
+                            const label = LOT_DOCUMENT_LABEL[d.kind as keyof typeof LOT_DOCUMENT_LABEL] ?? d.kind;
+                            return (
+                              <li key={d.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+                                <Pill>{label}</Pill>
+                                <span className="max-w-[16rem] truncate text-fg" title={d.fileName}>{d.fileName}</span>
+                                <span className="font-mono text-[10.5px] text-fg-muted">{uploadedLine(d.uploadedAt, d.uploadedBy)}</span>
+                                <PreviewButton
+                                  plain className="text-accent hover:underline"
+                                  title={label} fileName={d.fileName} href={d.downloadHref} inlineHref={`${d.downloadHref}?inline=1`}
+                                  uploadedAt={d.uploadedAt} uploadedBy={d.uploadedBy}
+                                />
+                                <a href={d.downloadHref} className="text-accent hover:underline">Download</a>
+                              </li>
+                            );
+                          })}
+                        </ul>
                       </Td>
                     </Tr>
                   )}

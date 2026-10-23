@@ -233,7 +233,8 @@ describe("NotesTab (spec §4.3, shared with the Inventory record)", () => {
 });
 
 const att = (id: string, over: Partial<AssetAttachmentView> = {}): AssetAttachmentView => ({
-  id, kind: "quotation", fileName: `${id}.pdf`, size: 1_536_000, createdAt: at("2026-10-19T02:00:00Z"), uploadedBy: "Ana Cruz", ...over,
+  id, kind: "quotation", fileName: `${id}.pdf`, size: 1_536_000, createdAt: at("2026-10-19T02:00:00Z"),
+  uploadedAt: "2026-10-19T02:00:00.000Z", uploadedBy: "Ana Cruz", ...over,
 });
 const hrefFor = (p: { ak?: string; att?: string | null }) => `/x?ak=${p.ak ?? "all"}&att=${p.att ?? ""}`;
 
@@ -251,6 +252,8 @@ describe("AttachmentsTab (spec §4.4, shared with the Inventory record)", () => 
     expect(html).toContain("q1.pdf");
     expect(html).toContain("1.5 MB");
     expect(html).toContain("Ana Cruz");
+    // the upload time to the minute (Manila), not the date alone
+    expect(html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).toContain("Quotation · Ana Cruz · 19 Oct 2026 10:00 · 1.5 MB");
     expect(html).toContain('href="/x?ak=all&amp;att=q1"');
     expect(html).toContain("Select a file to preview it");
   });
@@ -260,6 +263,19 @@ describe("AttachmentsTab (spec §4.4, shared with the Inventory record)", () => 
     const img = renderToStaticMarkup(<AttachmentsTab assetId="a1" attachments={list} canUpload={false} kind="photo" selectedId="p1" hrefFor={hrefFor} />);
     expect(img).toMatch(/<img[^>]*alt="p1.jpg"/);
     expect(img).not.toContain("q1.pdf"); // filtered to photos
+    // the preview says when and by whom the file was uploaded
+    expect(pdf).toMatch(/<iframe/);
+    expect(pdf.indexOf("Uploaded 19 Oct 2026 10:00 · Ana Cruz")).toBeGreaterThan(-1);
+    expect(pdf.indexOf("Uploaded 19 Oct 2026 10:00 · Ana Cruz")).toBeLessThan(pdf.indexOf("<iframe"));
+  });
+  it("an attachment nobody uploaded: no stand-in name, in the list or the preview", () => {
+    const html = renderToStaticMarkup(
+      <AttachmentsTab assetId="a1" attachments={[att("q1", { uploadedBy: null })]} canUpload={false} kind="all" selectedId="q1" hrefFor={hrefFor} />,
+    );
+    const t = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    expect(t).toContain("Quotation · 19 Oct 2026 10:00 · 1.5 MB");
+    expect(t).toContain("Uploaded 19 Oct 2026 10:00");
+    expect(t).not.toMatch(/Unknown|system|10:00 ·  ?Uploaded/);
   });
   it("viewers: no upload; empty and filtered-empty states", () => {
     const ro = renderToStaticMarkup(<AttachmentsTab assetId="a1" attachments={list} canUpload={false} kind="all" selectedId={null} hrefFor={hrefFor} />);
@@ -278,6 +294,15 @@ describe("DocPreview", () => {
     expect(html).toMatch(/<a [^>]*href="\/inventory\/a1\/documents\/d1\/download\?inline=1"[^>]*>Open full size/);
     expect(html).toMatch(/<a [^>]*href="\/inventory\/a1\/documents\/d1\/download"[^>]*>Download/);
     expect(html).toMatch(/<a [^>]*href="\/back"[^>]*>Close/);
+  });
+  it("the uploaded line when it is given; none when it is not", () => {
+    const html = renderToStaticMarkup(
+      <DocPreview assetId="a1" doc={{ id: "d1", fileName: "inv.pdf" }} uploadedAt="2026-10-22T01:41:00.000Z" uploadedBy="A. Reyes" />,
+    );
+    expect(html).toContain("Uploaded 22 Oct 2026 09:41 · A. Reyes");
+    expect(renderToStaticMarkup(<DocPreview assetId="a1" doc={{ id: "d1", fileName: "inv.pdf" }} uploadedAt="2026-10-22T01:41:00.000Z" uploadedBy={null} />))
+      .toContain("Uploaded 22 Oct 2026 09:41<");
+    expect(renderToStaticMarkup(<DocPreview assetId="a1" doc={{ id: "d1", fileName: "inv.pdf" }} />)).not.toContain("Uploaded");
   });
   it("a file that cannot preview says so and still downloads", () => {
     const html = renderToStaticMarkup(<DocPreview assetId="a1" doc={{ id: "d1", fileName: "x.docx" }} />);

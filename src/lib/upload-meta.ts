@@ -11,6 +11,25 @@ export const UPLOAD_TYPES: Record<string, string> = {
   ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 };
 
+/**
+ * The one list of extensions a browser may show in place (a PDF in a frame, a PNG or JPG as an image): what
+ * `fileResponse` sends `inline` for on `?inline=1`, and what the preview offers. Every upload type is here.
+ */
+export const PREVIEWABLE: ReadonlySet<string> = new Set([".pdf", ".png", ".jpg", ".jpeg"]);
+
+/** True when the file's extension (any case) is in PREVIEWABLE. */
+export function isPreviewable(fileName: string): boolean {
+  return PREVIEWABLE.has(fileExtension(fileName).toLowerCase());
+}
+
+/**
+ * What every listed file carries for its "Uploaded …" line: `createdAt` as an ISO string, and the uploader's name,
+ * or null for a row nobody uploaded (a system or imported row). The lists format it with `fmtDateTime`.
+ */
+export function uploadStamp(createdAt: Date, uploader: { name: string } | null | undefined): { uploadedAt: string; uploadedBy: string | null } {
+  return { uploadedAt: createdAt.toISOString(), uploadedBy: uploader?.name ?? null };
+}
+
 /** The same answer as node's `path.posix.extname` (".pdf" and ".." have none; trailing slashes are ignored). */
 export function fileExtension(name: string): string {
   const trimmed = name.replace(/\/+$/, "");

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { assetDocHref, fmtFileSize, previewKind } from "@/lib/finance-asset-page";
+import { assetDocHref, fmtFileSize } from "@/lib/finance-asset-page";
+import { previewKindOf, uploadedLine } from "@/lib/file-preview";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Card } from "@/components/ui/card";
 
@@ -14,14 +15,20 @@ export function DocPreview({
   doc,
   title,
   closeHref,
+  uploadedAt,
+  uploadedBy,
 }: {
   assetId: string;
   doc: { id: string; fileName: string; size?: number | null };
   /** What the file is ("Sales invoice"); the file name alone when absent. */
   title?: string;
   closeHref?: string;
+  /** When it was uploaded (ISO) and by whom: "Uploaded 22 Oct 2026 09:41 · A. Reyes" under the name. */
+  uploadedAt?: string | null;
+  uploadedBy?: string | null;
 }) {
-  const kind = previewKind(doc.fileName);
+  const kind = previewKindOf(doc.fileName);
+  const line = uploadedLine(uploadedAt, uploadedBy);
   const inline = assetDocHref(assetId, doc.id, true);
   const download = assetDocHref(assetId, doc.id);
   return (
@@ -35,6 +42,7 @@ export function DocPreview({
               <span className="ml-2 font-mono text-[11px] font-normal text-fg-muted">{fmtFileSize(doc.size)}</span>
             )}
           </p>
+          {line && <p className="text-[11.5px] text-fg-muted">{line}</p>}
         </div>
         {kind && (
           <a

@@ -7,6 +7,7 @@ import { buildStockItemWhere, buildStockOrderBy } from "@/lib/stock-list";
 import { isLow } from "@/lib/stock-balance";
 import { EXPORT_CAP } from "@/lib/export-columns";
 import { fmtDate, localDateISO } from "@/lib/format";
+import { uploadStamp } from "@/lib/upload-meta";
 import {
   DEFAULT_EXPIRY_WINDOW, consumptionOrder, expiryLabel, isExpired, lotRemaining, onHand, type LotState,
 } from "@/lib/stock-allocation";
@@ -343,8 +344,9 @@ export async function getStockItem(id: string, page: number, today: string = loc
   };
 }
 
+/** `uploadedAt` (ISO) and `uploadedBy` (a name, or null for a system row) feed the "Uploaded …" line; `at` is the old date. */
 export interface StockLotDocumentRow {
-  id: string; kind: string; fileName: string; uploadedBy: string; at: string; downloadHref: string;
+  id: string; kind: string; fileName: string; uploadedAt: string; uploadedBy: string | null; at: string; downloadHref: string;
 }
 
 export interface StockLotRow {
@@ -413,7 +415,7 @@ export async function itemLots(itemId: string, today: string = localDateISO()): 
         value: unitCost === null ? null : unitCost * o.remaining,
         reference: l.reference, supplier: l.supplier?.name ?? null, receivedBy: l.receivedBy.name,
         documents: l.documents.map((d) => ({
-          id: d.id, kind: d.kind, fileName: d.fileName, uploadedBy: d.uploadedBy?.name ?? "system",
+          id: d.id, kind: d.kind, fileName: d.fileName, ...uploadStamp(d.createdAt, d.uploadedBy),
           at: fmtDate(d.createdAt), downloadHref: `/stock/lots/${l.id}/documents/${d.id}/download`,
         })),
       };

@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/guards";
 import { getVisibleAsset } from "@/server/modules/inventory/queries";
-import { fmtDate } from "@/lib/format";
+import { assetDocumentRow } from "@/lib/inventory-record";
 import { toSearchParams } from "@/lib/url-state";
 import { canAttachDocuments, canManageClass } from "@/lib/asset-class";
 import { Banner } from "@/components/ui/banner";
@@ -30,19 +30,12 @@ export default async function AssetDocumentsPage({
   if (!asset) notFound();
   const docs = await prisma.assetDocument.findMany({
     where: { assetId: id },
-    include: { uploadedBy: true },
+    include: { uploadedBy: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
   });
 
-  const rows: DocumentRow[] = docs.map((d) => ({
-    id: d.id,
-    kind: d.kind,
-    fileName: d.fileName,
-    signed: d.signed,
-    uploadedBy: d.uploadedBy?.name ?? "system",
-    at: fmtDate(d.createdAt),
-    downloadHref: `/inventory/${id}/documents/${d.id}/download`,
-  }));
+  // each row also carries uploadedAt (ISO) and uploadedBy (a name or null) for the "Uploaded …" line
+  const rows: DocumentRow[] = docs.map((d) => assetDocumentRow(id, d));
 
   // Task 12: the single-asset form redirects here (instead of the record
   // page) when one or more documents chosen at registration failed to

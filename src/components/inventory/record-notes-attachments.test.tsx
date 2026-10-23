@@ -59,7 +59,7 @@ describe("RecordTabs: Notes and Attachments (Phase 47 Task 8)", () => {
 
 describe("DocumentsPanel groups attachments (Phase 47 Task 8)", () => {
   const row = (over: Partial<DocumentRow>): DocumentRow => ({
-    id: "d1", kind: "receipt", fileName: "receipt.pdf", signed: false, uploadedBy: "Ana", at: "Oct 2, 2026",
+    id: "d1", kind: "receipt", fileName: "receipt.pdf", signed: false, uploadedBy: "Ana", uploadedAt: "2026-10-22T01:41:00.000Z",
     downloadHref: "/inventory/a1/documents/d1/download", ...over,
   });
   const panel = (docs: DocumentRow[], canSign = true) =>
@@ -113,5 +113,17 @@ describe("DocumentsPanel groups attachments (Phase 47 Task 8)", () => {
     const out = panel([docs[2]]);
     expect(out).toContain("gcash.png");
     expect(out).not.toContain("Nothing attached yet");
+  });
+
+  it("the file name opens Preview (the dialog), a Download icon keeps the download, and each row says when and by whom it was uploaded", () => {
+    const out = panel([row({}), row({ id: "d2", fileName: "scan.png", uploadedBy: null, downloadHref: "/inventory/a1/documents/d2/download" })]);
+    expect(out).toMatch(/<button type="button"[^>]*title="receipt.pdf"[^>]*>receipt.pdf<\/button>/);
+    expect(out).toMatch(/<a [^>]*href="\/inventory\/a1\/documents\/d1\/download"[^>]*aria-label="Download receipt.pdf"/);
+    expect(out).not.toMatch(/<a [^>]*href="[^"]*inline=1/);
+    const text = out.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    expect(text).toContain("Uploaded 22 Oct 2026 09:41 · Ana");
+    // nobody uploaded it: the time alone, no stand-in name
+    expect(text).toMatch(/scan\.png .*Uploaded 22 Oct 2026 09:41(?! ·)/);
+    expect(text).not.toContain("system");
   });
 });

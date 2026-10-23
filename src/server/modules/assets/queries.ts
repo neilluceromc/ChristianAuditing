@@ -4,6 +4,7 @@ import { canSeeClass } from "@/lib/asset-class";
 import {
   ATTACHMENT_DOC_PREFIX, attachmentKindOf, normId, threadNotes, type AssetAttachmentView, type AssetNoteThread,
 } from "@/lib/asset-notes";
+import { uploadStamp } from "@/lib/upload-meta";
 
 /*
  * Phase 47 (Task 6, spec §4.2a–§4.4): the shared notes and attachments reads, for the Finance asset page and the
@@ -59,6 +60,6 @@ export async function assetAttachments(assetId: string): Promise<AssetAttachment
     fileName: r.fileName,
     size: r.size,
     createdAt: r.createdAt,
-    uploadedBy: r.uploadedBy?.name ?? null,
+    ...uploadStamp(r.createdAt, r.uploadedBy),
   }));
 }

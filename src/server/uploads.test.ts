@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { checkUploadMeta, contentDisposition, storeUpload, UPLOAD_MAX_BYTES } from "./uploads";
+import { checkUploadMeta, contentDisposition, fileResponse, storeUpload, UPLOAD_MAX_BYTES } from "./uploads";
 import { writeObject } from "./storage";
 
 vi.mock("./storage", () => ({ writeObject: vi.fn(async () => undefined) }));
@@ -40,6 +40,56 @@ describe("contentDisposition (ruling R11)", () => {
   it("never lets CR/LF into the header value", () => {
     const header = contentDisposition("evil\r\nX-Injected: yes.pdf");
     expect(header).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe("fileResponse: every download route's response", () => {
+  const bytes = new Uint8Array([37, 80, 68, 70]);
+  const req = (qs = "") => new Request(`http://localhost/x/documents/d1/download${qs}`);
+
+  it("?inline=1 on a PDF: inline, application/pdf, the bytes as the body", async () => {
+    const res = fileResponse(bytes, "invoice.pdf", req("?inline=1"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toMatch(/^inline; filename="invoice\.pdf"/);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("?inline=1 on an upper-case .JPG: inline, image/jpeg", () => {
+    const res = fileResponse(bytes, "IMG_2041.JPG", req("?inline=1"));
+    expect(res.headers.get("content-disposition")).toMatch(/^inline; filename="IMG_2041\.JPG"/);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+  });
+
+  it("?inline=1 on a .docx still downloads, as application/octet-stream", () => {
+    const res = fileResponse(bytes, "quote.docx", req("?inline=1"));
+    expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="quote\.docx"/);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+  });
+
+  it("without inline (or with any value but 1) a PDF is an attachment", () => {
+    expect(fileResponse(bytes, "invoice.pdf", req()).headers.get("content-disposition")).toMatch(/^attachment; /);
+    expect(fileResponse(bytes, "invoice.pdf", req("?inline=true")).headers.get("content-disposition")).toMatch(/^attachment; /);
+    expect(fileResponse(bytes, "invoice.pdf", req("?inline=0")).headers.get("content-disposition")).toMatch(/^attachment; /);
+  });
+
+  it("always sends nosniff, inline or not, previewable or not", () => {
+    for (const [name, qs] of [["invoice.pdf", "?inline=1"], ["invoice.pdf", ""], ["quote.docx", "?inline=1"], ["noext", ""]]) {
+      expect(fileResponse(bytes, name, req(qs)).headers.get("x-content-type-options"), `${name}${qs}`).toBe("nosniff");
+    }
+  });
+
+  it("a non-Latin-1 name goes through contentDisposition: an ASCII fallback plus filename*", () => {
+    const res = fileResponse(bytes, "résumé 收据.pdf", req("?inline=1"));
+    expect(res.headers.get("content-disposition")).toBe(contentDisposition("résumé 收据.pdf", "inline"));
+    expect(res.headers.get("content-disposition")).toContain("filename*=UTF-8''r%C3%A9sum%C3%A9%20%E6%94%B6%E6%8D%AE.pdf");
+  });
+
+  it("one extension parser decides both the type and the disposition (a backslash in the name changes neither)", () => {
+    // win32's path.extname reads "scan\.pdf" as a dotfile with no extension; fileExtension (posix) reads ".pdf"
+    const res = fileResponse(bytes, "scan\\.pdf", req("?inline=1"));
+    expect(res.headers.get("content-disposition")).toMatch(/^inline; /);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
   });
 });
 

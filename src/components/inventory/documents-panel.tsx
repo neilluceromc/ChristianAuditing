@@ -10,18 +10,23 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { FileDrop } from "@/components/patterns/file-drop";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { DownloadIconLink } from "@/components/files/download-icon-link";
+import { PreviewButton } from "@/components/files/file-preview-dialog";
 import { markDocumentSigned, uploadDocument } from "@/server/modules/inventory/document-actions";
 import { DOCUMENT_KINDS, DOCUMENT_KIND_LABEL as KIND_LABELS, type DocumentKind } from "@/lib/documents";
 import { ATTACHMENT_DOC_PREFIX, ATTACHMENT_KIND_LABELS, attachmentKindOf } from "@/lib/asset-notes";
 import { splitDocuments } from "@/lib/inventory-record";
+import { uploadedLine } from "@/lib/file-preview";
 
 export interface DocumentRow {
   id: string;
   kind: string;
   fileName: string;
   signed: boolean;
-  uploadedBy: string;
-  at: string;
+  /** When it was uploaded (ISO): "Uploaded 22 Oct 2026 09:41 · <name>". */
+  uploadedAt: string;
+  /** Null for a row nobody uploaded (system or import): the line gives the time alone. */
+  uploadedBy: string | null;
   downloadHref: string;
 }
 
@@ -33,16 +38,21 @@ function kindLabel(kind: string): string {
   return KIND_LABELS[kind as DocumentKind] ?? kind;
 }
 
-/** One list of document rows. An attachment is never signable: only an accountability form shows Mark signed. */
+/**
+ * One list of document rows. The file name opens the Preview dialog; the icon beside the upload line downloads. An
+ * attachment is never signable: only an accountability form shows Mark signed.
+ */
 function DocList({ rows, canSign, onSign, label }: { rows: DocumentRow[]; canSign: boolean; onSign: (docId: string) => void; label?: string }) {
   return (
     <ul aria-label={label} className="flex flex-col rounded-(--radius-card) border border-border bg-surface shadow-card">
       {rows.map((doc) => (
-        <li key={doc.id} className="flex items-center gap-3 border-b border-border-faint px-3 py-2.5 last:border-b-0">
+        <li key={doc.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-faint px-3 py-2.5 last:border-b-0">
           <Pill>{kindLabel(doc.kind)}</Pill>
-          <a href={doc.downloadHref} className="min-w-0 flex-1 truncate text-[12.5px] text-accent hover:underline">
-            {doc.fileName}
-          </a>
+          <PreviewButton
+            plain label={doc.fileName} className="min-w-0 flex-1 basis-32 truncate text-left text-[12.5px] text-accent hover:underline"
+            title={kindLabel(doc.kind)} fileName={doc.fileName} href={doc.downloadHref} inlineHref={`${doc.downloadHref}?inline=1`}
+            uploadedAt={doc.uploadedAt} uploadedBy={doc.uploadedBy}
+          />
           {doc.signed ? (
             <Pill tone="accent">SIGNED</Pill>
           ) : (
@@ -50,8 +60,9 @@ function DocList({ rows, canSign, onSign, label }: { rows: DocumentRow[]; canSig
               <Button size="sm" variant="ghost" onClick={() => onSign(doc.id)}>Mark signed</Button>
             )
           )}
-          <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
-            {doc.uploadedBy} · {doc.at}
+          <span className="flex shrink-0 items-center gap-1">
+            <span className="font-mono text-[10.5px] text-fg-faint">{uploadedLine(doc.uploadedAt, doc.uploadedBy)}</span>
+            <DownloadIconLink href={doc.downloadHref} fileName={doc.fileName} />
           </span>
         </li>
       ))}

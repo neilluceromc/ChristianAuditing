@@ -10,9 +10,11 @@ import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { RateLimitNotice } from "@/components/patterns/rate-limit-notice";
+import { PreviewButton } from "@/components/files/file-preview-dialog";
 import { recordAcknowledgement } from "@/server/modules/employees/acknowledgement-actions";
 import { fmtDate } from "@/lib/format";
 import { latestSigningDate, type AckItem } from "@/lib/acknowledgement";
+import { uploadedLine } from "@/lib/file-preview";
 import { formStatus, tagLine } from "@/lib/side-card";
 import { StatusDot } from "./status-dot";
 
@@ -20,6 +22,10 @@ export interface AckRow {
   id: string;
   signedAt: Date;
   items: unknown;
+  fileName: string;
+  /** When the scan was uploaded (ISO) and who recorded it (null: nobody), for the "Uploaded …" line. */
+  uploadedAt: string;
+  uploadedBy: string | null;
 }
 
 function itemCount(items: unknown): number {
@@ -32,10 +38,23 @@ function plural(n: number): string {
 
 const download = (employeeId: string, id: string) => `/employees/${employeeId}/acknowledgements/${id}/download`;
 
+/** "Preview": the signed form in the Preview dialog, through the download route's `?inline=1`. */
+function PreviewForm({ employeeId, row }: { employeeId: string; row: AckRow }) {
+  const href = download(employeeId, row.id);
+  return (
+    <PreviewButton
+      plain className="text-accent hover:underline"
+      title="Signed form" fileName={row.fileName} href={href} inlineHref={`${href}?inline=1`}
+      uploadedAt={row.uploadedAt} uploadedBy={row.uploadedBy}
+    />
+  );
+}
+
 /**
  * Spec §6 (Phase 20), Phase 39 (spec §2.4): the signed paper, recorded on the person — the side card's Form tab.
- * A status line with a dot, a helper line, Print and Record side by side (Record is the primary while nothing is
- * signed), then the History `<details>` of older forms (the page caps the read at 20).
+ * A status line with a dot (Preview and Download for the latest form, and when and by whom it was uploaded), a helper
+ * line, Print and Record side by side (Record is the primary while nothing is signed), then the History `<details>` of
+ * older forms (the page caps the read at 20).
  */
 export function FormTab({
   employeeId,
@@ -51,6 +70,7 @@ export function FormTab({
   canRecord: boolean;
 }) {
   const status = formStatus(latest ? { signedAt: latest.signedAt, items: itemCount(latest.items) } : null, uncovered.length);
+  const latestLine = latest ? uploadedLine(latest.uploadedAt, latest.uploadedBy) : "";
   return (
     <div className="flex flex-col gap-3">
       <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-fg-secondary">
@@ -58,6 +78,8 @@ export function FormTab({
         <span className={latest ? "text-fg" : undefined}>{status.text}</span>
         {latest && (
           <>
+            <span aria-hidden>·</span>
+            <PreviewForm employeeId={employeeId} row={latest} />
             <span aria-hidden>·</span>
             <a href={download(employeeId, latest.id)} className="text-accent hover:underline">Download</a>
           </>
@@ -71,6 +93,7 @@ export function FormTab({
           </>
         )}
       </p>
+      {latestLine && <p className="-mt-2 pl-3.5 text-[11px] text-fg-muted">{latestLine}</p>}
       {status.since && (
         <p className="-mt-2 pl-3.5 font-mono text-[11px] text-fg-muted">{tagLine(uncovered.map((u) => u.tag))}</p>
       )}
@@ -91,9 +114,11 @@ export function FormTab({
           <div className="flex flex-col gap-1.5 border-t border-border-faint px-3 py-2.5">
             {history.map((row) => {
               const n = itemCount(row.items);
+              const line = uploadedLine(row.uploadedAt, row.uploadedBy);
               return (
                 <p key={row.id} className="text-[11px] text-fg-secondary">
-                  {fmtDate(row.signedAt)} · {n} item{plural(n)} ·{" "}
+                  {fmtDate(row.signedAt)} · {n} item{plural(n)} ·{line && ` ${line} ·`}{" "}
+                  <PreviewForm employeeId={employeeId} row={row} /> ·{" "}
                   <a href={download(employeeId, row.id)} className="text-accent hover:underline">Download</a>
                 </p>
               );
