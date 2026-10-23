@@ -1,9 +1,10 @@
 import { Role } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
-  PERMANENT_LOCK, ROLE_LABELS, ROLE_OPTIONS, USER_STATUSES, USER_STATUS_LABEL, canTurnOff, disableChange, emailProblem,
-  groupLabel, lockReason, roleChange, roleChangeNote, roleWorkspaces, selfRoleChangeWarning, userStatus,
-  type TargetUser,
+  OFFBOARDED_NOTE, PERMANENT_LOCK, ROLE_CARD_OPENS, ROLE_LABELS, ROLE_OPTIONS, ROLE_TABS, USER_STATUSES, USER_STATUS_LABEL,
+  accessHistoryHref, accountCreated, canTurnOff, createdLabel, disableChange, emailProblem, groupLabel, lastSignInLabel,
+  lockReason, passwordLabel, roleChange, roleChangeNote, roleWorkspaces, selfRoleChangeWarning, turnOffConfirm,
+  userStatus, waitingChip, type TargetUser,
 } from "./admin-users";
 import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
 
@@ -264,5 +265,61 @@ describe("Users & access rules", () => {
   it("groupLabel names a client group 'Client: X' and a department by its name", () => {
     expect(groupLabel({ name: "Finance", kind: "INTERNAL" })).toBe("Finance");
     expect(groupLabel({ name: "Acme", kind: "CLIENT" })).toBe("Client: Acme");
+  });
+});
+
+describe("Users & access page words (spec §4.4, Task 4)", () => {
+  // 2026-10-24 10:30 in Manila (UTC+8).
+  const now = new Date("2026-10-24T02:30:00Z");
+
+  it("the role tabs: All, then each role's short name, in ROLE_OPTIONS order", () => {
+    expect(ROLE_TABS.map((t) => t.label)).toEqual(["All", "Admin", "IT", "Purchasing", "Finance", "Viewer"]);
+    expect(ROLE_TABS.map((t) => t.role)).toEqual([null, ...ROLE_OPTIONS]);
+  });
+
+  it("each role card names the workspaces the role opens", () => {
+    for (const role of ROLE_OPTIONS) {
+      const opens = ROLE_CARD_OPENS[role];
+      if (role === "admin") expect(opens).toMatch(/^Every workspace/);
+      else for (const id of ROLE_WORKSPACES[role]) expect(opens).toContain(WORKSPACE_META[id].label);
+    }
+    expect(ROLE_CARD_OPENS.viewer).toMatch(/read-only/);
+  });
+
+  it("last sign-in: Never, today with the Manila time, yesterday, days ago, then the date", () => {
+    expect(lastSignInLabel(null, now)).toBe("Never");
+    expect(lastSignInLabel("2026-10-24T01:12:00Z", now)).toBe("Today 09:12");
+    // 23:50 on the 23rd in Manila is yesterday there, though it is the 23rd in UTC too
+    expect(lastSignInLabel("2026-10-23T15:50:00Z", now)).toBe("Yesterday");
+    // 07:00 on the 24th in Manila is 23:00 on the 23rd in UTC: still today in Manila
+    expect(lastSignInLabel("2026-10-23T23:00:00Z", now)).toBe("Today 07:00");
+    expect(lastSignInLabel("2026-10-21T03:00:00Z", now)).toBe("3 days ago");
+    expect(lastSignInLabel("2026-09-14T03:00:00Z", now)).toBe("14 Sep 2026");
+  });
+
+  it("password: temporary with the date it was given, set by them, or SSO only", () => {
+    const at = "2026-10-23T03:00:00Z";
+    expect(passwordLabel({ signIn: "credentials", mustChangePassword: true, passwordChangedAt: at })).toBe("Temporary, given 23 Oct");
+    expect(passwordLabel({ signIn: "credentials", mustChangePassword: false, passwordChangedAt: at })).toBe("Set by them, 23 Oct");
+    expect(passwordLabel({ signIn: "credentials", mustChangePassword: false, passwordChangedAt: null })).toBe("Set by them");
+    expect(passwordLabel({ signIn: "SSO only", mustChangePassword: false, passwordChangedAt: null })).toBe("None — signs in with SSO");
+  });
+
+  it("created: the date, and the admin who created it when one did", () => {
+    expect(createdLabel("2026-09-01T03:00:00Z", "M. Cruz")).toBe("1 Sep 2026 by M. Cruz");
+    expect(createdLabel("2026-09-01T03:00:00Z", null)).toBe("1 Sep 2026");
+  });
+
+  it("the verbatim copy", () => {
+    expect(turnOffConfirm("Nina Reyes")).toBe(
+      "Turn off Nina Reyes's account? They're signed out now and can't sign in. Their history stays.",
+    );
+    expect(accountCreated("Ana Lim")).toBe("Account created for Ana Lim — give them the temporary password");
+    expect(waitingChip(3)).toBe("Waiting for approval · 3");
+    expect(OFFBOARDED_NOTE).toBe("Employee offboarded");
+  });
+
+  it("the access history link is the Activity page filtered to that user's entries", () => {
+    expect(accessHistoryHref("clx0abc")).toBe("/audit?entity=user&q=clx0abc");
   });
 });

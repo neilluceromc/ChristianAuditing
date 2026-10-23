@@ -69,6 +69,56 @@ export interface UsersList {
   roleCounts: Record<Role, number>;
 }
 
+/** What a users-list row reads. An explicit select: passwordHash is read only to say "SSO only", and never leaves here. */
+const USER_ROW_SELECT = {
+  id: true, name: true, email: true, role: true, isPermanentAdmin: true, disabled: true, passwordHash: true,
+  approvalState: true, mustChangePassword: true, lastSignInAt: true, passwordChangedAt: true,
+  createdAt: true, updatedAt: true,
+  createdBy: { select: { name: true } },
+  employee: {
+    select: {
+      id: true, employeeNo: true, name: true, employment: true,
+      department: { select: { name: true, kind: true } },
+    },
+  },
+} as const satisfies Prisma.UserSelect;
+
+function toUserRow(r: Prisma.UserGetPayload<{ select: typeof USER_ROW_SELECT }>): UserRow {
+  const target: TargetUser = {
+    id: r.id, role: r.role, isPermanentAdmin: r.isPermanentAdmin, disabled: r.disabled,
+  };
+  const status = userStatus(r);
+  return {
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: r.role,
+    disabled: r.disabled,
+    locked: lockReason(target),
+    signIn: r.passwordHash ? "credentials" : "SSO only",
+    workspaces: roleWorkspaces(r.role),
+    target,
+    status,
+    statusLabel: USER_STATUS_LABEL[status],
+    approvalState: r.approvalState,
+    employee: r.employee
+      ? {
+          id: r.employee.id,
+          employeeNo: r.employee.employeeNo,
+          name: r.employee.name,
+          groupLabel: groupLabel(r.employee.department),
+          offboarded: r.employee.employment !== "ACTIVE",
+        }
+      : null,
+    lastSignInAt: r.lastSignInAt?.toISOString() ?? null,
+    passwordChangedAt: r.passwordChangedAt?.toISOString() ?? null,
+    mustChangePassword: r.mustChangePassword,
+    createdAt: r.createdAt.toISOString(),
+    createdByName: r.createdBy?.name ?? null,
+    updatedAt: r.updatedAt.toISOString(),
+  };
+}
+
 /**
  * Users & access (spec §4.4): the users list, filtered by role, status and search (`usersListWhere`), the permanent
  * admin first, then by name. Every user otherwise: nothing is excluded.
@@ -84,19 +134,7 @@ export async function listUsers(filter: Partial<UsersFilter>, requestedPage: num
         tx.user.findMany({
           where,
           orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
-          // An explicit select: passwordHash is read only to say "SSO only", and never leaves this function.
-          select: {
-            id: true, name: true, email: true, role: true, isPermanentAdmin: true, disabled: true, passwordHash: true,
-            approvalState: true, mustChangePassword: true, lastSignInAt: true, passwordChangedAt: true,
-            createdAt: true, updatedAt: true,
-            createdBy: { select: { name: true } },
-            employee: {
-              select: {
-                id: true, employeeNo: true, name: true, employment: true,
-                department: { select: { name: true, kind: true } },
-              },
-            },
-          },
+          select: USER_ROW_SELECT,
           skip: pg.skip, take: pg.take,
         }),
     ),
@@ -106,42 +144,16 @@ export async function listUsers(filter: Partial<UsersFilter>, requestedPage: num
   const roleCounts = Object.fromEntries(
     ROLE_OPTIONS.map((role) => [role, byRole.find((g) => g.role === role)?._count._all ?? 0]),
   ) as Record<Role, number>;
-  const rows = users.map((r): UserRow => {
-    const target: TargetUser = {
-      id: r.id, role: r.role, isPermanentAdmin: r.isPermanentAdmin, disabled: r.disabled,
-    };
-    const status = userStatus(r);
-    return {
-      id: r.id,
-      name: r.name,
-      email: r.email,
-      role: r.role,
-      disabled: r.disabled,
-      locked: lockReason(target),
-      signIn: r.passwordHash ? "credentials" : "SSO only",
-      workspaces: roleWorkspaces(r.role),
-      target,
-      status,
-      statusLabel: USER_STATUS_LABEL[status],
-      approvalState: r.approvalState,
-      employee: r.employee
-        ? {
-            id: r.employee.id,
-            employeeNo: r.employee.employeeNo,
-            name: r.employee.name,
-            groupLabel: groupLabel(r.employee.department),
-            offboarded: r.employee.employment !== "ACTIVE",
-          }
-        : null,
-      lastSignInAt: r.lastSignInAt?.toISOString() ?? null,
-      passwordChangedAt: r.passwordChangedAt?.toISOString() ?? null,
-      mustChangePassword: r.mustChangePassword,
-      createdAt: r.createdAt.toISOString(),
-      createdByName: r.createdBy?.name ?? null,
-      updatedAt: r.updatedAt.toISOString(),
-    };
-  });
-  return { rows, total, page, pageCount, pendingCount, roleCounts };
+  return { rows: users.map(toUserRow), total, page, pageCount, pendingCount, roleCounts };
+}
+
+/**
+ * Task 4: one users-list row by id, for a `?sel=` the current page doesn't list (an account just created, or one the
+ * filters hide), so its details panel still opens. Null when there is no such account.
+ */
+export async function findUserRow(id: string): Promise<UserRow | null> {
+  const r = await prisma.user.findUnique({ where: { id }, select: USER_ROW_SELECT });
+  return r ? toUserRow(r) : null;
 }
 
 export interface FlagRow {

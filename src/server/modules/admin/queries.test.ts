@@ -7,13 +7,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   findMany: vi.fn(),
+  findUnique: vi.fn(),
   count: vi.fn(),
   groupBy: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => {
   const prisma = {
-    user: { findMany: h.findMany, count: h.count, groupBy: h.groupBy },
+    user: { findMany: h.findMany, findUnique: h.findUnique, count: h.count, groupBy: h.groupBy },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
   };
   return { prisma };
@@ -21,7 +22,7 @@ vi.mock("@/server/db/client", () => {
 
 import { usersListWhere } from "@/lib/admin-lists";
 import { PERMANENT_LOCK } from "@/lib/admin-users";
-import { listUsers } from "./queries";
+import { findUserRow, listUsers } from "./queries";
 
 const at = (s: string) => new Date(`2026-10-${s}Z`);
 
@@ -122,5 +123,21 @@ describe("listUsers", () => {
       by: ["role"], where: usersListWhere({ status: "ACTIVE", q: "a" }), _count: { _all: true },
     });
     expect(r.roleCounts).toEqual({ admin: 2, it_staff: 0, purchasing_staff: 0, finance_staff: 0, viewer: 5 });
+  });
+});
+
+// Task 4: `?sel=` names someone the current page doesn't list (just created, or filtered out); the panel still opens.
+describe("findUserRow", () => {
+  it("is the same row listUsers would give, by id, never with the hash", async () => {
+    h.findUnique.mockResolvedValue(dbRow({ id: "n", createdBy: { name: "M. Cruz" }, mustChangePassword: true }));
+    const row = await findUserRow("n");
+    expect(h.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "n" } }));
+    expect(row).toMatchObject({ id: "n", status: "MUST_SET_PASSWORD", createdByName: "M. Cruz", signIn: "credentials" });
+    expect(JSON.stringify(row)).not.toContain("hash");
+  });
+
+  it("is null for an unknown id", async () => {
+    h.findUnique.mockResolvedValue(null);
+    expect(await findUserRow("gone")).toBeNull();
   });
 });

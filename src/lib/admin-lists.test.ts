@@ -121,4 +121,11 @@ describe("Users & access list filters (spec §4.4, Task 3)", () => {
     );
     expect(usersListHref({ disabled: true }, 1)).toBe("/admin/users?disabled=1");
   });
+
+  // Task 4: the selected person (`?sel=`) rides along, so Back and a refresh keep the panel open on them.
+  it("keeps the selected person, last", () => {
+    expect(usersListHref({ status: "PENDING" }, 1, "u-1")).toBe("/admin/users?status=PENDING&sel=u-1");
+    expect(usersListHref({}, 2, "u-1")).toBe("/admin/users?page=2&sel=u-1");
+    expect(usersListHref({}, 1, null)).toBe("/admin/users");
+  });
 });

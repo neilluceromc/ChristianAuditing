@@ -100,14 +100,15 @@ export function usersListWhere(filter: Partial<UsersFilter>): Prisma.UserWhereIn
   return { AND: and };
 }
 
-/** A page of the users list, keeping every filter. */
-export function usersListHref(filter: Partial<UsersFilter>, page = 1): string {
+/** A page of the users list, keeping every filter, and (Task 4) the person whose details are open (`?sel=`). */
+export function usersListHref(filter: Partial<UsersFilter>, page = 1, sel: string | null = null): string {
   const qs = new URLSearchParams();
   if (filter.role) qs.set("role", filter.role);
   if (filter.status) qs.set("status", filter.status);
   if (filter.q?.trim()) qs.set("q", filter.q.trim());
   if (filter.disabled !== undefined && filter.disabled !== null) qs.set("disabled", filter.disabled ? "1" : "0");
   if (page > 1) qs.set("page", String(page));
+  if (sel) qs.set("sel", sel);
   const s = qs.toString();
   return s ? `/admin/users?${s}` : "/admin/users";
 }

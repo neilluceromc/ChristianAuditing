@@ -1,5 +1,6 @@
 import type { AccountApprovalState, GroupKind, Role } from "@prisma/client";
 import { isAllowedDomain, normalizeEmail } from "./auth-shared";
+import { localDateISO } from "./format";
 import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
 
 /** Admin first: the select reads as a privilege ladder, most-privileged at the top. */
@@ -154,6 +155,99 @@ export function userStatus(row: {
   if (row.disabled) return "DISABLED";
   if (row.mustChangePassword) return "MUST_SET_PASSWORD";
   return "ACTIVE";
+}
+
+/*
+ * Users & access page (spec §4.4, Task 4; the V2 boards). The page's words live here, pure, so the components and
+ * their tests share one copy.
+ */
+
+/** The role tabs (a select on a phone): All, then each role by its short name. */
+export const ROLE_TABS: ReadonlyArray<{ role: Role | null; label: string }> = [
+  { role: null, label: "All" },
+  { role: "admin", label: "Admin" },
+  { role: "it_staff", label: "IT" },
+  { role: "purchasing_staff", label: "Purchasing" },
+  { role: "finance_staff", label: "Finance" },
+  { role: "viewer", label: "Viewer" },
+];
+
+/** What each role card says the role opens (ROLE_WORKSPACES in words). */
+export const ROLE_CARD_OPENS: Record<Role, string> = {
+  admin: "Every workspace, plus Users & access and Setup",
+  it_staff: "IT: inventory, people, worklist, offboarding",
+  purchasing_staff: "Purchasing: purchase orders, vendors, stock",
+  finance_staff: "Finance: asset register, reviews, depreciation",
+  viewer: "IT workspace, read-only",
+};
+
+const DAY_MS = 86_400_000;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "14 Sep" / "14 Sep 2026" on the Manila calendar. Built by hand: some ICU builds write September "Sept". */
+function manilaDay(value: string | Date, withYear: boolean): string {
+  const [y, m, d] = localDateISO(typeof value === "string" ? new Date(value) : value).split("-");
+  return `${Number(d)} ${MONTHS[Number(m) - 1]}${withYear ? ` ${y}` : ""}`;
+}
+
+const manilaTime = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Manila",
+});
+
+/** Last sign-in, on the Manila calendar: "Never", "Today 09:12", "Yesterday", "3 days ago", then "14 Sep 2026". */
+export function lastSignInLabel(iso: string | null, now: Date): string {
+  if (!iso) return "Never";
+  const at = new Date(iso);
+  const days = Math.round(
+    (Date.parse(`${localDateISO(now)}T00:00:00Z`) - Date.parse(`${localDateISO(at)}T00:00:00Z`)) / DAY_MS,
+  );
+  if (days <= 0) return `Today ${manilaTime.format(at)}`;
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return manilaDay(at, true);
+}
+
+/** The Sign-in section's Password line: a temporary one with the day it was given, one they set, or none (SSO). */
+export function passwordLabel(row: {
+  signIn: "credentials" | "SSO only";
+  mustChangePassword: boolean;
+  passwordChangedAt: string | null;
+}): string {
+  if (row.signIn === "SSO only") return "None — signs in with SSO";
+  const day = row.passwordChangedAt ? `, ${row.mustChangePassword ? "given " : ""}${manilaDay(row.passwordChangedAt, false)}` : "";
+  return row.mustChangePassword ? `Temporary${day}` : `Set by them${day}`;
+}
+
+/** "1 Sep 2026 by M. Cruz", or the date alone when no admin created it (a sign-up, or an account from before). */
+export function createdLabel(createdAt: string, createdByName: string | null): string {
+  const day = manilaDay(createdAt, true);
+  return createdByName ? `${day} by ${createdByName}` : day;
+}
+
+/** Verbatim (plan Global Constraints): the inline confirm before an account is turned off. */
+export function turnOffConfirm(name: string): string {
+  return `Turn off ${name}'s account? They're signed out now and can't sign in. Their history stays.`;
+}
+
+/** Verbatim: Add user's done line. */
+export function accountCreated(name: string): string {
+  return `Account created for ${name} — give them the temporary password`;
+}
+
+/** Verbatim: the chip above the list while sign-ups wait. */
+export function waitingChip(n: number): string {
+  return `Waiting for approval · ${n}`;
+}
+
+/** Verbatim: the amber note beside a linked employee who is offboarding or offboarded. */
+export const OFFBOARDED_NOTE = "Employee offboarded";
+
+/**
+ * "See this person's access history →": the Activity page (/audit) on user entries, searched by the account's id.
+ * The page's search matches an entry's entity id, so this lists exactly that account's entries.
+ */
+export function accessHistoryHref(userId: string): string {
+  return `/audit?${new URLSearchParams({ entity: "user", q: userId }).toString()}`;
 }
 
 /** An employee's group as the list shows it: the department's name, or "Client: X" for a client. */
