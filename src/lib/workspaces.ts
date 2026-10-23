@@ -48,7 +48,9 @@ export type CountKey =
   | "finToConfirmIt" | "finToConfirmPurchasing"
   // Task 6 (spec §5): Finance's To review queue, one per registration group
   | "finGroupsToReview"
-  | "usersDisabled" | "deadDeliveries" | "flagsUnavailable";
+  | "usersDisabled" | "deadDeliveries" | "flagsUnavailable"
+  // Users & access (spec §4.4): sign-ups waiting for an admin
+  | "pendingSignups";
 
 /**
  * What a view matches on, param by param: a string is the param's exact value; a list matches when any of the
@@ -472,11 +474,16 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "access",
       items: [
         {
-          label: "Users & roles",
+          // Users & access (spec §4.4): renamed from "Users & roles"; the palette still finds it by the old name. The
+          // closed link keeps the waiting sign-ups' count, as Webhooks keeps its failed deliveries'.
+          label: "Users & access",
           href: "/admin/users",
           icon: "users",
+          also: ["Users & roles"],
+          badge: ["pendingSignups"],
           views: [
             { label: "All users", href: "/admin/users" },
+            { label: "Waiting for approval", href: "/admin/users?status=PENDING", count: "pendingSignups" },
             { label: "Disabled", href: "/admin/users?disabled=1", count: "usersDisabled" },
           ],
         },

@@ -21,7 +21,8 @@
     "db:seed:scale": "tsx prisma/seed-scale.ts",
     "worker": "tsx src/worker/index.ts",
     "worker:once": "tsx src/worker/index.ts --once",
-    "worker:prune": "tsx src/worker/prune.ts"
+    "worker:prune": "tsx src/worker/prune.ts",
+    "admin:recover": "tsx scripts/admin-recover.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",

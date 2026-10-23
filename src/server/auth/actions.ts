@@ -15,13 +15,13 @@ import { SIGN_IN_COPY } from "@/lib/sign-in-copy";
 import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
 import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 import { saveUiPref } from "@/server/ui-prefs";
+import { isUniqueViolation } from "@/server/prisma-errors";
 
 export interface AuthFormState {
   error?: string;
   field?: SignUpField;
+  /** Sign-up made an account that waits for an admin to approve it; nobody was signed in. */
   created?: boolean;
-  /** Sign-up made a disabled account that an admin must approve; nobody was signed in. */
-  pendingApproval?: boolean;
 }
 
 function safeNext(raw: FormDataEntryValue | null): string | undefined {
@@ -117,6 +117,13 @@ async function clearCrisChats(): Promise<void> {
   }
 }
 
+const EMAIL_EXISTS: AuthFormState = { error: "An account with that email already exists.", field: "email" };
+
+/**
+ * Users & access (spec §4.6): every sign-up waits for an admin. The account is created PENDING, as a Viewer, and
+ * turned off as well (so code that only knows `disabled` refuses it too); Approve turns it on. Nobody is signed in.
+ * The person keeps the password they chose, so nothing is owed at their first sign-in.
+ */
 export async function signUp(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
   const name = String(formData.get("name") ?? "").trim();
   const email = normalizeEmail(String(formData.get("email") ?? ""));
@@ -129,16 +136,23 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   // Exact lookup on the normalized email — NOT mode:"insensitive" (ILIKE),
   // which treats %/_ in the input as wildcards: an unauthenticated enumeration
   // oracle on this public form. Same fix as the login path (commit dc33830).
+  // Review Focus #4: the email is trimmed and lower-cased first, so " Ana.Lim@X.com " meets "ana.lim@x.com" here.
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return { error: "An account with that email already exists.", field: "email" };
+  if (existing) return EMAIL_EXISTS;
 
-  // Cloud staging: the app is on the open internet, so a new account waits, disabled, until an admin enables it.
-  const needsApproval = process.env.SIGNUP_REQUIRES_APPROVAL === "1";
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    // Least privilege: every signup is a viewer; admins promote via /admin/users.
-    data: { name, email, passwordHash, role: "viewer", ...(needsApproval ? { disabled: true } : {}) },
-  });
+  let user: { id: string; name: string };
+  try {
+    user = await prisma.user.create({
+      // Least privilege: every sign-up is a viewer; the admin picks the role when approving it.
+      data: { name, email, passwordHash, role: "viewer", approvalState: "PENDING", disabled: true },
+      select: { id: true, name: true },
+    });
+  } catch (err) {
+    // A row that differs only in case (User_email_lower_key), or a sign-up racing this one.
+    if (isUniqueViolation(err)) return EMAIL_EXISTS;
+    throw err;
+  }
   await prisma.auditEntry.create({
     data: {
       actorId: user.id,
@@ -148,19 +162,12 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
       action: "signup",
       diff: {
         role: { from: null, to: "viewer" },
-        ...(needsApproval ? { disabled: { from: null, to: true } } : {}),
+        approvalState: { from: null, to: "PENDING" },
+        disabled: { from: null, to: true },
       },
     },
   });
-
-  // No session for an account that is waiting: sign-in would refuse it anyway (authorize() rejects disabled users).
-  if (needsApproval) return { created: true, pendingApproval: true };
-
-  try {
-    await signIn("credentials", { email, password, redirect: false });
-  } catch {
-    redirect("/login"); // account exists; worst case they sign in manually
-  }
+  // No session: sign-in refuses an account that is waiting, with its own copy.
   return { created: true };
 }
 

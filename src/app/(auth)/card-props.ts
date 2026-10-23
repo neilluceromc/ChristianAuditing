@@ -48,6 +48,5 @@ export async function loadCardProps({
             accounts: quickAccounts.map((a) => ({ email: a.email, label: ROLE_LABELS[a.role] })),
             refused: quick === "refused",
           },
-    viewerLanding: "/", // Home, like every sign-in (follow-up spec §7.1)
   };
 }

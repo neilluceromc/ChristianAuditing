@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import { PASSWORD_RULE_LABELS, passwordChecks } from "@/lib/password-rules";
 import { signInWithCredentials, signUp, type AuthFormState } from "@/server/auth/actions";
-import { emailProblem, firstWord, segments, sequenceEmail, stepForField, type Step } from "./login-steps";
+import { emailProblem, segments, sequenceEmail, stepForField, type Step } from "./login-steps";
 
 /** Staging quick sign-in: null when QUICK_LOGIN_EMAILS is unset (no STAGING pill). */
 export type QuickSignIn = { accounts: { email: string; label: string }[]; refused: boolean } | null;
@@ -39,7 +39,6 @@ export type SignInCardProps = {
   domain: string | null;
   next?: string;
   microsoftAction: (() => Promise<void>) | null;
-  viewerLanding: string;
   /** Focus the email field on load (`/login?step=login`). */
   autoFocus?: boolean;
   onCue?: (c: CrisCue) => void;
@@ -55,7 +54,6 @@ export function SignInCard({
   domain,
   next,
   microsoftAction,
-  viewerLanding,
   autoFocus,
   onCue,
   onValues,
@@ -136,7 +134,7 @@ export function SignInCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loginState]);
 
-  // Sign-up: success shows "You're in"; an error moves to the step holding its field.
+  // Sign-up: success shows the wait-for-approval step; an error moves to the step holding its field.
   useEffect(() => {
     if (signupState.created) {
       latest.current.onStep("signup-done");
@@ -476,26 +474,12 @@ export function SignInCard({
                 <path d="m6 12.5 4 4 8-9" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            {signupState.pendingApproval ? (
-              <>
-                {heading("Account created")}
-                <p className="lw-lede">An admin needs to approve it before you can sign in.</p>
-                <a href={loginHref} className="lw-btn lw-btn-link" onClick={intercept("login")}>
-                  Back to sign in
-                </a>
-              </>
-            ) : (
-              <>
-                {heading(firstWord(name) ? `You're in, ${firstWord(name)}` : "You're in")}
-                <p className="lw-lede">
-                  New accounts start as <strong className="lw-rolechip">Viewer</strong>. An admin assigns your role, which
-                  decides the workspaces you can open. You&apos;ll start on Home.
-                </p>
-                <a href={viewerLanding} className="lw-btn lw-btn-link">
-                  Go to Cris
-                </a>
-              </>
-            )}
+            {/* Users & access (spec §4.6): every sign-up waits for an admin; the two lines are verbatim. */}
+            {heading("Wait for an admin to approve your account.")}
+            <p className="lw-lede">You can sign in once it&apos;s approved.</p>
+            <a href={loginHref} className="lw-btn lw-btn-link" onClick={intercept("login")}>
+              Back to sign in
+            </a>
           </>
         )}
       </section>

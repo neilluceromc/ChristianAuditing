@@ -1,7 +1,9 @@
 import { prisma } from "@/server/db/client";
-import { lockReason, roleWorkspaces, ROLE_OPTIONS, type TargetUser } from "@/lib/admin-users";
+import {
+  groupLabel, lockReason, roleWorkspaces, ROLE_OPTIONS, USER_STATUS_LABEL, userStatus, type TargetUser, type UserStatus,
+} from "@/lib/admin-users";
 import { FLAG_SPECS, flagEnabled, type FlagState } from "@/lib/admin-flags";
-import { isFlagUnavailable, usersWhere, type UsersDisabled } from "@/lib/admin-lists";
+import { isFlagUnavailable, usersListWhere, type UsersFilter } from "@/lib/admin-lists";
 import { fmtDateTime } from "@/lib/format";
 import {
   deliveryStage, deliveryTabWhere, partitionEvents, replayBlockedReason, type DeliveryTab,
@@ -9,7 +11,7 @@ import {
 } from "@/lib/webhooks";
 import { ENTITY_PAGE_SIZE, LOG_PAGE_SIZE } from "@/lib/paging";
 import { pagedSnapshot } from "@/server/paged";
-import type { DeliveryStatus, Prisma, Role } from "@prisma/client";
+import type { AccountApprovalState, DeliveryStatus, Prisma, Role } from "@prisma/client";
 import { dayWindowStart } from "@/lib/overview";
 
 export interface UserRow {
@@ -31,32 +33,84 @@ export interface UserRow {
    * field (isPermanentAdmin, say) that happens to be right today.
    */
   target: TargetUser;
+  /** Users & access (spec §4.4): one of the five statuses (`userStatus`), and its words. */
+  status: UserStatus;
+  statusLabel: string;
+  approvalState: AccountApprovalState;
+  /** The linked employee record; `offboarded` while they are offboarding or gone (the amber note). */
+  employee: UserEmployee | null;
+  /** ISO timestamps; null = never. */
+  lastSignInAt: string | null;
+  passwordChangedAt: string | null;
+  mustChangePassword: boolean;
+  createdAt: string;
+  createdByName: string | null;
+  /** The row's version for `updateUser`'s / `setUserDisabled`'s `expectedUpdatedAt`. */
+  updatedAt: string;
 }
 
-/** Every user, or (Phase 46, `?disabled=0|1`) only the active or disabled ones — `usersWhere`, nothing else excluded. */
-export async function listUsers(requestedPage: number, disabled: UsersDisabled = null): Promise<{
-  rows: UserRow[]; total: number; page: number; pageCount: number;
-}> {
-  const where = usersWhere(disabled);
-  const { rows: users, total, page, pageCount } = await pagedSnapshot(
-    ENTITY_PAGE_SIZE,
-    requestedPage,
-    (tx) => tx.user.count({ where }),
-    (tx, pg) =>
-      tx.user.findMany({
-        where,
-        orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
-        select: {
-          id: true, name: true, email: true, role: true,
-          isPermanentAdmin: true, disabled: true, passwordHash: true,
-        },
-        skip: pg.skip, take: pg.take,
-      }),
-  );
+export interface UserEmployee {
+  id: string;
+  employeeNo: string;
+  name: string;
+  /** "Finance" or "Client: Acme" */
+  groupLabel: string;
+  offboarded: boolean;
+}
+
+export interface UsersList {
+  rows: UserRow[];
+  total: number;
+  page: number;
+  pageCount: number;
+  /** Sign-ups waiting for approval, whatever the filters (the "Waiting for approval · N" chip). */
+  pendingCount: number;
+  /** Accounts per role under the other filters (status and search), for the role tabs. */
+  roleCounts: Record<Role, number>;
+}
+
+/**
+ * Users & access (spec §4.4): the users list, filtered by role, status and search (`usersListWhere`), the permanent
+ * admin first, then by name. Every user otherwise: nothing is excluded.
+ */
+export async function listUsers(filter: Partial<UsersFilter>, requestedPage: number): Promise<UsersList> {
+  const where = usersListWhere(filter);
+  const [{ rows: users, total, page, pageCount }, pendingCount, byRole] = await Promise.all([
+    pagedSnapshot(
+      ENTITY_PAGE_SIZE,
+      requestedPage,
+      (tx) => tx.user.count({ where }),
+      (tx, pg) =>
+        tx.user.findMany({
+          where,
+          orderBy: [{ isPermanentAdmin: "desc" }, { name: "asc" }, { id: "asc" }],
+          // An explicit select: passwordHash is read only to say "SSO only", and never leaves this function.
+          select: {
+            id: true, name: true, email: true, role: true, isPermanentAdmin: true, disabled: true, passwordHash: true,
+            approvalState: true, mustChangePassword: true, lastSignInAt: true, passwordChangedAt: true,
+            createdAt: true, updatedAt: true,
+            createdBy: { select: { name: true } },
+            employee: {
+              select: {
+                id: true, employeeNo: true, name: true, employment: true,
+                department: { select: { name: true, kind: true } },
+              },
+            },
+          },
+          skip: pg.skip, take: pg.take,
+        }),
+    ),
+    prisma.user.count({ where: usersListWhere({ status: "PENDING" }) }),
+    prisma.user.groupBy({ by: ["role"], where: usersListWhere({ ...filter, role: null }), _count: { _all: true } }),
+  ]);
+  const roleCounts = Object.fromEntries(
+    ROLE_OPTIONS.map((role) => [role, byRole.find((g) => g.role === role)?._count._all ?? 0]),
+  ) as Record<Role, number>;
   const rows = users.map((r): UserRow => {
     const target: TargetUser = {
       id: r.id, role: r.role, isPermanentAdmin: r.isPermanentAdmin, disabled: r.disabled,
     };
+    const status = userStatus(r);
     return {
       id: r.id,
       name: r.name,
@@ -67,9 +121,27 @@ export async function listUsers(requestedPage: number, disabled: UsersDisabled =
       signIn: r.passwordHash ? "credentials" : "SSO only",
       workspaces: roleWorkspaces(r.role),
       target,
+      status,
+      statusLabel: USER_STATUS_LABEL[status],
+      approvalState: r.approvalState,
+      employee: r.employee
+        ? {
+            id: r.employee.id,
+            employeeNo: r.employee.employeeNo,
+            name: r.employee.name,
+            groupLabel: groupLabel(r.employee.department),
+            offboarded: r.employee.employment !== "ACTIVE",
+          }
+        : null,
+      lastSignInAt: r.lastSignInAt?.toISOString() ?? null,
+      passwordChangedAt: r.passwordChangedAt?.toISOString() ?? null,
+      mustChangePassword: r.mustChangePassword,
+      createdAt: r.createdAt.toISOString(),
+      createdByName: r.createdBy?.name ?? null,
+      updatedAt: r.updatedAt.toISOString(),
     };
   });
-  return { rows, total, page, pageCount };
+  return { rows, total, page, pageCount, pendingCount, roleCounts };
 }
 
 export interface FlagRow {

@@ -1,7 +1,8 @@
 import { Role } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
-  ROLE_LABELS, ROLE_OPTIONS, disableChange, lockReason, roleChange, roleWorkspaces, selfRoleChangeWarning,
+  PERMANENT_LOCK, ROLE_LABELS, ROLE_OPTIONS, USER_STATUSES, USER_STATUS_LABEL, canTurnOff, disableChange, emailProblem,
+  groupLabel, lockReason, roleChange, roleChangeNote, roleWorkspaces, selfRoleChangeWarning, userStatus,
   type TargetUser,
 } from "./admin-users";
 import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
@@ -153,5 +154,115 @@ describe("roleWorkspaces", () => {
 
   it("labels every role with something non-empty", () => {
     for (const role of ROLE_OPTIONS) expect(roleWorkspaces(role)).toBeTruthy();
+  });
+});
+
+/*
+ * Users & access (spec §4.4, Task 3): the rules every admin account action shares.
+ */
+describe("Users & access rules", () => {
+  const actor = { id: "actor-9" };
+  const LOCK = "The permanent admin's account can only be changed by its owner.";
+
+  it("lockReason is the permanent admin's lock copy, word for word", () => {
+    expect(lockReason(permanent)).toBe(LOCK);
+    expect(PERMANENT_LOCK).toBe(LOCK);
+  });
+
+  it("every refusal of the permanent admin quotes the lock copy", () => {
+    expect(roleChange(permanent, "viewer", "actor-9")).toEqual({ allowed: false, reason: LOCK });
+    expect(disableChange(permanent, true, "actor-9")).toEqual({ allowed: false, reason: LOCK });
+    expect(canTurnOff(actor, permanent)).toEqual({ allowed: false, reason: LOCK });
+  });
+
+  describe("canTurnOff", () => {
+    it("allows turning off another ordinary account", () => {
+      expect(canTurnOff(actor, ordinary)).toEqual({ allowed: true });
+    });
+
+    it("refuses your own account, in its own words", () => {
+      const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
+      const res = canTurnOff(actor, self);
+      expect(res.allowed).toBe(false);
+      expect(res.allowed === false && res.reason).toMatch(/your own account/i);
+      expect(res.allowed === false && res.reason).not.toBe(LOCK);
+    });
+
+    it("is what disableChange applies when turning an account off", () => {
+      const self: TargetUser = { id: "actor-9", role: "admin", isPermanentAdmin: false, disabled: false };
+      expect(disableChange(self, true, "actor-9")).toEqual(canTurnOff(actor, self));
+    });
+  });
+
+  describe("emailProblem", () => {
+    it("is null for a well-formed email on the domain, not taken", () => {
+      expect(emailProblem("nina@thebackroomop.com", "thebackroomop.com", false)).toBeNull();
+    });
+
+    it("is null with no domain restriction", () => {
+      expect(emailProblem("nina@gmail.com", null, false)).toBeNull();
+    });
+
+    it("refuses a malformed email first", () => {
+      expect(emailProblem("nina", "thebackroomop.com", true)).toBe("Enter a valid email.");
+    });
+
+    it("refuses an email outside the allowed domain, naming the domain", () => {
+      expect(emailProblem("nina@gmail.com", "thebackroomop.com", false)).toBe("Use an @thebackroomop.com address.");
+    });
+
+    it("refuses an email another account uses", () => {
+      expect(emailProblem("nina@thebackroomop.com", "thebackroomop.com", true)).toBe("Another account already uses that email.");
+    });
+
+    it("reads the domain case-insensitively, after trimming", () => {
+      expect(emailProblem("  Nina@TheBackroomOp.com ", "thebackroomop.com", false)).toBeNull();
+    });
+  });
+
+  describe("roleChangeNote", () => {
+    it("is the verbatim note, with the first name, both role labels and what each opens", () => {
+      expect(roleChangeNote("Nina Reyes", "it_staff", "finance_staff")).toBe(
+        "Moves Nina from IT staff to Finance staff: opens Finance instead of IT. They're signed out when you save.",
+      );
+    });
+
+    it("says 'all four workspaces' for admin", () => {
+      expect(roleChangeNote("Nina Reyes", "viewer", "admin")).toBe(
+        "Moves Nina from Viewer to Admin: opens all four workspaces instead of IT · read-only. They're signed out when you save.",
+      );
+    });
+
+    it("is null when the role isn't changing", () => {
+      expect(roleChangeNote("Nina Reyes", "viewer", "viewer")).toBeNull();
+    });
+  });
+
+  describe("userStatus", () => {
+    const row = { approvalState: "APPROVED" as const, disabled: false, mustChangePassword: false };
+
+    it("checks the approval state first, then disabled, then the owed password", () => {
+      expect(userStatus({ ...row, approvalState: "PENDING", disabled: true, mustChangePassword: true })).toBe("PENDING");
+      expect(userStatus({ ...row, approvalState: "DECLINED", disabled: true })).toBe("DECLINED");
+      expect(userStatus({ ...row, disabled: true, mustChangePassword: true })).toBe("DISABLED");
+      expect(userStatus({ ...row, mustChangePassword: true })).toBe("MUST_SET_PASSWORD");
+      expect(userStatus(row)).toBe("ACTIVE");
+    });
+
+    it("labels the five statuses word for word", () => {
+      expect(USER_STATUS_LABEL).toEqual({
+        PENDING: "Waiting for approval",
+        ACTIVE: "Active",
+        MUST_SET_PASSWORD: "Must set password",
+        DISABLED: "Disabled",
+        DECLINED: "Declined",
+      });
+      expect(USER_STATUSES).toEqual(["PENDING", "ACTIVE", "MUST_SET_PASSWORD", "DISABLED", "DECLINED"]);
+    });
+  });
+
+  it("groupLabel names a client group 'Client: X' and a department by its name", () => {
+    expect(groupLabel({ name: "Finance", kind: "INTERNAL" })).toBe("Finance");
+    expect(groupLabel({ name: "Acme", kind: "CLIENT" })).toBe("Client: Acme");
   });
 });

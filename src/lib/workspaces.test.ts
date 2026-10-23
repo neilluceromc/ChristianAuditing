@@ -272,7 +272,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       ["Reports"],
       ["Activity"],
     ]);
-    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & roles"], ["Webhooks", "Feature flags"], ["Audit log"]]);
+    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & access"], ["Webhooks", "Feature flags"], ["Audit log"]]);
   });
   it("an admin sees the same links as each workspace's own staff", () => {
     expect(labels("it", "admin")).toEqual(labels("it", "it_staff"));
@@ -341,7 +341,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(counts("purchasing", "Approvals")).toEqual({ Open: "approvals" });
     expect(counts("finance", "Assets")).toEqual({ "To confirm · IT": "finToConfirmIt", "To confirm · Purchasing": "finToConfirmPurchasing" });
     expect(counts("finance", "Approvals")).toEqual({ Open: "approvals" });
-    expect(counts("admin", "Users & roles")).toEqual({ Disabled: "usersDisabled" });
+    expect(counts("admin", "Users & access")).toEqual({ "Waiting for approval": "pendingSignups", Disabled: "usersDisabled" });
     expect(counts("admin", "Webhooks")).toEqual({ "Failed deliveries": "deadDeliveries" });
     expect(counts("admin", "Feature flags")).toEqual({ Unavailable: "flagsUnavailable" });
   });
@@ -363,6 +363,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("purchasing", "purchasing_staff", "Assets").badge).toEqual(["assetsSentBackPurchasing"]);
     // Phase 46: failed deliveries are waiting work (a replay), so the closed Webhooks link keeps their red count.
     expect(item("admin", "admin", "Webhooks").badge).toEqual(["deadDeliveries"]);
+    // Users & access (spec §4.4): the closed link keeps the waiting sign-ups' count.
+    expect(item("admin", "admin", "Users & access").badge).toEqual(["pendingSignups"]);
   });
   it("icons: Inventory and the Assets links reuse inventory, Employees employee, Approvals approval", () => {
     expect(item("it", "it_staff", "Inventory").icon).toBe("inventory");
@@ -526,9 +528,10 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
     });
   });
 
-  it("Admin: Users & roles, Webhooks and Feature flags views, and Audit log under records", () => {
-    expect(views("admin", "admin", "Users & roles")).toEqual([
-      ["All users", "/admin/users"], ["Disabled", "/admin/users?disabled=1"],
+  it("Admin: Users & access, Webhooks and Feature flags views, and Audit log under records", () => {
+    expect(views("admin", "admin", "Users & access")).toEqual([
+      ["All users", "/admin/users"], ["Waiting for approval", "/admin/users?status=PENDING"],
+      ["Disabled", "/admin/users?disabled=1"],
     ]);
     expect(views("admin", "admin", "Webhooks")).toEqual([
       ["Endpoints", "/admin/webhooks"], ["Failed deliveries", "/admin/webhooks/deliveries?state=DEAD"],

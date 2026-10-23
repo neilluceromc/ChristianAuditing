@@ -1,4 +1,5 @@
-import type { Role } from "@prisma/client";
+import type { AccountApprovalState, GroupKind, Role } from "@prisma/client";
+import { isAllowedDomain, normalizeEmail } from "./auth-shared";
 import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
 
 /** Admin first: the select reads as a privilege ladder, most-privileged at the top. */
@@ -22,8 +23,12 @@ export interface TargetUser {
 
 export type RuleResult = { allowed: true } | { allowed: false; reason: string };
 
-const PERMANENT_LOCK =
-  "This is the permanent admin account — its role and access can't be changed, so the system can never be locked out of itself.";
+/**
+ * Users & access (spec §4.4, owner 2026-10-24): the permanent admin's account is locked against EVERY admin action
+ * on Users & access (role, turning it off, password reset, name, email, employee link, approve, decline). Its owner
+ * changes their own password in Account settings; a forgotten one is recovered with `npm run admin:recover`.
+ */
+export const PERMANENT_LOCK = "The permanent admin's account can only be changed by its owner.";
 
 /**
  * Why this row cannot be edited at all, or null when it can. The page prints
@@ -68,16 +73,92 @@ export function roleChange(target: TargetUser, next: Role, actorId: string): Rul
  * apart from the lock branch above — see the note in the test file.
  */
 export function disableChange(target: TargetUser, next: boolean, actorId: string): RuleResult {
+  if (next) return canTurnOff({ id: actorId }, target);
+  const locked = lockReason(target);
+  return locked ? { allowed: false, reason: locked } : { allowed: true };
+}
+
+/**
+ * Users & access (spec §4.4): may `actor` turn `target`'s account off? Never the permanent admin (the lock), never
+ * your own account (you'd be signed out with no way back in). The panel greys its switch out with this reason, and
+ * setUserDisabled refuses on the same grounds.
+ */
+export function canTurnOff(actor: { id: string }, target: TargetUser): RuleResult {
   const locked = lockReason(target);
   if (locked) return { allowed: false, reason: locked };
-  if (next && target.id === actorId) {
+  if (target.id === actor.id) {
     return {
       allowed: false,
       reason:
-        "You can't disable your own account — you'd be signed out with no way back in. Another admin can do it for you.",
+        "You can't turn off your own account — you'd be signed out with no way back in. Another admin can do it for you.",
     };
   }
   return { allowed: true };
+}
+
+/**
+ * Users & access (spec §4.4): the email field's problem, or null. In order: the shape, the allowed domain (null =
+ * unrestricted), then whether another account already uses it (the caller looks that up on the normalized email).
+ */
+export function emailProblem(email: string, domain: string | null, takenByOther: boolean): string | null {
+  const normalized = normalizeEmail(email);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)) return "Enter a valid email.";
+  if (!isAllowedDomain(normalized, domain)) return `Use an @${domain} address.`;
+  if (takenByOther) return "Another account already uses that email.";
+  return null;
+}
+
+/** What a role opens, as the role-change note says it: "all four workspaces" for admin, else roleWorkspaces. */
+function opensPhrase(role: Role): string {
+  return role === "admin" ? "all four workspaces" : roleWorkspaces(role);
+}
+
+/**
+ * Users & access (spec §4.4, verbatim): the note under the role cards when a different role is picked, or null when
+ * the role isn't changing. "Moves {first name} from {old} to {new}: opens {new} instead of {old}. They're signed out
+ * when you save."
+ */
+export function roleChangeNote(name: string, from: Role, to: Role): string | null {
+  if (from === to) return null;
+  const first = name.trim().split(/\s+/)[0] || name;
+  return (
+    `Moves ${first} from ${ROLE_LABELS[from]} to ${ROLE_LABELS[to]}: ` +
+    `opens ${opensPhrase(to)} instead of ${opensPhrase(from)}. They're signed out when you save.`
+  );
+}
+
+/** Users & access (spec §4.4): the five statuses, in the status filter's order. */
+export const USER_STATUSES = ["PENDING", "ACTIVE", "MUST_SET_PASSWORD", "DISABLED", "DECLINED"] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+export const USER_STATUS_LABEL: Record<UserStatus, string> = {
+  PENDING: "Waiting for approval",
+  ACTIVE: "Active",
+  MUST_SET_PASSWORD: "Must set password",
+  DISABLED: "Disabled",
+  DECLINED: "Declined",
+};
+
+/**
+ * An account's status. The approval state comes first: a waiting or declined sign-up is also turned off (so older
+ * code refuses it too), but it reads as waiting or declined, never as "Disabled". `userStatusWhere`
+ * (admin-lists.ts) is the same mapping as a query.
+ */
+export function userStatus(row: {
+  approvalState: AccountApprovalState;
+  disabled: boolean;
+  mustChangePassword: boolean;
+}): UserStatus {
+  if (row.approvalState === "PENDING") return "PENDING";
+  if (row.approvalState === "DECLINED") return "DECLINED";
+  if (row.disabled) return "DISABLED";
+  if (row.mustChangePassword) return "MUST_SET_PASSWORD";
+  return "ACTIVE";
+}
+
+/** An employee's group as the list shows it: the department's name, or "Client: X" for a client. */
+export function groupLabel(group: { name: string; kind: GroupKind }): string {
+  return group.kind === "CLIENT" ? `Client: ${group.name}` : group.name;
 }
 
 /**

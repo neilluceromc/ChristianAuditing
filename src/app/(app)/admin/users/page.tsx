@@ -3,7 +3,8 @@ import { pageTitle } from "@/lib/page-title";
 import { requireRole } from "@/server/auth/guards";
 import { toSearchParams } from "@/lib/url-state";
 import { parsePage } from "@/lib/paging";
-import { parseUsersDisabled, usersHref } from "@/lib/admin-lists";
+import { parseUsersFilter, usersListHref } from "@/lib/admin-lists";
+import { ROLE_LABELS, USER_STATUS_LABEL } from "@/lib/admin-users";
 import { PageHeader } from "@/components/ui/page-header";
 import { Banner } from "@/components/ui/banner";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -21,9 +22,19 @@ export default async function UsersPage({
 }) {
   const actor = await requireRole("admin");
   const sp = toSearchParams(await searchParams);
-  // Phase 46 (spec §3.2, §4.3): `?disabled=1` lists disabled accounts, `?disabled=0` active ones.
-  const disabled = parseUsersDisabled(sp.get("disabled"));
-  const { rows, page, pageCount } = await listUsers(parsePage(sp), disabled);
+  // Phase 46 (spec §3.2, §4.3): `?disabled=1` lists disabled accounts, `?disabled=0` active ones. Users & access
+  // (spec §4.4, Task 3): `?role`, `?status` and `?q` filter too (the nav's "Waiting for approval" is ?status=PENDING);
+  // Task 4 rebuilds this page around them.
+  const filter = parseUsersFilter(sp);
+  const { disabled } = filter;
+  const { rows, page, pageCount } = await listUsers(filter, parsePage(sp));
+  const chips = [
+    ...(filter.role ? [{ label: ROLE_LABELS[filter.role], removeHref: usersListHref({ ...filter, role: null }) }] : []),
+    ...(filter.status ? [{ label: USER_STATUS_LABEL[filter.status], removeHref: usersListHref({ ...filter, status: null }) }] : []),
+    ...(filter.q ? [{ label: `"${filter.q}"`, removeHref: usersListHref({ ...filter, q: "" }) }] : []),
+    ...(disabled !== null ? [{ label: disabled ? "Disabled" : "Active", removeHref: usersListHref({ ...filter, disabled: null }) }] : []),
+  ];
+  const filtered = chips.length > 0;
 
   return (
     <>
@@ -33,21 +44,16 @@ export default async function UsersPage({
           Disabling an account keeps its history and blocks sign-in. The permanent admin cannot be
           demoted or disabled, so the system can never be locked out of itself.
         </Banner>
-        {disabled !== null && (
-          <ChipFilterRow
-            chips={[{ label: disabled ? "Disabled" : "Active", removeHref: usersHref(null) }]}
-            clearHref={usersHref(null)}
-          />
-        )}
+        {filtered && <ChipFilterRow chips={chips} clearHref={usersListHref({})} />}
         {rows.length > 0 ? (
           <>
             <UserTable rows={rows} actorId={actor.id} />
-            <Pagination page={page} pageCount={pageCount} hrefFor={(p) => usersHref(disabled, p)} />
+            <Pagination page={page} pageCount={pageCount} hrefFor={(p) => usersListHref(filter, p)} />
           </>
         ) : (
           <EmptyState
-            title={disabled === null ? "No accounts yet" : disabled ? "No disabled accounts" : "No active accounts"}
-            description={disabled === null ? undefined : "Every account is in the other list."}
+            title={!filtered ? "No accounts yet" : "No accounts match"}
+            description={!filtered ? undefined : "Clear the filters to see every account."}
           />
         )}
       </div>

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
- * Cloud staging (Task 3): with SIGNUP_REQUIRES_APPROVAL=1 a self sign-up creates the account disabled, writes the
- * audit entry, and never signs the person in. Without it, sign-up behaves as before.
+ * Users & access (spec §4.6): a self sign-up creates the account PENDING (and turned off), writes the audit entry,
+ * and never signs the person in. The old SIGNUP_REQUIRES_APPROVAL switch is retired.
  */
 
 const h = vi.hoisted(() => ({
@@ -81,54 +81,62 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("signUp when SIGNUP_REQUIRES_APPROVAL=1", () => {
-  beforeEach(() => vi.stubEnv("SIGNUP_REQUIRES_APPROVAL", "1"));
-
-  it("creates the account disabled, as a viewer", async () => {
+describe("signUp (Users & access spec §4.6): every sign-up waits for an admin", () => {
+  it("creates the account PENDING and turned off, as a viewer", async () => {
     await signUp({}, form());
     expect(h.userCreate).toHaveBeenCalledTimes(1);
-    expect(h.userCreate.mock.calls[0][0].data).toMatchObject({
+    const data = h.userCreate.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      name: "Nina Reyes",
       email: "nina@thebackroomop.com",
       role: "viewer",
+      approvalState: "PENDING",
       disabled: true,
     });
+    // The person chose this password: nothing is owed, and it is stored only as a cost-10 hash.
+    expect(data).not.toHaveProperty("mustChangePassword", true);
+    expect(bcrypt.getRounds(data.passwordHash)).toBe(10);
+    expect(JSON.stringify(data)).not.toContain("correct horse battery 9");
   });
 
-  it("audits the signup with the disabled flag in the diff", async () => {
+  it("audits the sign-up with its waiting state, and no password", async () => {
     await signUp({}, form());
     expect(h.auditCreate).toHaveBeenCalledTimes(1);
     const data = h.auditCreate.mock.calls[0][0].data;
     expect(data).toMatchObject({ action: "signup", entityType: "user", entityId: "u-new", actorId: "u-new" });
-    expect(data.diff).toEqual({ role: { from: null, to: "viewer" }, disabled: { from: null, to: true } });
+    expect(data.diff).toEqual({
+      role: { from: null, to: "viewer" },
+      approvalState: { from: null, to: "PENDING" },
+      disabled: { from: null, to: true },
+    });
+    expect(JSON.stringify(data)).not.toContain("correct horse battery 9");
   });
 
-  it("does not sign the person in, and returns pendingApproval", async () => {
+  it("never signs the person in, and reports created", async () => {
+    vi.stubEnv("SIGNUP_REQUIRES_APPROVAL", "0"); // retired: the switch no longer changes anything
     const r = await signUp({}, form());
     expect(h.signIn).not.toHaveBeenCalled();
-    expect(r).toEqual({ created: true, pendingApproval: true });
-  });
-});
-
-describe("signUp when SIGNUP_REQUIRES_APPROVAL is unset or not 1", () => {
-  it.each(["", "0", "true"])("behaves as before (value %j)", async (value) => {
-    vi.stubEnv("SIGNUP_REQUIRES_APPROVAL", value);
-    const r = await signUp({}, form());
-    expect(h.userCreate.mock.calls[0][0].data).not.toHaveProperty("disabled");
-    expect(h.auditCreate.mock.calls[0][0].data.diff).toEqual({ role: { from: null, to: "viewer" } });
-    expect(h.signIn).toHaveBeenCalledWith("credentials", {
-      email: "nina@thebackroomop.com",
-      password: "correct horse battery 9",
-      redirect: false,
-    });
     expect(r).toEqual({ created: true });
   });
 
-  it("behaves as before when the variable is absent", async () => {
-    delete process.env.SIGNUP_REQUIRES_APPROVAL;
-    const r = await signUp({}, form());
-    expect(h.userCreate.mock.calls[0][0].data).not.toHaveProperty("disabled");
-    expect(h.signIn).toHaveBeenCalledTimes(1);
-    expect(r).toEqual({ created: true });
+  it("refuses an email that matches an existing one once trimmed and lower-cased", async () => {
+    h.userFindUnique.mockImplementation(async ({ where }: { where: { email: string } }) =>
+      where.email === "ana.lim@x.com" ? { id: "u-ana" } : null);
+    const f = form();
+    f.set("email", " Ana.Lim@X.com ");
+    expect(await signUp({}, f)).toEqual({ error: "An account with that email already exists.", field: "email" });
+    expect(h.userFindUnique).toHaveBeenCalledWith({ where: { email: "ana.lim@x.com" } });
+    expect(h.userCreate).not.toHaveBeenCalled();
+    expect(h.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses the same way when a differently-cased row wins the race at the unique index", async () => {
+    const { Prisma } = await import("@prisma/client");
+    h.userCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "6", meta: { target: "User_email_lower_key" } }),
+    );
+    expect(await signUp({}, form())).toEqual({ error: "An account with that email already exists.", field: "email" });
+    expect(h.auditCreate).not.toHaveBeenCalled();
   });
 });
 

@@ -12,7 +12,7 @@ import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { parseCls } from "@/lib/asset-class";
 import { parseFin } from "@/lib/registration";
 import { FLAG_SPECS } from "@/lib/admin-flags";
-import { filterFlags, parseFlagsState, parseUsersDisabled, usersWhere } from "@/lib/admin-lists";
+import { filterFlags, parseFlagsState, parseUsersDisabled, parseUsersFilter, usersListWhere, usersWhere } from "@/lib/admin-lists";
 import { deliveryTabWhere, parseDeliveryTab } from "@/lib/webhooks";
 import { localDateISO } from "@/lib/format";
 import { stockLowCount, stocktakesOverdueWhere } from "@/server/modules/stock/queries";
@@ -50,6 +50,8 @@ export const NAV_COUNT_HREF = {
   // Task 6 (spec §5): Finance's group queue; the page lists exactly reviewGroups(), which reviewGroupCount counts.
   finGroupsToReview: "/finance/review",
   usersDisabled: "/admin/users?disabled=1",
+  // Users & access (spec §4.4): the sign-ups waiting for an admin
+  pendingSignups: "/admin/users?status=PENDING",
   deadDeliveries: "/admin/webhooks/deliveries?state=DEAD",
   flagsUnavailable: "/admin/flags?state=unavailable",
 } as const satisfies Partial<Record<CountKey, string>>;
@@ -145,6 +147,11 @@ const toConfirm = (key: "finToConfirmIt" | "finToConfirmPurchasing") => () => {
 const usersDisabled = () =>
   prisma.user.count({ where: usersWhere(parseUsersDisabled(paramsOf("usersDisabled").get("disabled"))) });
 
+// Users & access (spec §4.4) /admin/users: parseUsersFilter → usersListWhere; listUsers counts it (and its
+// pendingCount is the same where).
+const pendingSignups = () =>
+  prisma.user.count({ where: usersListWhere(parseUsersFilter(paramsOf("pendingSignups"))) });
+
 // /admin/webhooks/deliveries: parseDeliveryTab → deliveryTabWhere; listDeliveries counts it.
 const deadDeliveries = () =>
   prisma.webhookDelivery.count({ where: deliveryTabWhere(parseDeliveryTab(paramsOf("deadDeliveries").get("state"))) });
@@ -172,6 +179,7 @@ const READERS: Record<Exclude<ReadKey, ItStatusKey>, (user: User) => Promise<num
   finToConfirmPurchasing: toConfirm("finToConfirmPurchasing"),
   finGroupsToReview: () => reviewGroupCount(),
   usersDisabled,
+  pendingSignups,
   deadDeliveries,
   flagsUnavailable,
 };

@@ -1,4 +1,5 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, Role } from "@prisma/client";
+import { ROLE_OPTIONS, USER_STATUSES, type UserStatus } from "./admin-users";
 
 /*
  * Phase 46 spec §3.2 / §4.3: the Admin list filters the sidebar views and the Admin overview tiles link to. Pure, so
@@ -26,6 +27,86 @@ export function usersWhere(disabled: UsersDisabled): Prisma.UserWhereInput {
 export function usersHref(disabled: UsersDisabled, page = 1): string {
   const qs = new URLSearchParams();
   if (disabled !== null) qs.set("disabled", disabled ? "1" : "0");
+  if (page > 1) qs.set("page", String(page));
+  const s = qs.toString();
+  return s ? `/admin/users?${s}` : "/admin/users";
+}
+
+/*
+ * Users & access (spec §4.4): /admin/users?role=&status=&q= — the role tabs, the status filter and the search. The
+ * page, the "Waiting for approval" nav count and listUsers' pendingCount all read these wheres. `disabled` is the
+ * Phase 46 filter above, kept while the Disabled view and the Admin overview tiles still link to it.
+ */
+export interface UsersFilter {
+  role: Role | null;
+  status: UserStatus | null;
+  q: string;
+  disabled: UsersDisabled;
+}
+
+const Q_MAX = 100;
+
+export function parseUserStatus(raw: string | null | undefined): UserStatus | null {
+  return (USER_STATUSES as readonly string[]).includes(raw ?? "") ? (raw as UserStatus) : null;
+}
+
+export function parseUserRole(raw: string | null | undefined): Role | null {
+  return (ROLE_OPTIONS as string[]).includes(raw ?? "") ? (raw as Role) : null;
+}
+
+export function parseUsersFilter(params: URLSearchParams): UsersFilter {
+  return {
+    role: parseUserRole(params.get("role")),
+    status: parseUserStatus(params.get("status")),
+    q: (params.get("q") ?? "").trim().slice(0, Q_MAX),
+    disabled: parseUsersDisabled(params.get("disabled")),
+  };
+}
+
+/** `userStatus` (admin-users.ts) as a where: approval state first, then turned off, then a password owed. */
+export function userStatusWhere(status: UserStatus): Prisma.UserWhereInput {
+  switch (status) {
+    case "PENDING":
+      return { approvalState: "PENDING" };
+    case "DECLINED":
+      return { approvalState: "DECLINED" };
+    case "DISABLED":
+      return { approvalState: "APPROVED", disabled: true };
+    case "MUST_SET_PASSWORD":
+      return { approvalState: "APPROVED", disabled: false, mustChangePassword: true };
+    case "ACTIVE":
+      return { approvalState: "APPROVED", disabled: false, mustChangePassword: false };
+  }
+}
+
+/** Every filter given, ANDed; the search matches name, email, employee no. or department, ignoring case. */
+export function usersListWhere(filter: Partial<UsersFilter>): Prisma.UserWhereInput {
+  const and: Prisma.UserWhereInput[] = [];
+  if (filter.role) and.push({ role: filter.role });
+  if (filter.status) and.push(userStatusWhere(filter.status));
+  if (filter.disabled !== undefined && filter.disabled !== null) and.push({ disabled: filter.disabled });
+  const q = filter.q?.trim();
+  if (q) {
+    const has = { contains: q, mode: "insensitive" as const };
+    and.push({
+      OR: [
+        { name: has },
+        { email: has },
+        { employee: { is: { employeeNo: has } } },
+        { employee: { is: { department: { is: { name: has } } } } },
+      ],
+    });
+  }
+  return { AND: and };
+}
+
+/** A page of the users list, keeping every filter. */
+export function usersListHref(filter: Partial<UsersFilter>, page = 1): string {
+  const qs = new URLSearchParams();
+  if (filter.role) qs.set("role", filter.role);
+  if (filter.status) qs.set("status", filter.status);
+  if (filter.q?.trim()) qs.set("q", filter.q.trim());
+  if (filter.disabled !== undefined && filter.disabled !== null) qs.set("disabled", filter.disabled ? "1" : "0");
   if (page > 1) qs.set("page", String(page));
   const s = qs.toString();
   return s ? `/admin/users?${s}` : "/admin/users";

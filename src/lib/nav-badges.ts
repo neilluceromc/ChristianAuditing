@@ -48,6 +48,8 @@ const LABEL: Record<CountKey, (n: number) => string> = {
   usersDisabled: (n) => `${n} disabled`,
   deadDeliveries: (n) => `${n} failed deliver${n === 1 ? "y" : "ies"}`,
   flagsUnavailable: (n) => `${n} unavailable`,
+  // Users & access (spec §4.4)
+  pendingSignups: (n) => `${n} waiting for approval`,
 };
 
 /**
