@@ -82,6 +82,7 @@ vi.mock("@/server/db/client", () => {
   return { prisma: { ...full, $transaction: async (fn: (tx: typeof full) => Promise<unknown>) => fn(full) } };
 });
 
+import { prisma } from "@/server/db/client";
 import { approveGroup } from "./group-actions";
 import { reopenGroup, undoGroupAction } from "./undo-actions";
 
@@ -120,6 +121,25 @@ function seed(qty = 3, poExtra: Row = {}) {
   for (const id of ["0205", "0206", "0207"]) seedAsset(id);
 }
 const ALL = ["0205", "0206", "0207"];
+
+/**
+ * The asset came back corrected: Finance sent it back to `team` two minutes before T0, and `by` resubmitted it a
+ * minute later (the audit trail correctionTeams reads; the reply sits on the asset).
+ */
+function corrected(id: string, by: { id: string } = IVAN, team = "IT") {
+  t("auditEntry").push(
+    {
+      id: `aud-r-${id}`, actorId: ANA.id, actorLabel: ANA.name, entityType: "asset", entityId: id, action: "finance.return",
+      diff: { financeReturn: { from: null, to: { fields: ["Serial number"], note: null, team } } }, createdAt: new Date(T0.getTime() - 120_000),
+    },
+    {
+      id: `aud-s-${id}`, actorId: by.id, actorLabel: "x", entityType: "asset", entityId: id, action: "finance.resubmit",
+      diff: { financeReturn: { from: "returned", to: null } }, createdAt: new Date(T0.getTime() - 60_000),
+    },
+  );
+  asset(id).financeResubmitNote = "fixed";
+}
+const notes = () => t("notification").map((n) => ({ team: n.team, kind: n.kind, title: n.title as string, href: n.href }));
 
 /** A refusal writes nothing at all. */
 async function expectRefused(run: () => Promise<{ ok: boolean }>, message: string) {
@@ -160,7 +180,8 @@ describe("approveGroup", () => {
       expect(a).toMatchObject({ entityType: "asset", actorId: ANA.id, source: "web" });
       expect(a.diff).toMatchObject({ financeConfirmed: { from: null, to: "Ana Cruz" }, group: { from: null, to: "rec1" } });
     }
-    expect(t("notification")).toEqual([]);
+    // nothing was corrected, so no "accepted"; the PO is now fully approved, so Purchasing hears that (2026-10-23)
+    expect(t("notification").map((n) => n.title)).toEqual(["PO-0214: Finance approved all its assets"]);
     // the PO row first, then the group's assets, before anything is read or written
     expect(h.ops.slice(0, 2)).toEqual(["lock:po:po1", "lock:assets:rec1"]);
   });
@@ -245,6 +266,103 @@ describe("approveGroup", () => {
   });
 });
 
+describe("approveGroup tells the team that corrected an asset (2026-10-23)", () => {
+  it("each corrected asset: '{tag}: Finance accepted the correction' to the team that corrected it, linked to it", async () => {
+    seed(5); // two units still to register: the PO isn't complete
+    corrected("0205");
+    corrected("0207", { id: "u-pat" }, "PURCHASING");
+    t("user").push({ id: "u-pat", name: "Pat Lim", role: "purchasing_staff" });
+    expect((await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL })).ok).toBe(true);
+    expect(notes()).toEqual([
+      { team: "IT", kind: "CHANGED", title: "BR-LT-0205: Finance accepted the correction", href: "/inventory/0205" },
+      { team: "PURCHASING", kind: "CHANGED", title: "BR-LT-0207: Finance accepted the correction", href: "/inventory/0207" },
+    ]);
+    expect(t("notification").every((n) => n.actorId === ANA.id && n.entityType === "asset")).toBe(true);
+  });
+
+  it("an admin's resubmit counts for the team it had been sent back to", async () => {
+    seed(5);
+    corrected("0206", ADA, "PURCHASING");
+    await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL });
+    expect(notes()).toEqual([
+      { team: "PURCHASING", kind: "CHANGED", title: "BR-LT-0206: Finance accepted the correction", href: "/inventory/0206" },
+    ]);
+  });
+
+  it("a send-back Finance undid is no correction; one undone after a resubmit leaves the correction standing", async () => {
+    seed(5);
+    // 0205: sent back, and the send-back undone (no resubmit)
+    t("auditEntry").push(
+      { id: "aud-1", actorId: ANA.id, entityType: "asset", entityId: "0205", action: "finance.return", diff: { financeReturn: { to: { team: "IT" } } }, createdAt: new Date(T0.getTime() - 90_000) },
+      { id: "aud-2", actorId: ANA.id, entityType: "asset", entityId: "0205", action: "asset.return.undone", diff: {}, createdAt: new Date(T0.getTime() - 80_000) },
+    );
+    // 0206: corrected, then sent back again, and that second send-back undone: it comes back as the correction it was
+    corrected("0206");
+    t("auditEntry").push(
+      { id: "aud-3", actorId: ANA.id, entityType: "asset", entityId: "0206", action: "finance.return", diff: { financeReturn: { to: { team: "IT" } } }, createdAt: new Date(T0.getTime() - 30_000) },
+      { id: "aud-4", actorId: ANA.id, entityType: "asset", entityId: "0206", action: "asset.return.undone", diff: {}, createdAt: new Date(T0.getTime() - 20_000) },
+    );
+    await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL });
+    expect(notes().map((n) => n.title)).toEqual(["BR-LT-0206: Finance accepted the correction"]);
+  });
+
+  it("three to one team stay three; past three they collapse into one per team, never one per asset", async () => {
+    seed(9);
+    for (const id of ["0208", "0209", "0210", "0211"]) seedAsset(id);
+    for (const id of ["0205", "0206", "0207", "0208"]) corrected(id); // 4 to IT
+    for (const id of ["0209", "0210", "0211"]) corrected(id, ADA, "PURCHASING"); // 3 to Purchasing
+    const ids = ["0205", "0206", "0207", "0208", "0209", "0210", "0211"];
+    expect((await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ids })).ok).toBe(true);
+    expect(notes()).toEqual([
+      { team: "IT", kind: "CHANGED", title: "4 corrections accepted by Finance", href: "/inventory" },
+      { team: "PURCHASING", kind: "CHANGED", title: "BR-LT-0209: Finance accepted the correction", href: "/inventory/0209" },
+      { team: "PURCHASING", kind: "CHANGED", title: "BR-LT-0210: Finance accepted the correction", href: "/inventory/0210" },
+      { team: "PURCHASING", kind: "CHANGED", title: "BR-LT-0211: Finance accepted the correction", href: "/inventory/0211" },
+    ]);
+    expect(t("notification")[0]).toMatchObject({ entityType: "purchase-record", entityId: "rec1" });
+  });
+
+  it("the PO fully approved: one '{ref}: Finance approved all its assets' to Purchasing, on the PO, once", async () => {
+    seed(3);
+    corrected("0205");
+    await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL });
+    expect(notes()).toEqual([
+      { team: "IT", kind: "CHANGED", title: "BR-LT-0205: Finance accepted the correction", href: "/inventory/0205" },
+      { team: "PURCHASING", kind: "CHANGED", title: "PO-0214: Finance approved all its assets", href: "/purchases/po1" },
+    ]);
+    expect(t("notification")[1]).toMatchObject({ entityType: "purchase-order", entityId: "po1", actorId: ANA.id });
+    // undone and approved again: the PO already completed, so Purchasing isn't told twice
+    at(2);
+    expect((await undoGroupAction({ recordId: "rec1" })).ok).toBe(true);
+    at(3);
+    expect((await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL })).ok).toBe(true);
+    expect(notes().filter((n) => n.title.startsWith("PO-0214"))).toHaveLength(1);
+  });
+
+  it("none written when the approval fails: a refusal, or a guarded write that misses part-way", async () => {
+    seed(3, { invoiceRef: null });
+    corrected("0205");
+    expect((await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL })).ok).toBe(false);
+    expect(t("notification")).toEqual([]);
+
+    po().invoiceRef = "SI-0012";
+    type Writes = { updateMany: (args: unknown) => Promise<{ count: number }> };
+    const assets = prisma.asset as unknown as Writes;
+    const real = assets.updateMany;
+    let calls = 0;
+    const spy = vi.spyOn(assets, "updateMany").mockImplementation(async (args) => {
+      calls++;
+      // the third asset was changed by someone else between the read and the write: the guard misses
+      return calls === 3 ? { count: 0 } : real(args);
+    });
+    const r = await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL });
+    spy.mockRestore();
+    expect(r).toMatchObject({ ok: false, kind: "conflict", message: "BR-LT-0207 changed since you opened this. Reload." });
+    // the transaction rolls back; the fake can't, but nothing had been written to the bell yet
+    expect(t("notification")).toEqual([]);
+  });
+});
+
 describe("webhooks fire once on full approval", () => {
   it("both events when every line is registered and every asset approved; once only", async () => {
     seed(3);
@@ -321,6 +439,50 @@ describe("undoGroupAction", () => {
       () => undoGroupAction({ recordId: "rec1" }),
       "Can't undo: BR-LT-0205 — the 15 minutes to undo it ended at 10:57.",
     );
+  });
+});
+
+describe("a group's undo and reopen tell the teams affected (2026-10-23)", () => {
+  it("undo: each hold-back's team hears it was taken back; each accepted correction's team hears it reopened", async () => {
+    seed(5);
+    corrected("0205");
+    await approveGroup({
+      recordId: "rec1", notCapitalised: false, assetIds: ALL,
+      holdBack: [{ assetId: "0207", team: "IT", fields: ["serial"], note: "Wrong serial" }],
+    });
+    const heard = t("notification").length; // the hold-back's SENT_BACK and 0205's "accepted"
+    expect(heard).toBe(2);
+    at(5);
+    expect((await undoGroupAction({ recordId: "rec1" })).ok).toBe(true);
+    expect(notes().slice(heard)).toEqual([
+      { team: "IT", kind: "CHANGED", title: "BR-LT-0207: Finance took back the send-back", href: "/inventory/0207" },
+      { team: "IT", kind: "CHANGED", title: "BR-LT-0205: Finance reopened its review", href: "/inventory/0205" },
+    ]);
+  });
+
+  it("past three to one team, one notification for the team", async () => {
+    seed(9);
+    for (const id of ["0208", "0209"]) seedAsset(id);
+    const ids = ["0205", "0206", "0207", "0208", "0209"];
+    for (const id of ids) corrected(id);
+    await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ids });
+    at(5);
+    await undoGroupAction({ recordId: "rec1" });
+    expect(notes().map((n) => n.title)).toEqual(["5 corrections accepted by Finance", "5 reviews reopened by Finance"]);
+  });
+
+  it("reopenGroup: the corrected ones' teams hear it, with the reason; the rest ring nobody", async () => {
+    seed(5);
+    corrected("0206");
+    await approveGroup({ recordId: "rec1", notCapitalised: false, assetIds: ALL });
+    at(30);
+    h.user = ADA;
+    expect((await reopenGroup({ recordId: "rec1", reason: "Recheck the costs" })).ok).toBe(true);
+    expect(notes()).toEqual([
+      { team: "IT", kind: "CHANGED", title: "BR-LT-0206: Finance accepted the correction", href: "/inventory/0206" },
+      { team: "IT", kind: "CHANGED", title: "BR-LT-0206: Finance reopened its review", href: "/inventory/0206" },
+    ]);
+    expect(t("notification")[1]).toMatchObject({ body: "Recheck the costs", actorId: ADA.id });
   });
 });
 

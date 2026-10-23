@@ -15,14 +15,25 @@ import {
   UNDO_KINDS, UNDONE_ACTION, type UndoKind,
 } from "@/lib/finance-undo";
 import { lockPo } from "@/server/modules/purchases/po-lock";
-import { undoOne } from "./review-writes";
+import { undoOne, type ReturnTeam } from "./review-writes";
 import { GROUP_ASSET_SELECT, lockGroupAssets, revalidateGroup, StaleGroupError } from "./group-shared";
+import { correctionTeams, FINANCE_WORDS, notifyAssetsByTeam } from "./review-notify";
+import { notify } from "@/server/notifications/notify";
 
 /*
  * Finance follow-up (spec §3): Undo for Finance's review actions, and the admin's Reopen review. Every rule runs here,
  * inside the transaction, from a fresh read of the asset and its audit trail (`undoCheck`); the asset page's banner
  * and the toast's timer are only hints. Audit stays append-only: an undo is a new entry, the original is untouched.
+ *
+ * 2026-10-23: the team that heard about the original hears about its undo, in the same transaction — a send-back
+ * taken back tells the team it went to ("{tag}: Finance took back the send-back"); an approval of a corrected asset
+ * undone or reopened tells the team that corrected it ("{tag}: Finance reopened its review"), after the "accepted" it
+ * had. A notification is never deleted: the earlier one stays, and this one follows it.
  */
+
+/** The team an asset was sent back to (one from before teams were recorded went to its class's team). */
+const sentBackTeam = (a: { cls: string; financeReturnedTo: string | null }): ReturnTeam =>
+  a.financeReturnedTo === "IT" || a.financeReturnedTo === "PURCHASING" ? a.financeReturnedTo : a.cls === "IT" ? "IT" : "PURCHASING";
 
 const undoSchema = z.object({ assetId: z.string().min(1), kind: z.enum(UNDO_KINDS as [UndoKind, ...UndoKind[]]) });
 
@@ -35,9 +46,9 @@ const reopenSchema = z.object({
 const RECENT_ENTRIES = 50;
 
 const ASSET_SELECT = {
-  id: true, tag: true, cost: true, purchaseRecordId: true,
+  id: true, tag: true, cls: true, cost: true, purchaseRecordId: true,
   financeConfirmedAt: true, financeConfirmedById: true, financeNotCapitalised: true,
-  financeReturnedAt: true, financeReturnedById: true, financeReturnFields: true, financeResubmitNote: true,
+  financeReturnedAt: true, financeReturnedById: true, financeReturnedTo: true, financeReturnFields: true, financeResubmitNote: true,
   depreciationLifeMonths: true, depreciationSalvage: true, depreciationNote: true,
 } as const;
 
@@ -102,9 +113,18 @@ export async function undoFinanceAction(input: unknown): Promise<ActionResult<{ 
     if (kind !== "settings") {
       // Approve or send back: the shared per-asset undo (review-writes.ts), state-guarded like the action itself — the
       // one read above, by this person, is the one being undone. The group undo runs the same write per asset.
+      const fixedBy = kind === "approve" ? (await correctionTeams(tx, [asset])).get(asset.id) : undefined;
       if (!(await undoOne(tx, asset, kind, original.diff, user))) {
         failure = conflict(RACE(asset.tag));
         return;
+      }
+      const team = kind === "send-back" ? sentBackTeam(asset) : fixedBy;
+      if (team) {
+        await notify(tx, {
+          team, kind: "CHANGED",
+          title: kind === "send-back" ? FINANCE_WORDS.tookBack.one(asset.tag) : FINANCE_WORDS.reopened.one(asset.tag),
+          href: `/inventory/${asset.id}`, actorId: user.id, actorRole: user.role, entityType: "asset", entityId: asset.id,
+        });
       }
       out = { tag: asset.tag, id: asset.id };
       return;
@@ -163,7 +183,7 @@ export async function reopenFinanceReview(input: unknown): Promise<ActionResult<
     await lockAsset(tx, assetId);
     const asset = await tx.asset.findUnique({
       where: { id: assetId },
-      select: { id: true, tag: true, financeConfirmedAt: true, financeNotCapitalised: true },
+      select: { id: true, tag: true, cls: true, financeConfirmedAt: true, financeNotCapitalised: true },
     });
     if (!asset) {
       failure = validationError({ assetId: "Unknown asset" });
@@ -190,6 +210,14 @@ export async function reopenFinanceReview(input: unknown): Promise<ActionResult<
       },
       reason, source: "web",
     });
+    // A corrected asset's review reopened: the team that corrected it heard "accepted"; now it hears this, and why.
+    const fixedBy = (await correctionTeams(tx, [asset])).get(asset.id);
+    if (fixedBy) {
+      await notify(tx, {
+        team: fixedBy, kind: "CHANGED", title: FINANCE_WORDS.reopened.one(asset.tag), body: reason,
+        href: `/inventory/${asset.id}`, actorId: user.id, actorRole: user.role, entityType: "asset", entityId: asset.id,
+      });
+    }
     out = { tag: asset.tag, id: asset.id };
   });
 
@@ -265,11 +293,24 @@ export async function undoGroupAction(input: unknown): Promise<ActionResult<{ un
       if (!check.ok) { failure = conflict(check.reason); return; }
 
       const meta = { group: { from: null, to: recordId } };
-      for (const item of check.items) {
-        const asset = group.assets.find((a) => a.id === item.assetId)!;
+      const undone = check.items.map((item) => ({ item, asset: group.assets.find((a) => a.id === item.assetId)! }));
+      const fixedBy = await correctionTeams(tx, undone.filter((u) => u.item.kind === "approve").map((u) => u.asset));
+      for (const { item, asset } of undone) {
         if (item.kind === "settings") throw new StaleGroupError(asset.tag); // a group action never changes settings
         if (!(await undoOne(tx, asset, item.kind, item.entry.diff, user, meta))) throw new StaleGroupError(asset.tag);
       }
+      // Every undo landed: the teams that heard of the hold-backs and the accepted corrections hear they were taken back.
+      const about = { group: { entityType: "purchase-record", entityId: recordId } };
+      await notifyAssetsByTeam(
+        tx,
+        undone.filter((u) => u.item.kind === "send-back").map((u) => ({ team: sentBackTeam(u.asset), id: u.asset.id, tag: u.asset.tag })),
+        FINANCE_WORDS.tookBack, user, about,
+      );
+      await notifyAssetsByTeam(
+        tx,
+        undone.filter((u) => fixedBy.has(u.asset.id)).map((u) => ({ team: fixedBy.get(u.asset.id)!, id: u.asset.id, tag: u.asset.tag })),
+        FINANCE_WORDS.reopened, user, about,
+      );
       ids = check.items.map((i) => i.assetId);
       out = { undone: check.items.length, refNo: group.refNo };
     });
@@ -328,6 +369,13 @@ export async function reopenGroup(input: unknown): Promise<ActionResult<{ reopen
           reason, source: "web",
         });
       }
+      // The corrected ones: their teams heard "accepted", so they hear this, with the reason.
+      const fixedBy = await correctionTeams(tx, approved);
+      await notifyAssetsByTeam(
+        tx,
+        approved.filter((a) => fixedBy.has(a.id)).map((a) => ({ team: fixedBy.get(a.id)!, id: a.id, tag: a.tag })),
+        FINANCE_WORDS.reopened, user, { body: reason, group: { entityType: "purchase-record", entityId: recordId } },
+      );
       ids = approved.map((a) => a.id);
       out = { reopened: approved.length, refNo: group.refNo };
     });

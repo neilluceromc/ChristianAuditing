@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
   interfere: null as null | (() => void),
   /** The order of the row lock and the reads/writes inside a transaction. */
   ops: [] as string[],
+  /** The bell's rows (2026-10-23: undos and approvals of corrections ring the team affected). */
+  notifications: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
@@ -84,8 +86,22 @@ vi.mock("@/server/db/client", () => {
     return [];
   };
   // Task 6: a send-back and a resubmit ring a team's bell.
-  const notification = { create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "n1", ...data }) };
-  const client = { asset, auditEntry, notification, $queryRaw };
+  const notification = {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      h.notifications.push(data);
+      return { id: `n${h.notifications.length}`, ...data };
+    },
+  };
+  // Who resubmitted a correction (correctionTeams reads the resubmitting person's team).
+  const PEOPLE = [
+    { id: "u-ana", role: "finance_staff" }, { id: "u-ben", role: "finance_staff" }, { id: "u-ivan", role: "it_staff" },
+    { id: "u-pat", role: "purchasing_staff" }, { id: "u-ada", role: "admin" },
+  ];
+  const user = {
+    findMany: async ({ where }: { where: Record<string, unknown> }) => PEOPLE.filter((u) => matches(u, where)),
+    findUnique: async ({ where }: { where: { id: string } }) => PEOPLE.find((u) => u.id === where.id) ?? null,
+  };
+  const client = { asset, auditEntry, notification, user, $queryRaw };
   return { prisma: { ...client, $transaction: async (fn: (tx: typeof client) => Promise<unknown>) => fn(client) } };
 });
 
@@ -143,6 +159,7 @@ beforeEach(() => {
   h.revalidated = [];
   h.interfere = null;
   h.ops = [];
+  h.notifications = [];
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -377,6 +394,72 @@ describe("admin reopen", () => {
       () => reopenFinanceReview({ assetId: "0243", reason: "Wrong category" }),
       "BR-LT-0243 isn't approved, so there is no review to reopen.",
     );
+  });
+});
+
+describe("the team affected hears of an undo or a reopen (2026-10-23)", () => {
+  const changed = () => h.notifications.filter((n) => n.kind === "CHANGED").map((n) => ({ team: n.team, title: n.title, href: n.href, body: n.body }));
+
+  /** Sent back to IT, corrected by Ivan (IT), then approved by Ana: IT heard "accepted". */
+  async function correctedAndApproved(id: string, extra: Rec = {}) {
+    seed(id, extra);
+    expect((await returnAsset({ id, team: "IT", fields: ["serial"] })).ok).toBe(true);
+    at(1);
+    as(IVAN);
+    expect((await resubmitAssetToFinance({ id, reply: "Serial fixed" })).ok).toBe(true);
+    at(2);
+    as(ANA);
+    expect((await confirmAssetDetails({ id })).ok).toBe(true);
+  }
+
+  it("a send-back taken back: the team it went to hears '{tag}: Finance took back the send-back'", async () => {
+    seed("0260", { cls: "PURCHASING" });
+    await returnAsset({ id: "0260", team: "PURCHASING", fields: ["other"], note: "slip" });
+    at(2);
+    expect((await undoFinanceAction({ assetId: "0260", kind: "send-back" })).ok).toBe(true);
+    expect(changed()).toEqual([{ team: "PURCHASING", title: "BR-LT-0260: Finance took back the send-back", href: "/inventory/0260", body: null }]);
+    expect(h.notifications.at(-1)).toMatchObject({ actorId: ANA.id, entityType: "asset", entityId: "0260" });
+  });
+
+  it("a corrected asset's approval undone: 'accepted' stays, and IT hears '{tag}: Finance reopened its review'", async () => {
+    await correctedAndApproved("0261");
+    expect(changed()).toEqual([{ team: "IT", title: "BR-LT-0261: Finance accepted the correction", href: "/inventory/0261", body: null }]);
+    at(4);
+    expect((await undoFinanceAction({ assetId: "0261", kind: "approve" })).ok).toBe(true);
+    expect(changed()).toEqual([
+      { team: "IT", title: "BR-LT-0261: Finance accepted the correction", href: "/inventory/0261", body: null },
+      { team: "IT", title: "BR-LT-0261: Finance reopened its review", href: "/inventory/0261", body: null },
+    ]);
+  });
+
+  it("an approval undone that nobody heard of (not a correction) rings nobody", async () => {
+    seed("0262");
+    await confirmAssetDetails({ id: "0262" });
+    at(1);
+    expect((await undoFinanceAction({ assetId: "0262", kind: "approve" })).ok).toBe(true);
+    expect(h.notifications).toEqual([]);
+  });
+
+  it("an admin reopening a corrected asset's review tells IT, with the reason", async () => {
+    await correctedAndApproved("0263");
+    at(60);
+    as(ADA);
+    expect((await reopenFinanceReview({ assetId: "0263", reason: "Wrong category" })).ok).toBe(true);
+    expect(changed().at(-1)).toEqual({ team: "IT", title: "BR-LT-0263: Finance reopened its review", href: "/inventory/0263", body: "Wrong category" });
+  });
+
+  it("none written when the undo or reopen fails", async () => {
+    await correctedAndApproved("0264");
+    const count = h.notifications.length;
+    as(BEN);
+    await expectRefused(() => undoFinanceAction({ assetId: "0264", kind: "approve" }), "Can't undo: only Ana Cruz can undo this.");
+    as(ANA);
+    h.interfere = () => { asset("0264").financeConfirmedAt = null; }; // reopened by someone at the same moment
+    expect(await undoFinanceAction({ assetId: "0264", kind: "approve" })).toMatchObject({ ok: false, kind: "conflict" });
+    as(ADA);
+    h.interfere = () => { asset("0264").financeConfirmedAt = null; };
+    await reopenFinanceReview({ assetId: "0264", reason: "Wrong category" });
+    expect(h.notifications).toHaveLength(count);
   });
 });
 

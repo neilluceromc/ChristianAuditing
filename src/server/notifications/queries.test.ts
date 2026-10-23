@@ -111,20 +111,31 @@ describe("unreadCount", () => {
     expect(await unreadCount(it1, NOW)).toBe(1);
   });
 
-  it("admin and viewer are never rung", async () => {
+  it("an admin's count sums every team, by their own reads; a viewer is never rung", async () => {
     note("IT");
-    note("PURCHASING");
-    expect(await unreadCount(admin, NOW)).toBe(0);
+    const p = note("PURCHASING");
+    note("FINANCE", { kind: "TO_CHECK" });
+    note("IT", { createdAt: ago(91) });
+    expect(await unreadCount(admin, NOW)).toBe(3);
+    markRead(p, admin.id);
+    expect(await unreadCount(admin, NOW)).toBe(2);
+    // a teammate's read is theirs: Purchasing still has it unread, the admin's read changed nothing for them
+    expect(await unreadCount(purchasing, NOW)).toBe(1);
     expect(await unreadCount({ id: "v", role: "viewer" }, NOW)).toBe(0);
   });
 });
 
 describe("listNotifications", () => {
-  it("admin requires team", async () => {
-    note("IT");
-    await expect(listNotifications(admin, { tab: "all" }, NOW)).rejects.toThrow(/team/i);
-    const { items } = await listNotifications(admin, { tab: "all", team: "IT" }, NOW);
-    expect(items).toHaveLength(1);
+  it("an admin reads every team's, each item with its team; naming a team narrows to it", async () => {
+    note("IT", { createdAt: ago(3) });
+    note("PURCHASING", { createdAt: ago(2), kind: "CHANGED" });
+    note("FINANCE", { createdAt: ago(1), kind: "TO_CHECK" });
+    const all = await listNotifications(admin, { tab: "all" }, NOW);
+    expect(all.items.map((i) => [i.id, i.team])).toEqual([["n003", "FINANCE"], ["n002", "PURCHASING"], ["n001", "IT"]]);
+    const it = await listNotifications(admin, { tab: "all", team: "IT" }, NOW);
+    expect(it.items.map((i) => i.id)).toEqual(["n001"]);
+    const changed = await listNotifications(admin, { tab: "changed" }, NOW);
+    expect(changed.items.map((i) => i.team)).toEqual(["PURCHASING"]);
   });
 
   it("staff always get their own team, whatever team they pass", async () => {
@@ -147,7 +158,7 @@ describe("listNotifications", () => {
     markRead(a, it2.id);
     const sent = await listNotifications(it1, { tab: "sent-back" }, NOW);
     expect(sent.items).toEqual([{
-      id: a.id, kind: "SENT_BACK", title: a.title, body: "wrong serial", href: a.href, actorName: "Fe Reyes",
+      id: a.id, team: "IT", kind: "SENT_BACK", title: a.title, body: "wrong serial", href: a.href, actorName: "Fe Reyes",
       createdAt: a.createdAt, read: true,
     }]);
     const toCheck = await listNotifications(it1, { tab: "to-check" }, NOW);

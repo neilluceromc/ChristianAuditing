@@ -6,7 +6,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { fmtDateTime } from "@/lib/format";
 import {
-  arrivalText, bellLabel, NOTIFICATION_TABS, notificationsHref, type NotificationTab, type NotificationView,
+  arrivalText, bellLabel, NOTIFICATION_TABS, notificationsHref, TEAM_LABEL, type NotificationTab, type NotificationView,
 } from "@/lib/notifications";
 import { BELL_POLL_MS, bellPollStep, initialBellPollState, type BellPollEvent, type BellPollState } from "@/lib/bell-poll";
 import { bellCount, bellItems, markRead } from "@/server/notifications/actions";
@@ -20,7 +20,8 @@ import { useOverlayLayer } from "@/components/ui/use-focus-trap";
  * to it. The count is polled as bellPollStep decides (every 2 minutes while the tab is visible and the person is
  * active, on window focus, on a route change at most once per 30 s; nothing after 10 idle minutes until the next
  * input) — cheap on Vercel Hobby. A polite live region says "1 new notification" only when the count goes up, from a
- * poll or from a layout re-render. Admins are never rung: their panel points at the full page.
+ * poll or from a layout re-render. An admin's bell (2026-10-23) works the same across every team: the count sums them,
+ * and each item carries its team.
  */
 export function NotificationBell({ initialCount, admin }: { initialCount: number; admin: boolean }) {
   const pathname = usePathname();
@@ -92,19 +93,17 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
   // A route change (the first render already has the layout's count), at most one poll per 30 s.
   const firstPath = useRef(true);
   useEffect(() => {
-    if (admin) return;
     if (firstPath.current) {
       firstPath.current = false;
       schedule.current ??= initialBellPollState(Date.now());
       return;
     }
     void step("route");
-  }, [pathname, admin, step]);
+  }, [pathname, step]);
 
   // The interval while this tab is visible; window focus or coming back to the tab polls; pointer and key input keep
   // the person active (the first input after 10 idle minutes polls at once).
   useEffect(() => {
-    if (admin) return;
     let timer: number | undefined;
     const stop = () => {
       if (timer !== undefined) window.clearInterval(timer);
@@ -138,11 +137,11 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
       window.removeEventListener("pointermove", onInput);
       window.removeEventListener("keydown", onInput);
     };
-  }, [admin, step]);
+  }, [step]);
 
   // The open tab's items.
   useEffect(() => {
-    if (!open || admin) return;
+    if (!open) return;
     let live = true;
     bellItems({ tab })
       .then((r) => {
@@ -154,7 +153,7 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
     return () => {
       live = false;
     };
-  }, [open, tab, admin]);
+  }, [open, tab]);
 
   const close = useCallback((refocus: boolean) => {
     setOpen(false);
@@ -164,14 +163,13 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
   // Escape (top overlay layer only) closes and returns focus to the bell.
   useOverlayLayer(open, () => close(true));
 
-  // The panel is a dialog (aria-haspopup="dialog"), so opening it moves focus into it: onto the selected tab, or
-  // "See all" for an admin (who has no tabs). Only on the open itself — a tab change already focuses its own tab.
-  const seeAllRef = useRef<HTMLAnchorElement>(null);
+  // The panel is a dialog (aria-haspopup="dialog"), so opening it moves focus into it: onto the selected tab. Only on
+  // the open itself — a tab change already focuses its own tab.
   useEffect(() => {
     if (!open) return;
-    (admin ? seeAllRef.current : tabRefs.current[tab])?.focus();
+    tabRefs.current[tab]?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, admin]);
+  }, [open]);
 
   // A click outside closes without refocusing: focus follows the click.
   useEffect(() => {
@@ -277,69 +275,60 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
           )}
           style={{ animation: "fade var(--dur-2) var(--ease-std)" }}
         >
-          {admin ? (
-            <p className="px-4 py-3 text-[13px] text-fg-secondary">
-              Admins aren&apos;t notified. Read any team&apos;s notifications on the notifications page.
-            </p>
-          ) : (
-            <>
-              <div role="tablist" aria-label="Notification types" className="flex gap-1 border-b border-border px-2">
-                {NOTIFICATION_TABS.map((t) => {
-                  const selected = t.id === tab;
-                  return (
-                    <button
-                      key={t.id}
-                      ref={(el) => {
-                        tabRefs.current[t.id] = el;
-                      }}
-                      type="button"
-                      role="tab"
-                      id={`${tabsId}-${t.id}`}
-                      aria-selected={selected}
-                      aria-controls={`${tabsId}-panel`}
-                      tabIndex={selected ? 0 : -1}
-                      onClick={() => pickTab(t.id)}
-                      onKeyDown={onTabKey}
-                      className={cn(
-                        "relative px-2.5 py-2 text-[12px] font-medium",
-                        selected ? "text-fg" : "text-fg-muted hover:text-fg-secondary",
-                      )}
-                    >
-                      {t.label}
-                      {selected && <span aria-hidden className="absolute inset-x-1.5 bottom-0 h-[2px] bg-accent" />}
-                    </button>
-                  );
-                })}
-              </div>
-              <div
-                role="tabpanel"
-                id={`${tabsId}-panel`}
-                aria-labelledby={`${tabsId}-${tab}`}
-                aria-busy={items === null && !failed}
-                className="min-h-[72px] overflow-y-auto"
-              >
-                {failed ? (
-                  <p className="px-4 py-3 text-[13px] text-fg-secondary">Couldn&apos;t load notifications. Try again.</p>
-                ) : items === null ? (
-                  <p className="px-4 py-3 text-[13px] text-fg-muted">Loading…</p>
-                ) : items.length === 0 ? (
-                  <p className="px-4 py-3 text-[13px] text-fg-muted">Nothing here.</p>
-                ) : (
-                  <ul className="divide-y divide-border">
-                    {items.map((n) => (
-                      <li key={n.id}>
-                        <NotificationLink n={n} onOpen={() => openItem(n)} compact />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </>
-          )}
+          <div role="tablist" aria-label="Notification types" className="flex gap-1 border-b border-border px-2">
+            {NOTIFICATION_TABS.map((t) => {
+              const selected = t.id === tab;
+              return (
+                <button
+                  key={t.id}
+                  ref={(el) => {
+                    tabRefs.current[t.id] = el;
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`${tabsId}-${t.id}`}
+                  aria-selected={selected}
+                  aria-controls={`${tabsId}-panel`}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => pickTab(t.id)}
+                  onKeyDown={onTabKey}
+                  className={cn(
+                    "relative px-2.5 py-2 text-[12px] font-medium",
+                    selected ? "text-fg" : "text-fg-muted hover:text-fg-secondary",
+                  )}
+                >
+                  {t.label}
+                  {selected && <span aria-hidden className="absolute inset-x-1.5 bottom-0 h-[2px] bg-accent" />}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            role="tabpanel"
+            id={`${tabsId}-panel`}
+            aria-labelledby={`${tabsId}-${tab}`}
+            aria-busy={items === null && !failed}
+            className="min-h-[72px] overflow-y-auto"
+          >
+            {failed ? (
+              <p className="px-4 py-3 text-[13px] text-fg-secondary">Couldn&apos;t load notifications. Try again.</p>
+            ) : items === null ? (
+              <p className="px-4 py-3 text-[13px] text-fg-muted">Loading…</p>
+            ) : items.length === 0 ? (
+              <p className="px-4 py-3 text-[13px] text-fg-muted">Nothing here.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {items.map((n) => (
+                  <li key={n.id}>
+                    <NotificationLink n={n} onOpen={() => openItem(n)} compact showTeam={admin} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <div className="border-t border-border px-4 py-2 text-right">
             <Link
-              ref={seeAllRef}
-              href={admin ? "/notifications" : notificationsHref({ tab })}
+              href={notificationsHref({ tab })}
               onClick={() => setOpen(false)}
               className="text-[12.5px] font-medium text-accent underline-offset-2 hover:underline"
             >
@@ -354,9 +343,12 @@ export function NotificationBell({ initialCount, admin }: { initialCount: number
 
 /**
  * One notification as a link to its record: what happened, the reason or note, who did it and when; unread ones are
- * marked (in words for a screen reader, a dot for the eye). Shared by the bell and /notifications.
+ * marked (in words for a screen reader, a dot for the eye). Shared by the bell and /notifications. `showTeam` (an
+ * admin's lists, which mix every team's) adds the team it rang.
  */
-export function NotificationLink({ n, onOpen, compact = false }: { n: NotificationView; onOpen: () => void; compact?: boolean }) {
+export function NotificationLink({
+  n, onOpen, compact = false, showTeam = false,
+}: { n: NotificationView; onOpen: () => void; compact?: boolean; showTeam?: boolean }) {
   const when = new Date(n.createdAt);
   return (
     <Link
@@ -374,8 +366,15 @@ export function NotificationLink({ n, onOpen, compact = false }: { n: Notificati
           {n.title}
         </span>
         {n.body && <span className="text-[12.5px] text-fg-secondary">&ldquo;{n.body}&rdquo;</span>}
-        <span className="text-[11.5px] text-fg-muted">
-          {n.actorName ?? "Someone"} · <time dateTime={when.toISOString()}>{fmtDateTime(when)}</time>
+        <span className="flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-fg-muted">
+          {showTeam && (
+            <span className="rounded-full border border-border px-1.5 text-[10.5px] font-medium leading-[16px] text-fg-secondary">
+              {TEAM_LABEL[n.team]}
+            </span>
+          )}
+          <span>
+            {n.actorName ?? "Someone"} · <time dateTime={when.toISOString()}>{fmtDateTime(when)}</time>
+          </span>
         </span>
       </span>
     </Link>

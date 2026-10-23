@@ -794,6 +794,12 @@ describe("undoPoSendBack (Task 6 fix round 1: the send-back, undone as one actio
       diff: { state: { from: "SENT_BACK", to: "READY" }, sentBack: { from: { team: "FINANCE", fields: ["unit price"], note: "price is per box" }, to: null } },
     })]);
     expect(t("noteEntry").map((n) => n.kind)).toEqual(["PO_SENT_BACK", "COMMENT"]);
+    // 2026-10-23: Purchasing heard of the send-back; it hears it was taken back, on the PO (the first one stays)
+    expect(t("notification").map((n) => [n.team, n.kind, n.title, n.href])).toEqual([
+      ["PURCHASING", "SENT_BACK", expect.any(String), "/purchases/po1"],
+      ["PURCHASING", "CHANGED", "PO-0214: the send-back was taken back", "/purchases/po1"],
+    ]);
+    expect(t("notification")[1]).toMatchObject({ actorId: ANA.id, entityType: "purchase-order", entityId: "po1" });
   });
 
   it("IT's send-back goes back to With IT; a comment since doesn't block it", async () => {
@@ -814,6 +820,7 @@ describe("undoPoSendBack (Task 6 fix round 1: the send-back, undone as one actio
     h.user = ADA;
     const r = await expectNothingWritten(() => undoPoSendBack({ id: "po1" }));
     expect(r).toMatchObject({ kind: "conflict", message: "Can't undo: only Ana Cruz can undo this." });
+    expect(t("notification").filter((n) => n.kind === "CHANGED")).toEqual([]);
   });
 
   it("refused after 15 minutes", async () => {

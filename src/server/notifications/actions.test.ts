@@ -18,6 +18,7 @@ vi.mock("@/server/auth/guards", () => ({ actionUser: async () => h.user }));
 vi.mock("@/server/db/client", () => {
   const matches = (n: Row, where: Row): boolean =>
     Object.entries(where).every(([k, v]) => {
+      if (k === "AND") return (v as Row[]).every((w) => matches(n, w));
       if (k === "reads") return !h.reads.some((r) => r.notificationId === n.id && r.userId === (v as { none: { userId: string } }).none.userId);
       if (v !== null && typeof v === "object" && !(v instanceof Date)) {
         const op = v as { in?: unknown[]; gte?: Date };
@@ -29,7 +30,13 @@ vi.mock("@/server/db/client", () => {
   return {
     prisma: {
       notification: {
-        findMany: async ({ where }: { where: Row }) => h.notifications.filter((n) => matches(n, where)).map((n) => ({ id: n.id })),
+        findMany: async ({ where, take, select }: { where: Row; take?: number; select?: { reads?: { where: { userId: string } } } }) =>
+          h.notifications.filter((n) => matches(n, where)).slice(0, take ?? Infinity).map((n) => (select?.reads
+            ? {
+              ...n, kind: "SENT_BACK", title: "t", body: null, href: "/x", actor: null,
+              reads: h.reads.filter((r) => r.notificationId === n.id && r.userId === select.reads!.where.userId),
+            }
+            : { id: n.id })),
         count: async ({ where }: { where: Row }) => h.notifications.filter((n) => matches(n, where)).length,
       },
       notificationRead: {
@@ -43,7 +50,7 @@ vi.mock("@/server/db/client", () => {
   };
 });
 
-import { bellCount, markAllRead, markRead } from "./actions";
+import { bellCount, bellItems, markAllRead, markRead } from "./actions";
 
 const now = () => new Date();
 beforeEach(() => {
@@ -88,10 +95,31 @@ describe("markAllRead", () => {
     expect(h.reads.map((x) => x.notificationId)).toEqual(["n1", "n2"]);
   });
 
-  it("an admin must name the team", async () => {
+  it("an admin marks every team's for themself alone, or one team's when named", async () => {
+    h.reads = [{ notificationId: "n1", userId: "itA" }];
     h.user = { id: "adm", name: "Ada", role: "admin" };
-    expect((await markAllRead()).ok).toBe(false);
     expect(await markAllRead({ team: "PURCHASING" })).toEqual({ ok: true, data: { marked: 1 } });
-    expect(h.reads).toEqual([{ notificationId: "n3", userId: "adm" }]);
+    expect(h.reads).toEqual([{ notificationId: "n1", userId: "itA" }, { notificationId: "n3", userId: "adm" }]);
+    expect(await markAllRead()).toEqual({ ok: true, data: { marked: 2 } });
+    expect(h.reads.filter((r) => r.userId === "adm").map((r) => r.notificationId).sort()).toEqual(["n1", "n2", "n3"]);
+    // nobody else's read state moved: IT's other person still has both of IT's unread, Ivy still has n2
+    expect(h.reads.filter((r) => r.userId !== "adm")).toEqual([{ notificationId: "n1", userId: "itA" }]);
+    h.user = { id: "itB", name: "Ben", role: "it_staff" };
+    expect(await bellCount()).toEqual({ count: 2 });
+  });
+});
+
+describe("the admin's bell", () => {
+  it("counts every team's unread and lists them, each with its team", async () => {
+    h.user = { id: "adm", name: "Ada", role: "admin" };
+    expect(await bellCount()).toEqual({ count: 3 });
+    const { items } = await bellItems({ tab: "all" });
+    expect(items.map((i) => [i.id, i.team]).sort()).toEqual([["n1", "IT"], ["n2", "IT"], ["n3", "PURCHASING"]]);
+    expect(await markRead({ ids: ["n3"] })).toEqual({ ok: true, data: { count: 2 } });
+  });
+
+  it("a viewer's bell has nothing", async () => {
+    h.user = { id: "v", name: "Vic", role: "viewer" };
+    expect(await bellItems({ tab: "all" })).toEqual({ items: [] });
   });
 });

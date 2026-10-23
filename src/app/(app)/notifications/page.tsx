@@ -20,7 +20,8 @@ export const metadata: Metadata = { title: pageTitle("Notifications") };
 
 /**
  * Task 7 (spec §7): the bell's "See all" — the same tabs (Sent back · To check · Changed · All), 30 at a time, newest
- * first, with "Mark all read". Everyone on a team reads their own team's; an admin, never rung, picks any team.
+ * first, with "Mark all read". Everyone on a team reads their own team's; an admin reads every team's, each item with
+ * its team, or filters to one (2026-10-23).
  */
 export default async function NotificationsPage({
   searchParams,
@@ -31,33 +32,34 @@ export default async function NotificationsPage({
   const params = toSearchParams(await searchParams);
   const tab = parseNotificationTab(params.get("tab"));
   const admin = user.role === "admin";
-  // An admin reads the team they pick (Purchasing until they pick); anyone else always their own.
-  const team = teamOfRole(user.role) ?? (admin ? parseTeam(params.get("team")) ?? "PURCHASING" : null);
-  const teamParam = admin ? team : null;
+  // An admin reads every team's, or the one they pick; anyone else always their own. A viewer has no team: no list.
+  const own = teamOfRole(user.role);
+  const reads = own !== null || admin;
+  const teamParam = admin ? parseTeam(params.get("team")) : null;
   const cursor = params.get("cursor");
-  const { items, next } = team
-    ? await listNotifications(user, { tab, team, cursor, take: NOTIFICATIONS_PAGE })
+  const { items, next } = reads
+    ? await listNotifications(user, { tab, team: teamParam, cursor, take: NOTIFICATIONS_PAGE })
     : { items: [], next: null };
 
   return (
     <>
       <PageHeader
         title="Notifications"
-        actions={team ? <MarkAllReadButton team={teamParam} /> : undefined}
+        actions={reads ? <MarkAllReadButton team={teamParam} /> : undefined}
       />
       <div className="flex flex-col gap-3">
         {admin && (
           <form method="get" className="flex flex-wrap items-center gap-2">
             {tab !== "all" && <input type="hidden" name="tab" value={tab} />}
             <label htmlFor="notifications-team" className="text-[12.5px] text-fg-secondary">Team</label>
-            <Select id="notifications-team" name="team" defaultValue={team ?? "PURCHASING"} className="max-w-[200px]">
+            <Select id="notifications-team" name="team" defaultValue={teamParam ?? ""} className="max-w-[200px]">
+              <option value="">All teams</option>
               {TEAMS.map((t) => <option key={t} value={t}>{TEAM_LABEL[t]}</option>)}
             </Select>
             <Button type="submit" size="sm">Show</Button>
-            <span className="text-[12px] text-fg-muted">Admins aren&apos;t notified; this is the team&apos;s own list.</span>
           </form>
         )}
-        {team && (
+        {reads && (
           <Tabs
             label="Notification types"
             items={NOTIFICATION_TABS.map((t) => ({
@@ -67,7 +69,7 @@ export default async function NotificationsPage({
             }))}
           />
         )}
-        {!team ? (
+        {!reads ? (
           <EmptyState title="No notifications" description="Notifications go to the Purchasing, IT and Finance teams." />
         ) : items.length === 0 ? (
           <EmptyState
@@ -77,7 +79,7 @@ export default async function NotificationsPage({
           />
         ) : (
           <>
-            <NotificationList key={`${tab}:${team}:${cursor ?? ""}`} items={items} />
+            <NotificationList key={`${tab}:${teamParam ?? own ?? "all"}:${cursor ?? ""}`} items={items} showTeam={admin} />
             <nav aria-label="Notification pages" className="flex items-center justify-between pt-1">
               {cursor ? <ButtonLink href={notificationsHref({ tab, team: teamParam })}>Newest</ButtonLink> : <span />}
               {next && <ButtonLink href={notificationsHref({ tab, team: teamParam, cursor: next })}>Older</ButtonLink>}

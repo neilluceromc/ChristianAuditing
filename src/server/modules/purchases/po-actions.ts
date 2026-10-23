@@ -1019,6 +1019,11 @@ async function undoSendBackImpl(input: unknown): Promise<ActionResult<{ refNo: s
     });
     // The thread is append-only: the send-back stays in it, and so does this.
     await tx.noteEntry.create({ data: { orderId: id, authorId: user.id, kind: "COMMENT", text: "Undid the send-back to Purchasing." } });
+    // 2026-10-23: Purchasing heard of the send-back, so it hears it was taken back (the earlier one stays).
+    await notify(tx, {
+      team: "PURCHASING", kind: "CHANGED", title: `${po.refNo}: the send-back was taken back`, href: poHref(id),
+      actorId: user.id, actorRole: user.role, entityType: ENTITY, entityId: id,
+    });
     out = { refNo: po.refNo, undone: check.items.length };
   });
 
@@ -1328,7 +1333,7 @@ async function closeImpl(input: unknown): Promise<ActionResult<{ refNo: string; 
       reason, source: "web",
     });
     // The last units closed short on an otherwise fully approved PO complete it: its approval webhooks, once.
-    await emitIfPoFullyApproved(tx, id);
+    await emitIfPoFullyApproved(tx, id, user);
     out = { refNo: po.refNo, remaining: remaining - qty };
   });
 
