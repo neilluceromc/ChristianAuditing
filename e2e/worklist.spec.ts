@@ -7,7 +7,7 @@ import { login } from "./fixtures/login";
 /**
  * Worklist split view (H4), Task 4: the one-screen Worklist in a real browser against real Postgres.
  *
- *   1  one screen: at 1440×900 the document doesn't scroll; at 1280×720 ten rows fit too
+ *   1  one screen: the document never scrolls; a page is as many 52 px rows as fit, 6 to 10 (final review ruling)
  *   2  Keep as spare → the next row and its Keep as spare; the toast's Undo puts the row, its selection and
  *      Cleared today back (the decision's updatedAt survives the Postgres round trip, or the undo is refused)
  *   3  the last row decided: focus lands on the empty state
@@ -102,6 +102,12 @@ const drawer = (page: Page) => page.getByRole("dialog", { name: "Triage", exact:
 const pager = (page: Page) => page.getByRole("navigation", { name: "Pages" });
 const toast = (page: Page, text: string | RegExp) => page.locator("[data-toast-id]").filter({ hasText: text });
 const empty = (page: Page) => page.locator("[data-worklist-empty]");
+/** Rows per page as the page measured them (6–10; ten before the measurement and below 640 px). */
+async function perPageOf(page: Page): Promise<number> {
+  return Number(await page.locator("section[data-per-page]").getAttribute("data-per-page"));
+}
+/** The URL's ?page (null when it is page 1, which the URL leaves out). */
+const urlPage = (page: Page) => new URL(page.url()).searchParams.get("page");
 
 /** "Cleared today {n}" in the page header. */
 async function cleared(page: Page): Promise<number> {
@@ -139,7 +145,7 @@ test.describe("worklist — one screen", () => {
     });
   }
 
-  test("1. at 1440×900 the document doesn't scroll and ten rows fit; at 1280×720 the document still doesn't scroll", async ({ page }) => {
+  test("1. the document never scrolls; at 1440×900 the page shows as many rows as fit and the table doesn't scroll", async ({ page }) => {
     test.setTimeout(120_000);
     await arm(12, TWELVE);
     await login(page, IT);
@@ -149,32 +155,60 @@ test.describe("worklist — one screen", () => {
     for (const [width, height] of [[1440, 900], [1280, 720]] as const) {
       await page.setViewportSize({ width, height });
       await open(page);
-      await expect(bodyRows(page)).toHaveCount(10);
+      const per = await perPageOf(page);
+      expect(per).toBeGreaterThanOrEqual(6);
+      expect(per).toBeLessThanOrEqual(10);
+      await expect(bodyRows(page)).toHaveCount(per);
+      await expect(pager(page)).toContainText(`1–${per} of 12`);
       const fit = await overflow(page);
+      console.log(`[worklist rows per page] ${width}×${height}, Cris docked: ${per}; the table scrolls ${fit.table} px inside`);
       expect(fit.doc, `document scrolls at ${width}×${height}`).toBeLessThanOrEqual(1);
       expect(fit.main, `main scrolls at ${width}×${height}`).toBeLessThanOrEqual(1);
       if (width === 1440) {
-        expect(fit.table, "the table scrolls inside at 1440×900: ten rows don't fit").toBeLessThanOrEqual(1);
-        const last = await bodyRows(page).nth(9).boundingBox();
+        expect(fit.table, "the table scrolls inside at 1440×900: the rows shown don't fit").toBeLessThanOrEqual(1);
+        const last = await bodyRows(page).nth(per - 1).boundingBox();
         expect(last!.y + last!.height).toBeLessThanOrEqual(height);
       }
     }
   });
 
-  test("1b. at 1280×720 ten rows fit without the table scrolling (KNOWN SHORT — see the Task 4 report)", async ({ page }) => {
-    // Expected to fail until the owner rules: a two-line row (model over category · tag, with its 32 px tick) is at
-    // least 38 px, and ten of them plus the chrome need about 682 px where 1280×720 leaves 620 (532 while Cris's
-    // 88 px corner clearance shows). The document never scrolls; the table scrolls inside instead. When a layout
-    // change makes ten rows fit, this starts passing and Playwright flags it, so remove the `test.fail` then.
-    test.fail(true, "ten two-line rows don't fit at 1280×720");
-    test.setTimeout(90_000);
+  test("1b. at 1280×720 the page shows the rows that fit and the table doesn't scroll; ?page=2&sel= keeps the row", async ({ page }) => {
+    // At 1280×720 with Cris docked the table's box holds four 52 px rows, below the ruled minimum of six, so the six
+    // shown scroll inside (case 1 records it). With Cris tucked away the box holds six: that is the case pinned here.
+    test.setTimeout(120_000);
     await arm(12, TWELVE);
     await login(page, IT);
     await page.setViewportSize({ width: 1280, height: 720 });
-    await open(page);
-    await expect(bodyRows(page)).toHaveCount(10);
-    const fit = await overflow(page);
-    expect(fit.table, "the table scrolls inside at 1280×720: ten rows don't fit").toBeLessThanOrEqual(1);
+    await page.goto("/");
+    await expect(page.locator("[data-cris-dock]")).toHaveCount(1, { timeout: 20_000 });
+    await page.locator('button[aria-label="Tuck Cris away"]').dispatchEvent("click");
+    await expect(page.locator("[data-cris-dock]")).toHaveCount(0);
+    try {
+      await open(page);
+      const per = await perPageOf(page);
+      expect(per).toBe(6);
+      await expect(bodyRows(page)).toHaveCount(6);
+      await expect(pager(page)).toContainText("1–6 of 12");
+      const fit = await overflow(page);
+      expect(fit.doc).toBeLessThanOrEqual(1);
+      expect(fit.table, "the table scrolls inside at 1280×720").toBeLessThanOrEqual(1);
+      const last = await bodyRows(page).nth(5).boundingBox();
+      expect(last!.y + last!.height).toBeLessThanOrEqual(720);
+
+      // a ?page= written under ten rows a page: the URL's sel wins, and its page is the one six rows a page put it on
+      await open(page, `q=triage&page=2&sel=triage:${ids[11]}`);
+      await expect(rowOf(page, 12)).toHaveAttribute("aria-selected", "true");
+      await expect(pager(page)).toContainText("7–12 of 12");
+      await expect.poll(() => urlPage(page)).toBe("2");
+      await expect(page).toHaveURL(new RegExp(`sel=triage(%3A|:)${ids[11]}`));
+      await open(page, `q=triage&page=2&sel=triage:${ids[4]}`);
+      await expect(rowOf(page, 5)).toHaveAttribute("aria-selected", "true");
+      await expect(pager(page)).toContainText("1–6 of 12");
+      await expect.poll(() => urlPage(page)).toBeNull();
+    } finally {
+      await page.getByRole("button", { name: /^Bring Cris back/ }).click();
+      await expect(page.locator("[data-cris-dock]")).toHaveCount(1);
+    }
   });
 });
 
@@ -295,24 +329,29 @@ test.describe("worklist — filters, sort and paging", () => {
     await open(page);
     await expect(page.getByRole("navigation", { name: "Queues" }).getByRole("link", { name: /^Triage/ })).toHaveAttribute("aria-current", "page");
 
-    // paging: 10 a page
-    await expect(pager(page)).toContainText("1–10 of 12");
-    await expect(bodyRows(page)).toHaveCount(10);
+    // paging: as many rows a page as fit (6–10), so twelve rows make two pages
+    const P = await perPageOf(page);
+    expect(P).toBeGreaterThanOrEqual(6);
+    expect(P).toBeLessThanOrEqual(10);
+    const pageOne = `1–${P} of 12`;
+    const pageTwo = `${P + 1}–12 of 12`;
+    await expect(pager(page)).toContainText(pageOne);
+    await expect(bodyRows(page)).toHaveCount(P);
     await expect(bodyRows(page).first()).toHaveAttribute("data-row-key", `triage:${ids[0]}`);
     await pager(page).getByRole("button", { name: "Next →" }).click();
-    await expect(pager(page)).toContainText("11–12 of 12");
-    await expect(bodyRows(page)).toHaveCount(2);
+    await expect(pager(page)).toContainText(pageTwo);
+    await expect(bodyRows(page)).toHaveCount(12 - P);
     await expect(pager(page).getByRole("button", { name: "Next →" })).toBeDisabled();
     // a page change selects that page's first row
-    await expect(rowOf(page, 11)).toHaveAttribute("aria-selected", "true");
+    await expect(rowOf(page, P + 1)).toHaveAttribute("aria-selected", "true");
     await pager(page).getByRole("button", { name: "← Previous" }).click();
-    await expect(pager(page)).toContainText("1–10 of 12");
+    await expect(pager(page)).toContainText(pageOne);
 
     // filters: Over 90 days, a category chip, the search box; each narrows the rows
     await page.getByRole("checkbox", { name: "Over 90 days" }).check();
     await expect(pager(page)).toContainText("1–4 of 4");
     await page.getByRole("checkbox", { name: "Over 90 days" }).uncheck();
-    await expect(pager(page)).toContainText("1–10 of 12");
+    await expect(pager(page)).toContainText(pageOne);
     const monitorChip = page.getByRole("group", { name: "Category" }).getByRole("button", { name: new RegExp(`^${monitorName} `) });
     await expect(monitorChip).toHaveText(/2/);
     await monitorChip.click();
@@ -327,7 +366,7 @@ test.describe("worklist — filters, sort and paging", () => {
     await search.fill("nothing like this");
     await expect(table(page)).toContainText("Nothing matches these filters.");
     await table(page).getByRole("button", { name: "Clear filters" }).click();
-    await expect(pager(page)).toContainText("1–10 of 12");
+    await expect(pager(page)).toContainText(pageOne);
 
     // sort: Waiting opens descending (oldest first); one click turns it
     const waiting = table(page).getByRole("columnheader", { name: /Waiting/ });
@@ -337,7 +376,7 @@ test.describe("worklist — filters, sort and paging", () => {
     await expect(waiting).toHaveAttribute("aria-sort", "ascending");
     // the selected row (200 days) keeps its selection and the page follows it: now the last row of the last page
     await expect(rowOf(page, 1)).toHaveAttribute("aria-selected", "true");
-    await expect(pager(page)).toContainText("11–12 of 12");
+    await expect(pager(page)).toContainText(pageTwo);
     await expect(bodyRows(page).last()).toHaveAttribute("data-row-key", `triage:${ids[0]}`);
     await pager(page).getByRole("button", { name: "← Previous" }).click();
     await expect(bodyRows(page).first()).toHaveAttribute("data-row-key", `triage:${ids[11]}`);
@@ -345,8 +384,8 @@ test.describe("worklist — filters, sort and paging", () => {
     await expect(rowOf(page, 12)).toHaveAttribute("aria-selected", "true");
     await waiting.getByRole("button").click();
     await expect(waiting).toHaveAttribute("aria-sort", "descending");
-    await expect(pager(page)).toContainText("11–12 of 12");
-    await expect(bodyRows(page).first()).toHaveAttribute("data-row-key", `triage:${ids[10]}`);
+    await expect(pager(page)).toContainText(pageTwo);
+    await expect(bodyRows(page).first()).toHaveAttribute("data-row-key", `triage:${ids[P]}`);
 
     // URL sel: a row on page 2, selected, survives a reload with its page
     await rowOf(page, 12).click();
@@ -355,7 +394,7 @@ test.describe("worklist — filters, sort and paging", () => {
     await page.reload();
     await waitForHydration(table(page));
     await expect(rowOf(page, 12)).toHaveAttribute("aria-selected", "true");
-    await expect(pager(page)).toContainText("11–12 of 12");
+    await expect(pager(page)).toContainText(pageTwo);
     await expect(panel(page).getByRole("heading", { name: modelOf(12) })).toBeVisible();
 
     // a stale sel (decided elsewhere, or a typo) falls back to the first row, and the URL follows
@@ -363,6 +402,13 @@ test.describe("worklist — filters, sort and paging", () => {
     await expect(rowOf(page, 1)).toHaveAttribute("aria-selected", "true");
     await expect(panel(page).getByRole("heading", { name: modelOf(1) })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`sel=triage(%3A|:)${ids[0]}`));
+
+    // a ?page= written under another rows-per-page: the URL's sel wins and the page index is recomputed (row 7 is on
+    // page 1 at seven or more rows a page, on page 2 at six)
+    await open(page, `q=triage&page=2&sel=triage:${ids[6]}`);
+    await expect(rowOf(page, 7)).toHaveAttribute("aria-selected", "true");
+    await expect(pager(page)).toContainText(P >= 7 ? pageOne : pageTwo);
+    await expect.poll(() => urlPage(page)).toBe(P >= 7 ? null : "2");
 
     // red first: the first click on Loans' Status puts the late loan on top
     const late = await db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0287" } });
@@ -500,6 +546,18 @@ test.describe("worklist — someone else got there first", () => {
     await expect(rowOf(page, 2)).toHaveAttribute("aria-selected", "true");
     await expect(rowOf(page, 1)).toHaveCount(0, { timeout: 15_000 });
     await expect(panel(page).getByRole("button", { name: "Keep as spare", exact: true })).toBeFocused();
+    // final review I1: once the refresh has dropped the refused row, ↑/↓ keep focus in the table (nothing stays armed)
+    await rowOf(page, 2).click();
+    await expect(rowOf(page, 2)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(rowOf(page, 3)).toHaveAttribute("aria-selected", "true");
+    await expect(rowOf(page, 3)).toBeFocused();
+    await page.waitForTimeout(800);
+    await expect(rowOf(page, 3)).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(rowOf(page, 2)).toBeFocused();
+    await page.waitForTimeout(800);
+    await expect(rowOf(page, 2)).toBeFocused();
     // nothing more was written: one triage audit entry on it, the admin's
     expect(await db.auditEntry.count({ where: { entityId: ids[0], action: "lifecycle.triage", createdAt: { gte: started } } })).toBe(1);
 
@@ -550,12 +608,15 @@ test.describe("worklist — scale", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await open(page);
     await expect(page.getByRole("navigation", { name: "Queues" }).getByRole("link", { name: /^Triage/ })).toContainText("50+");
-    for (let p = 1; p <= 5; p++) {
+    const per = await perPageOf(page);
+    const pages = Math.ceil(50 / per);
+    for (let p = 1; p <= pages; p++) {
       await page.getByRole("checkbox", { name: "Select all on this page" }).check();
-      if (p < 5) await pager(page).getByRole("button", { name: "Next →" }).click();
+      if (p < pages) await pager(page).getByRole("button", { name: "Next →" }).click();
     }
-    // the last page carries the cap note (the bar replaces the filters, not the pager)
-    await expect(pager(page)).toContainText("41–50 of 50");
+    // the last page carries the cap note and See all (the bar replaces the filters, not the pager)
+    await expect(pager(page)).toContainText(`${(pages - 1) * per + 1}–50 of 50`);
+    await expect(pager(page).getByRole("link", { name: "See all →" })).toHaveAttribute("href", "/inventory?sort=attention");
     await expect(pager(page)).toContainText("Showing the first 50 — clear some to see more");
     const bar = page.getByRole("region", { name: "Bulk actions" });
     await expect(bar).toContainText("50 selected");

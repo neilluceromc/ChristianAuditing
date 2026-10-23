@@ -355,9 +355,13 @@ test.describe("worklist", () => {
     await expect(page.getByRole("table", { name: "Triage", exact: true })).toContainText("BR-LT-0201");
 
     // BR-MN-0910 (case 1's fresh repair, 0 days down) sorts last among the Repairs queue's 8 real DEFECTIVE rows
-    // and never makes Home's own cap — the Worklist's Repairs queue is where it has to show up.
+    // and never makes Home's own cap — the Worklist's Repairs queue is where it has to show up. Its page depends on
+    // how many rows fit the window (6–10), so the queue's search finds it.
     await page.goto("/inventory/work?q=repairs");
     const repairs = page.getByRole("table", { name: "Repairs", exact: true });
+    const search = page.getByRole("searchbox", { name: "Search Repairs" });
+    await waitForHydration(search);
+    await search.fill("BR-MN-0910");
     const row = repairs.getByRole("row", { name: /BR-MN-0910/ });
     await expect(row).toHaveCount(1);
     // Phase 32 (spec §5.2): Hide until tomorrow, now the selected row's details panel button.
@@ -411,7 +415,7 @@ test.describe("boundaries", () => {
     // (a) Phase 30 (spec §4.1 row 1, §7): while the approval is open the header
     // offers no lifecycle action at all — the pending banner explains, and More
     // holds only Print label.
-    await expect(page.getByRole("status").filter({ hasText: "APR-2039" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("status").filter({ hasText: "APR-2039" })).toBeVisible();
     await expect(page.getByRole("button", { name: /^(Return|Change status|Replace)$/ })).toHaveCount(0);
     await expect((await openMore(page)).getByRole("menuitem")).toHaveText(["Print label"]);
 

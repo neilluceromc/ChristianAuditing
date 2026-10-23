@@ -152,7 +152,7 @@ test.describe.serial("transfers", () => {
     // tile of its own there ("Laptop", kind loan) — loans are a status now.
     // Phase 37: the identity band's progress line says it too, so the banner is
     // picked by its role and the band line by its own test id.
-    await expect(page.getByRole("status").filter({ hasText: "No equipment policy applies" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("status").filter({ hasText: "No equipment policy applies" })).toBeVisible();
     await expect(page.getByTestId("identity-band").getByText("No equipment policy applies")).toBeVisible();
     const slotGroup = page.getByRole("group", { name: "Equipment slots" });
     await expect(slotGroup.locator('[data-kind="slot"]')).toHaveCount(0);

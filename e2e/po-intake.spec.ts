@@ -353,12 +353,12 @@ test.describe("8 · a legacy PO with no SI number", () => {
     const approve = page.getByRole("button", { name: "Approve 1", exact: true });
     await expect(approve).toBeDisabled();
     // why it can't be approved is part of the page: a status, never an alert that interrupts on every visit
-    await expect(page.getByRole("status").filter({ hasText: "No SI number yet. Add it before approving." })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("status").filter({ hasText: "No SI number yet. Add it before approving." })).toBeVisible();
     await expect(page.getByRole("alert").filter({ hasText: "No SI number yet" })).toHaveCount(0);
 
     // the PO page says so too — as a status, not an alert that interrupts on every visit
     await page.goto(`/purchases/${legacy.id}`);
-    const note = page.getByRole("status").filter({ hasText: "No SI number yet. Finance can't approve until it's added." });
+    const note = page.getByRole("main").getByRole("status").filter({ hasText: "No SI number yet. Finance can't approve until it's added." });
     await expect(note).toBeVisible();
     await expect(page.getByRole("alert").filter({ hasText: "No SI number yet" })).toHaveCount(0);
     expect(await db.asset.count({ where: { tag: LEGACY_TAG, financeConfirmedAt: { not: null } } })).toBe(0);
