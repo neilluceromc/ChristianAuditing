@@ -124,6 +124,8 @@ import { Prisma } from "@prisma/client";
 import { triageAsset, triageMany, undoTriage, undoTriageMany } from "./actions";
 import { eachAlone } from "./triage";
 import { BULK_ITEM_FAILED } from "@/lib/triage-undo";
+import { CHANGED_TRY_AGAIN } from "@/lib/lifecycle";
+import { changeStatus } from "./actions";
 
 const NEIL = { id: "u-neil", name: "Neil Lucero", role: "it_staff" };
 const IVY = { id: "u-ivy", name: "Ivy Santos", role: "it_staff" };
@@ -429,5 +431,28 @@ describe("a bulk item that throws (Task 2 fix round 1, review M2 and M4)", () =>
     expect(asset("0002").returnedAt).toEqual(BACK); // nothing of it was written
     expect(log).toHaveBeenCalledWith("[worklist bulk] item failed", "0002", expect.any(Prisma.PrismaClientKnownRequestError));
     log.mockRestore();
+  });
+});
+
+describe("a single action that loses a deadlock (fix round 2)", () => {
+  const deadlock = () => new Prisma.PrismaClientKnownRequestError("deadlock", { code: "P2010", clientVersion: "6", meta: { code: "40P01" } });
+
+  it("triageAsset reads as changed since, try again, and writes nothing", async () => {
+    seed("0230");
+    h.throwOn = { id: "0230", err: deadlock() };
+    await expectRefused(() => triageAsset({ assetId: "0230", outcome: "SPARE" }), { kind: "conflict", message: CHANGED_TRY_AGAIN });
+    expect(CHANGED_TRY_AGAIN).toBe("Changed by someone else since — try again");
+  });
+
+  it("a direct status change (P2034) reads the same, never a 500", async () => {
+    seed("0231", { returnedAt: null });
+    h.throwOn = { id: "0231", err: new Prisma.PrismaClientKnownRequestError("conflict", { code: "P2034", clientVersion: "6" }) };
+    await expectRefused(() => changeStatus({ assetId: "0231", to: "DEFECTIVE" }), { kind: "conflict", message: CHANGED_TRY_AGAIN });
+  });
+
+  it("any other error still throws", async () => {
+    seed("0232");
+    h.throwOn = { id: "0232", err: new Error("connection reset") };
+    await expect(triageAsset({ assetId: "0232", outcome: "SPARE" })).rejects.toThrow("connection reset");
   });
 });

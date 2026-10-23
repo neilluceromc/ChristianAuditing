@@ -12,7 +12,7 @@ vi.mock("@/server/audit", () => ({
 }));
 vi.mock("@/server/webhooks/emit", () => ({ emitWebhook: async (_tx: unknown, ...a: unknown[]) => { writes.hooks.push(a); } }));
 
-import { assignCore, loadDirect, replaceCore } from "./direct";
+import { assignCore, loadDirect, lockAssets, replaceCore } from "./direct";
 
 type Row = { id: string; tag: string; cls: "IT" | "PURCHASING"; status: string; assigneeId: string | null; defectiveSince: null; repairEndedAt: null; returnedAt: Date | null; loanDueAt: null; model: string };
 const asset = (id: string, tag: string, status: string, assigneeId: string | null = null, extra: Partial<Row> = {}): Row => ({
@@ -58,11 +58,20 @@ describe("loadDirect (Task 2 fix round 1)", () => {
     expect(await loadDirect(tx, user, "a1")).toEqual({ asset: spare });
     expect(ops).toEqual(['lock:SELECT "id" FROM "Asset" WHERE "id" = $ FOR UPDATE:a1', "read:a1"]);
   });
-  it("a replace locks each item before reading it", async () => {
-    const { tx, ops } = fakeTx([held, spare]);
-    await replaceCore(tx, user, { employeeId: "emp1", oldAssetId: "a0", newAssetId: "a1", outcome: "DEFECTIVE" }, { dryRun: true });
-    expect(ops.filter((o) => o.startsWith("lock:") || o.startsWith("read:")).map((o) => o.replace(/^lock:.*:/, "lock:")))
-      .toEqual(["lock:a0", "read:a0", "lock:a1", "read:a1"]);
+  it("a replace takes both locks up front, in id order, before either read (fix round 2)", async () => {
+    // the old item's id sorts AFTER the new one's: the locks still go a1, then b9
+    const { tx, ops } = fakeTx([asset("b9", "BR-LT-0100", "DEPLOYED", "emp1"), spare]);
+    await replaceCore(tx, user, { employeeId: "emp1", oldAssetId: "b9", newAssetId: "a1", outcome: "DEFECTIVE" }, { dryRun: true });
+    const seq = ops.map((o) => o.replace(/^lock:.*:/, "lock:"));
+    expect(seq.slice(0, 2)).toEqual(["lock:a1", "lock:b9"]);
+    // loadDirect's own locks are re-takes of rows already held (a no-op in Postgres): each still before its read
+    expect(seq.filter((o) => o.startsWith("read:"))).toEqual(["read:b9", "read:a1"]);
+    expect(seq.indexOf("read:b9")).toBeGreaterThan(1);
+  });
+  it("lockAssets: sorted, each id once", async () => {
+    const { tx, ops } = fakeTx([]);
+    await lockAssets(tx, ["c3", "a1", "c3", "b2"]);
+    expect(ops.map((o) => o.replace(/^lock:.*:/, ""))).toEqual(["a1", "b2", "c3"]);
   });
 });
 

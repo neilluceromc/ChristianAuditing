@@ -23,7 +23,7 @@ import {
   RETURN_OUTCOMES, RETURN_OUTCOME_STATUS, loanDueFor, reasonRequiredFor, triageInputSchema,
 } from "@/lib/lifecycle";
 import {
-  assetSelect, assignCore, assignSchema, dateStr, loadDirect, recordDirect, replaceCore, replaceSchema,
+  assetSelect, assignCore, assignSchema, dateStr, deadlockAsChanged, loadDirect, recordDirect, replaceCore, replaceSchema,
 } from "./direct";
 import { revalidateAsset } from "./revalidate";
 import { eachAlone, triageCore, undoTriageCore, type BulkResult, type TriageDone, type TriageUndone } from "./triage";
@@ -45,7 +45,7 @@ export async function changeStatus(input: unknown): Promise<ActionResult<{ tag: 
   const d = parsed.data;
   const now = new Date();
   let out: { tag: string; status: string } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await deadlockAsChanged(() => prisma.$transaction(async (tx) => {
     const loaded = await loadDirect(tx, user, d.assetId);
     if ("failure" in loaded) return loaded.failure;
     const { asset } = loaded;
@@ -59,7 +59,7 @@ export async function changeStatus(input: unknown): Promise<ActionResult<{ tag: 
     if (!r.ok) return conflict(r.error);
     out = { tag: asset.tag, status: d.to };
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAsset(d.assetId, []);
   return ok(out!);
@@ -75,7 +75,7 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
   const parsed = assignSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  const result = await prisma.$transaction((tx) => assignCore(tx, user, d));
+  const result = await deadlockAsChanged(() => prisma.$transaction((tx) => assignCore(tx, user, d)));
   if (!result.ok) return result;
   revalidateAsset(d.assetId, [d.employeeId]);
   await rememberPicks(user.id, { employee: d.employeeId });
@@ -98,7 +98,7 @@ export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: st
   const due = loanDueFor("TEMPORARY", d.loanDueAt, now);
   if (!due.ok) return validationError({ loanDueAt: due.error });
   let out: { tag: string; loanDueAt: string } | null = null;
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await deadlockAsChanged(() => prisma.$transaction(async (tx) => {
     const asset = await tx.asset.findUnique({ where: { id: d.assetId }, select: assetSelect });
     if (!asset) return conflict("That asset no longer exists.");
     if (!isDirectLifecycle(user.role, asset.cls)) return forbidden();
@@ -110,7 +110,7 @@ export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: st
     });
     out = { tag: asset.tag, loanDueAt: d.loanDueAt };
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAsset(d.assetId, []);
   revalidatePath("/inventory/work");
@@ -134,7 +134,7 @@ export async function returnAsset(input: unknown): Promise<ActionResult<{ tag: s
   const now = new Date();
   let out: { tag: string; status: string } | null = null;
   const holderId: { v: string | null } = { v: null };
-  const failure = await prisma.$transaction(async (tx) => {
+  const failure = await deadlockAsChanged(() => prisma.$transaction(async (tx) => {
     const loaded = await loadDirect(tx, user, d.assetId);
     if ("failure" in loaded) return loaded.failure;
     const { asset } = loaded;
@@ -149,7 +149,7 @@ export async function returnAsset(input: unknown): Promise<ActionResult<{ tag: s
     if (!r.ok) return conflict(r.error);
     out = { tag: asset.tag, status };
     return null;
-  });
+  }));
   if (failure) return failure;
   revalidateAsset(d.assetId, [holderId.v]);
   return ok(out!);
@@ -166,7 +166,7 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
   const parsed = replaceSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  const result = await prisma.$transaction((tx) => replaceCore(tx, user, d));
+  const result = await deadlockAsChanged(() => prisma.$transaction((tx) => replaceCore(tx, user, d)));
   if (!result.ok) return result;
   revalidateAsset(d.oldAssetId, [d.employeeId]);
   revalidatePath(`/inventory/${d.newAssetId}`);

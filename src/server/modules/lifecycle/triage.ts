@@ -8,7 +8,7 @@ import { openApprovalForAsset } from "@/server/modules/approvals/create";
 import { conflict, forbidden, ok, validationError, type ActionResult } from "@/server/action-result";
 import type { AuditDiff } from "@/lib/audit-diff";
 import { isDirectLifecycle } from "@/lib/asset-class";
-import { TRIAGE_LABEL, triageNeedsReason, type triageInputSchema } from "@/lib/lifecycle";
+import { CHANGED_TRY_AGAIN, TRIAGE_LABEL, triageNeedsReason, type triageInputSchema } from "@/lib/lifecycle";
 import {
   BULK_ITEM_FAILED, TRIAGE_ALREADY_UNDONE, TRIAGE_CHANGED_SINCE, TRIAGE_UNDONE, TRIAGE_UNDO_FINAL, TRIAGE_UNDO_NOT_YOURS,
   blocksTriageUndo, isUndoableTriage, notesBefore, triageOutcomeOf, triageRestore, triageVersion, undoWindowOpen, undoneTarget,
@@ -99,6 +99,8 @@ export async function triageCore(user: SessionUser, d: TriageInput, now: Date = 
     });
   } catch (err) {
     if (err instanceof DirectRefusal) return conflict(err.message);
+    // fix round 2: met another change head-on — rolled back whole, the claim with it
+    if (isDeadlock(err)) return conflict(CHANGED_TRY_AGAIN);
     throw err;
   }
   if (failure) return failure;

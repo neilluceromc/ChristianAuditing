@@ -11,7 +11,8 @@ import { ASSET_STATUSES } from "@/lib/inventory-list";
 import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, statusLabel,
 } from "@/lib/asset-class";
-import { RETURN_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan } from "@/lib/lifecycle";
+import { CHANGED_TRY_AGAIN, RETURN_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan } from "@/lib/lifecycle";
+import { isDeadlock } from "@/server/prisma-errors";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange, type Prepared } from "./apply";
 
 /*
@@ -33,9 +34,32 @@ export const assetSelect = {
  * `SELECT … FOR UPDATE` on the asset's row, held until the transaction ends (no row: nothing locked, the read refuses).
  * Worklist H4 (Task 2 fix round 1): every reader that goes on to write the asset takes it first, so an undo running at
  * the same moment either finishes before the read or waits behind the write — never reads stale between the two.
+ * Re-entrant: a row this transaction already holds is a no-op in Postgres, so `loadDirect` may re-take a lock that
+ * `lockAssets` took up front.
  */
 export async function lockAsset(tx: Tx, id: string): Promise<void> {
   await tx.$queryRaw`SELECT "id" FROM "Asset" WHERE "id" = ${id} FOR UPDATE`;
+}
+
+/**
+ * Fix round 2: an action that writes more than one asset takes every lock up front, in id order, before any read —
+ * two such actions over the same pair then queue instead of deadlocking.
+ */
+export async function lockAssets(tx: Tx, ids: readonly string[]): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) await lockAsset(tx, id);
+}
+
+/**
+ * Fix round 2: a single action whose transaction lost a deadlock (P2034, or 40P01 from the row lock) reads as
+ * "Changed by someone else since — try again" rather than a 500. The rollback was whole, so nothing was written.
+ */
+export async function deadlockAsChanged<T>(run: () => Promise<T>): Promise<T | ActionResult<never>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isDeadlock(err)) return conflict(CHANGED_TRY_AGAIN);
+    throw err;
+  }
 }
 
 /** Lock, load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
@@ -181,6 +205,8 @@ async function planReplace(tx: Tx, user: SessionUser, d: ReplaceInput, opts: Lif
   if (reasonRequiredFor(d.outcome) && cleanReason(d.reason).length < 3) {
     return { failure: validationError({ reason: "Missing needs a reason (at least 3 characters) — it opens an investigation." }) };
   }
+  // both rows, in id order, before either read (loadDirect's own locks are then no-ops)
+  await lockAssets(tx, [d.oldAssetId, d.newAssetId]);
   const oldL = await loadDirect(tx, user, d.oldAssetId);
   if (oldL.failure) return { failure: oldL.failure };
   const newL = await loadDirect(tx, user, d.newAssetId);

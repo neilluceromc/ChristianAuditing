@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   ops: [] as string[],
   asset: null as Record<string, unknown> | null,
+  lockErr: null as unknown,
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
@@ -18,6 +19,7 @@ vi.mock("@/server/modules/approvals/create", () => ({ openApprovalForAsset: asyn
 vi.mock("@/server/db/client", () => {
   const client = {
     $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (h.lockErr) throw h.lockErr;
       h.ops.push(`lock:${strings.join("$").replace(/\s+/g, " ").trim()}:${values.join(",")}`);
       return [];
     },
@@ -31,10 +33,13 @@ vi.mock("@/server/db/client", () => {
   return { prisma: { ...client, $transaction: async (fn: (tx: typeof client) => Promise<unknown>) => fn(client) } };
 });
 
+import { Prisma } from "@prisma/client";
 import { reserveAsset } from "./actions";
+import { CHANGED_TRY_AGAIN } from "@/lib/lifecycle";
 
 beforeEach(() => {
   h.ops = [];
+  h.lockErr = null;
   h.asset = { id: "a1", tag: "BR-LT-0230", cls: "IT", status: "SPARE", returnedAt: null };
 });
 
@@ -50,5 +55,14 @@ describe("reserveAsset", () => {
     expect(await reserveAsset({ assetId: "a1", employeeId: "emp1", expiresAt: "2099-01-01" }))
       .toMatchObject({ ok: false, kind: "conflict", message: "BR-LT-0230 is not a spare." });
     expect(h.ops).toEqual(['lock:SELECT "id" FROM "Asset" WHERE "id" = $ FOR UPDATE:a1', "read:a1"]);
+  });
+});
+
+describe("reserveAsset deadlock (fix round 2)", () => {
+  it("a lock that loses a deadlock reads as changed since, try again", async () => {
+    h.lockErr = new Prisma.PrismaClientKnownRequestError("deadlock", { code: "P2010", clientVersion: "6", meta: { code: "40P01" } });
+    expect(await reserveAsset({ assetId: "a1", employeeId: "emp1", expiresAt: "2099-01-01" }))
+      .toEqual({ ok: false, kind: "conflict", message: CHANGED_TRY_AGAIN });
+    expect(h.ops).toEqual([]);
   });
 });
