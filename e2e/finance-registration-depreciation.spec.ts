@@ -637,7 +637,7 @@ test.describe("Phase 35 — registration review, the Finance register, depreciat
     }
   });
 
-  test("14. a saved column preference without Registration still shows it under the reg filter (Show them)", async ({ page }) => {
+  test("14. a saved column preference without Registration still shows it under the reg filter (the Sent back view)", async ({ page }) => {
     const tag = "BR-HS-0502";
     const before = await snap(tag);
     const user = await db.user.findUniqueOrThrow({ where: { email: IT } });

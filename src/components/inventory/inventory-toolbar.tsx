@@ -4,7 +4,6 @@ import { useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { AssetClass } from "@prisma/client";
-import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { LIST } from "@/components/patterns/list-styles";
 import { Menu, type MenuItem } from "@/components/ui/menu";
@@ -23,25 +22,7 @@ import { SearchBox } from "@/components/patterns/search-box";
 import { inventorySearchSubmit } from "@/lib/inventory-search-submit";
 import { findExactTag } from "@/server/modules/inventory/scan-actions";
 import { MoreFilters } from "./more-filters";
-
-/** Phase 30 (spec §6.2): the view switches are pill toggles — links, so e2e and a middle-click reach them. */
-function PillLink({ href, on, children }: { href: string; on: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      aria-current={on ? "page" : undefined}
-      className={cn(
-        "inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors duration-(--dur-1)",
-        on
-          ? "border-accent-soft-border bg-accent-soft text-accent-soft-text"
-          : "border-border-strong bg-surface text-fg-secondary hover:bg-surface-subtle",
-      )}
-    >
-      {on && <span aria-hidden>✓</span>}
-      {children}
-    </Link>
-  );
-}
+import { PillLink } from "./pill-link";
 
 /** This view's URL for a list state, a year and a class — the one builder every control below goes through. */
 function useInventoryHref(cls: AssetClass, defaultCls: AssetClass, purchaseYear: PurchaseYearValue | null) {
@@ -51,8 +32,9 @@ function useInventoryHref(cls: AssetClass, defaultCls: AssetClass, purchaseYear:
 }
 
 /**
- * The view switches: the class pills (past one visible class) and the Repairs saved-view pill (IT only). Phase 45
- * (spec §2.2): they keep their own row, above the count tiles; the filter row below them is `InventoryToolbar`.
+ * The view switches: the class pills (past one visible class), the Repairs saved-view pill (IT only) and, after them,
+ * `children` — the page's "Sent back · N" chips (2026-10-23). Phase 45 (spec §2.2): they keep their own row, above the
+ * count tiles; the filter row below them is `InventoryToolbar`.
  */
 export function InventoryViewPills({
   state,
@@ -60,6 +42,7 @@ export function InventoryViewPills({
   cls,
   defaultCls,
   classes,
+  children,
 }: {
   state: ListState;
   /** the currently active `?purchaseYear=`, or null */
@@ -70,6 +53,8 @@ export function InventoryViewPills({
   defaultCls: AssetClass;
   /** the classes this role may switch between; the switch renders only past one */
   classes: readonly AssetClass[];
+  /** the Sent back chips (null when there are none) */
+  children?: React.ReactNode;
 }) {
   const pathname = usePathname();
   const hrefFor = useInventoryHref(cls, defaultCls, purchaseYear);
@@ -82,7 +67,7 @@ export function InventoryViewPills({
   const stateFor = (c: AssetClass): ListState => (c === cls ? state : { ...state, filters: {}, page: 1 });
   const repairsOn = isRepairView(state);
 
-  if (classes.length <= 1 && cls !== "IT") return null;
+  if (classes.length <= 1 && cls !== "IT" && !children) return null;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {classes.length > 1 && (
@@ -106,6 +91,7 @@ export function InventoryViewPills({
           Repairs
         </PillLink>
       )}
+      {children}
     </div>
   );
 }

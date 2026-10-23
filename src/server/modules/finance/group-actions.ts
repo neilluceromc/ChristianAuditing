@@ -15,6 +15,7 @@ import { lockPo } from "@/server/modules/purchases/po-lock";
 import { emitIfPoFullyApproved } from "@/server/modules/purchases/po-complete";
 import { approveOne, approveRefusal, returnOne, returnRefusal, type ReturnTeam } from "./review-writes";
 import { GROUP_ASSET_SELECT, lockGroupAssets, revalidateGroup, StaleGroupError } from "./group-shared";
+import { correctionTeams, FINANCE_WORDS, notifyAssetsByTeam } from "./review-notify";
 
 /*
  * Task 6 (spec §5): Finance reviews a registration group in one go. Approve all approves every asset of the group
@@ -124,8 +125,16 @@ export async function approveGroup(input: unknown): Promise<ActionResult<Out>> {
           actorId: user.id, actorRole: user.role, entityType: "purchase-record", entityId: recordId,
         });
       }
-      // The PO fully registered and now fully approved: its approval webhooks, once.
-      if (poId) await emitIfPoFullyApproved(tx, poId);
+      // 2026-10-23: each corrected asset approved tells the team that corrected it — past 3 to one team, once for
+      // the team. Written after every approval landed, inside the transaction, so a miss above leaves no notification.
+      const fixedBy = await correctionTeams(tx, toApprove);
+      await notifyAssetsByTeam(
+        tx,
+        toApprove.filter((a) => fixedBy.has(a.id)).map((a) => ({ team: fixedBy.get(a.id)!, id: a.id, tag: a.tag })),
+        FINANCE_WORDS.accepted, user, { group: { entityType: "purchase-record", entityId: recordId } },
+      );
+      // The PO fully registered and now fully approved: its approval webhooks (and Purchasing's bell), once.
+      if (poId) await emitIfPoFullyApproved(tx, poId, user);
       out = { approved: toApprove.length, heldBack: holdBack.length, refNo };
     });
   } catch (err) {

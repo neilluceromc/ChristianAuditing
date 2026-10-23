@@ -59,6 +59,8 @@ export function arrivalText(before: number, after: number): string | null {
 /** One view of a notification, as the bell and the page draw it. */
 export interface NotificationView {
   id: string;
+  /** the team it rang (an admin's bell shows it on each item) */
+  team: Team;
   kind: NotificationKind;
   title: string;
   body: string | null;

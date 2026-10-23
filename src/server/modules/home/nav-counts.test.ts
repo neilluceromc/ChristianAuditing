@@ -67,7 +67,7 @@ import { financeListWhere } from "@/server/modules/finance/queries";
 import { REVIEW_GROUP_WHERE } from "@/server/modules/finance/groups";
 import { stocktakesOverdueWhere } from "@/server/modules/stock/queries";
 import { resubmitAssetToFinance } from "@/server/modules/inventory/actions";
-import { getApprovalsBadge, NAV_COUNT_HREF, NAV_COUNT_UNFILTERED, readNavCounts } from "./nav-counts";
+import { getApprovalsBadge, NAV_COUNT_HREF, NAV_COUNT_UNFILTERED, readNavCounts, readSentBackChips } from "./nav-counts";
 
 const itStaff = { id: "u1", role: "it_staff" as const };
 const viewer = { id: "u2", role: "viewer" as const };
@@ -415,6 +415,37 @@ describe("readNavCounts: the Sent back and To register counts (Task 7, spec §7)
     expect(await counts()).toEqual({ itSentBack: 1, assetsSentBackPurchasing: 0 });
     // the asset on the sent-back PO comes back with the PO, not on its own
     expect((await resubmitAssetToFinance({ id: "a6" })).ok).toBe(false);
+  });
+
+  // 2026-10-23: the Inventory chip that replaced the red banner counts by the team it went back to, like the sidebar.
+  describe("readSentBackChips", () => {
+    it("IT sees what went back to IT (both classes); Purchasing what went back to Purchasing, never IT's", async () => {
+      expect(await readSentBackChips(itStaff)).toEqual([
+        { team: "IT", count: 2, href: "/inventory?reg=needs-correction&to=IT" }, // a1, a5 (a Purchasing chair)
+      ]);
+      expect(await readSentBackChips(purchasing)).toEqual([
+        { team: "PURCHASING", count: 2, href: "/inventory?reg=needs-correction&to=PURCHASING" }, // a2 (an IT laptop), a4
+      ]);
+    });
+
+    it("an admin sees each team's; Finance and a viewer see none and read nothing", async () => {
+      expect(await readSentBackChips({ id: "a", role: "admin" })).toEqual([
+        { team: "IT", count: 2, href: "/inventory?reg=needs-correction&to=IT" },
+        { team: "PURCHASING", count: 2, href: "/inventory?reg=needs-correction&to=PURCHASING" },
+      ]);
+      h.asset.mockClear();
+      expect(await readSentBackChips({ id: "f", role: "finance_staff" })).toEqual([]);
+      expect(await readSentBackChips(viewer)).toEqual([]);
+      expect(h.asset).not.toHaveBeenCalled();
+    });
+
+    it("hidden at 0: a team with nothing sent back has no chip", async () => {
+      for (const id of ["a2", "a4"]) assets.find((a) => a.id === id)!.financeReturnedAt = null;
+      expect(await readSentBackChips(purchasing)).toEqual([]);
+      expect(await readSentBackChips({ id: "a", role: "admin" })).toEqual([
+        { team: "IT", count: 2, href: "/inventory?reg=needs-correction&to=IT" },
+      ]);
+    });
   });
 
   it("poToRegister counts READY or WITH_IT POs, not completed, with a line Purchasing can register and units left", async () => {
