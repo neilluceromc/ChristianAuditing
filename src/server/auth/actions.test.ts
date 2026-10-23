@@ -329,6 +329,15 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
     expect(h.userUpdate.mock.invocationCallOrder[0]).toBeLessThan(h.signIn.mock.invocationCallOrder[0]);
   });
 
+  // Task 5 (found by e2e): Home would render the first-sign-in page under the "/" address; go there by name instead.
+  it("success for someone who owes a password goes straight to /welcome/password, even with a next", async () => {
+    h.userFindUnique.mockResolvedValue(account({ mustChangePassword: true }));
+    await expect(login("nina@thebackroomop.com", "correct horse battery", "/finance/assets")).rejects.toThrow(
+      /^REDIRECT:\/welcome\/password$/,
+    );
+    expect(h.signIn).toHaveBeenCalledTimes(1);
+  });
+
   it("success with no next goes Home", async () => {
     h.userFindUnique.mockResolvedValue(account());
     await expect(login("nina@thebackroomop.com", "correct horse battery")).rejects.toThrow(/^REDIRECT:\/$/);

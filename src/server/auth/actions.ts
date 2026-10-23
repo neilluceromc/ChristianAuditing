@@ -13,7 +13,7 @@ import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
 import { SIGN_IN_COPY } from "@/lib/sign-in-copy";
 import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
-import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
+import { PASSWORD_PAGE, ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 import { saveUiPref } from "@/server/ui-prefs";
 import { isUniqueViolation } from "@/server/prisma-errors";
 
@@ -52,7 +52,7 @@ export async function signInWithCredentials(
 
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, passwordHash: true, disabled: true, approvalState: true },
+    select: { id: true, passwordHash: true, disabled: true, approvalState: true, mustChangePassword: true },
   });
   // One compare, against the dummy hash for an unknown email. A wrong password: the reserved attempt stays as the failure.
   const matches = await passwordMatches(password, user?.passwordHash);
@@ -72,6 +72,9 @@ export async function signInWithCredentials(
     if (err instanceof AuthError) return { error: SIGN_IN_COPY.wrong };
     throw err;
   }
+  // Users & access (Task 5, found by e2e): someone who owes a password goes to the first-sign-in page by its own
+  // address. Sent to Home, the guards render that page with "/" left in the address bar.
+  if (user.mustChangePassword) redirect(PASSWORD_PAGE);
   // Follow-up spec §7.1: every sign-in lands on Home unless a safe `next` link brought the person here. The role's
   // old landing (ROLE_LANDING) now lives only in the page guards.
   redirect(safeNext(formData.get("next")) ?? "/");
