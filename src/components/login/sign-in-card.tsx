@@ -10,6 +10,7 @@ import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { PASSWORD_RULE_LABELS, passwordChecks } from "@/lib/password-rules";
 import { signInWithCredentials, signUp, type AuthFormState } from "@/server/auth/actions";
 import { emailProblem, firstWord, segments, sequenceEmail, stepForField, type Step } from "./login-steps";
 
@@ -207,9 +208,14 @@ export function SignInCard({
       go("signup-password");
       return;
     }
-    if (newPassword.length < 10) {
+    // Users & access (spec §4.3): the shared password rules; the server checks them again.
+    const checks = passwordChecks(newPassword, {});
+    if (!checks.long) {
       e.preventDefault();
       fail("newPassword", "Use at least 10 characters.");
+    } else if (!checks.mixed) {
+      e.preventDefault();
+      fail("newPassword", "Use letters and at least one number.");
     }
   }
 
@@ -331,6 +337,8 @@ export function SignInCard({
     );
   };
 
+  const signupChecks = passwordChecks(newPassword, {});
+
   return (
     <main
       className="lw-card"
@@ -423,16 +431,18 @@ export function SignInCard({
               </div>
               <div hidden={step !== "signup-password"} className="lw-stack">
                 {passwordField("newPassword")}
-                <div className={cn("lw-meter", newPassword.length >= 10 && "lw-ok")} aria-hidden="true">
+                <div className={cn("lw-meter", signupChecks.long && signupChecks.mixed && "lw-ok")} aria-hidden="true">
                   <span style={{ width: `${Math.min(100, newPassword.length * 6.25)}%` }} />
                 </div>
                 <ul className="lw-rules">
-                  <li className={newPassword.length >= 10 ? "lw-ok" : undefined}>
-                    <span className="lw-rule-mark" aria-hidden="true">
-                      {newPassword.length >= 10 ? "✓" : "○"}
-                    </span>
-                    At least 10 characters
-                  </li>
+                  {(["long", "mixed"] as const).map((rule) => (
+                    <li key={rule} className={signupChecks[rule] ? "lw-ok" : undefined}>
+                      <span className="lw-rule-mark" aria-hidden="true">
+                        {signupChecks[rule] ? "✓" : "○"}
+                      </span>
+                      {PASSWORD_RULE_LABELS[rule]}
+                    </li>
+                  ))}
                 </ul>
               </div>
               {step === "signup-name" ? (

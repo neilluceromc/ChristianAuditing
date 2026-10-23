@@ -648,3 +648,22 @@ describe("Phase 41 Settings › Cris (spec §2, §9: admin and it_staff only)", 
     expect(pathAllowedForRole("/settings", "it_staff")).toBe(false);
   });
 });
+
+describe("Users & access: Account settings and the first-sign-in page (spec §4.3, §4.5: every role)", () => {
+  const ROLES = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"] as const;
+  it("every role reaches /settings/account", () => {
+    for (const r of ROLES) expect(pathAllowedForRole("/settings/account", r)).toBe(true);
+  });
+  it("every signed-in role reaches /welcome/password", () => {
+    for (const r of ROLES) expect(pathAllowedForRole("/welcome/password", r)).toBe(true);
+  });
+  it("matches the paths exactly, not a lookalike or a wider prefix", () => {
+    expect(pathAllowedForRole("/settings/accounts", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/welcome", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/welcome/passwordx", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/welcome/other", "viewer")).toBe(false);
+  });
+  it("Settings › Cris keeps its own narrower rule", () => {
+    expect(pathAllowedForRole("/settings/cris", "viewer")).toBe(false);
+  });
+});

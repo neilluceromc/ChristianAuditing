@@ -56,11 +56,12 @@ import bcrypt from "bcryptjs";
 import { attempts, resetAttempts } from "./sign-in-attempts.fake";
 import { quickSignIn, signInWithCredentials, signOutAction, signUp, switchWorkspace } from "./actions";
 
+// Users & access (spec §4.3): a sign-up password needs letters and at least one number.
 function form(): FormData {
   const f = new FormData();
   f.set("name", "Nina Reyes");
   f.set("email", "nina@thebackroomop.com");
-  f.set("password", "correct horse battery");
+  f.set("password", "correct horse battery 9");
   return f;
 }
 
@@ -116,7 +117,7 @@ describe("signUp when SIGNUP_REQUIRES_APPROVAL is unset or not 1", () => {
     expect(h.auditCreate.mock.calls[0][0].data.diff).toEqual({ role: { from: null, to: "viewer" } });
     expect(h.signIn).toHaveBeenCalledWith("credentials", {
       email: "nina@thebackroomop.com",
-      password: "correct horse battery",
+      password: "correct horse battery 9",
       redirect: false,
     });
     expect(r).toEqual({ created: true });

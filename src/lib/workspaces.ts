@@ -555,7 +555,9 @@ export function resolveWorkspace(role: Role, cookie: string | undefined): Worksp
  */
 // Paths intentionally NOT workspace-gated — reachable by any authenticated
 // user. Everything else MUST match a PATH_RULE or it is denied (default-deny).
-const UNGATED: RegExp[] = [/^\/$/, /^\/dev(\/|$)/];
+// Users & access (spec §4.3): "Choose your own password" is open to every signed-in role; its page admits only
+// someone who owes a new password and sends anyone else Home. Exact path, so nothing else under /welcome opens.
+const UNGATED: RegExp[] = [/^\/$/, /^\/dev(\/|$)/, /^\/welcome\/password$/];
 
 const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[] }> = [
   { test: /^\/admin\/(users|webhooks|flags)(\/|$)/, workspaces: ["admin"] },
@@ -656,6 +658,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Phase 41 (spec §2, §9): Settings › Cris is for the two roles that have Cris. `roles` keeps viewer out of the
   // IT workspace it otherwise shares with it_staff; the page's own requireRole says the same.
   { test: /^\/settings\/cris(\/|$)/, workspaces: ["it", "admin"], roles: ["admin", "it_staff"] },
+  // Users & access (spec §4.5): Account settings is every role's own page. All four workspaces and no `roles` key,
+  // so every role passes (viewer through the IT workspace it shares).
+  { test: /^\/settings\/account(\/|$)/, workspaces: ["it", "purchasing", "finance", "admin"] },
   // Task 7 (purchase-orders spec §7): the bell's full page, for every team and for admins (any team's); a viewer
   // has no team, so no notifications and no bell.
   {

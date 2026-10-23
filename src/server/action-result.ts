@@ -16,15 +16,33 @@ export type ActionResult<T = null> =
       fieldErrors?: Record<string, string>;
       /** kind === "rate_limited": seconds until the window frees up */
       retryAfterSec?: number;
+      /** kind === "forbidden": why, when it isn't plain permission (Users & access spec §4.3) */
+      reason?: ForbiddenReason;
     };
 
 export const ok = <T,>(data: T): ActionResult<T> => ({ ok: true, data });
 
-export const forbidden = (): ActionResult<never> => ({
-  ok: false,
-  kind: "forbidden",
-  message: "You don't have permission to do that.",
-});
+/** Users & access (spec §4.3): the person signed in with a temporary password and hasn't chosen their own yet. */
+export type ForbiddenReason = "password_owed";
+
+export const PASSWORD_OWED_COPY = "Choose your own password first";
+
+/**
+ * The request's refusal reason, if the guards recorded one. Every action refuses with a bare `forbidden()` after
+ * `actionUser()`/`actionRole()` returns null; the guards install this probe (src/server/auth/refusal.ts) so those
+ * ~200 call sites say "Choose your own password first" when that was the reason, without each one changing. The
+ * default (no guards loaded, or outside a request) is no reason.
+ */
+let forbiddenReasonProbe: () => ForbiddenReason | null = () => null;
+
+export function setForbiddenReasonProbe(probe: () => ForbiddenReason | null): void {
+  forbiddenReasonProbe = probe;
+}
+
+export const forbidden = (reason: ForbiddenReason | null = forbiddenReasonProbe()): ActionResult<never> =>
+  reason === "password_owed"
+    ? { ok: false, kind: "forbidden", reason, message: PASSWORD_OWED_COPY }
+    : { ok: false, kind: "forbidden", message: "You don't have permission to do that." };
 
 /**
  * `message` is an optional override (R-2, round 2): the default sentence

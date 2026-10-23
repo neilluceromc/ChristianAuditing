@@ -25,7 +25,7 @@ export interface ShellUser {
 /**
  * Spec §3: below `lg` (the sidebar hidden) the top bar opens this drawer. It
  * carries everything the sidebar does — the workspace switch at the top, the
- * nav, and the account block (initials, name, role, Sign out) at the bottom.
+ * nav, and the account block (Account settings; initials, name, role, Sign out) at the bottom.
  */
 export function MobileNav({
   sections,
@@ -74,6 +74,14 @@ export function MobileNav({
                   Cris settings
                 </Link>
               )}
+              {/* Users & access (spec §4.5): Account settings, for every role, before Sign out (the account menu's too). */}
+              <Link
+                href="/settings/account"
+                onClick={() => setOpen(false)}
+                className="rounded-(--radius-btn) px-2 py-1.5 text-xs text-fg-secondary hover:bg-surface-subtle"
+              >
+                Account settings
+              </Link>
               <div className="flex items-center gap-2.5">
                 <Avatar name={user.name} size="lg" />
                 <div className="min-w-0 flex-1">

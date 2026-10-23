@@ -9,7 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   session: null as { user?: { id?: string; role?: string; sessionVersion?: number } } | null,
-  user: null as { id: string; role: string; disabled: boolean; sessionVersion?: number; approvalState?: string } | null,
+  user: null as {
+    id: string; role: string; disabled: boolean; sessionVersion?: number; approvalState?: string; mustChangePassword?: boolean;
+  } | null,
   auth: vi.fn(),
   findUnique: vi.fn(),
   /** Every cache() store, so a test can start a fresh "request". */
@@ -34,9 +36,16 @@ vi.mock("next/navigation", () => ({
   },
 }));
 vi.mock("./index", () => ({ auth: h.auth }));
+// Users & access: the request store a server action runs in (Next's work-unit storage), as a real AsyncLocalStorage.
+vi.mock("next/dist/server/app-render/work-unit-async-storage.external", async () => {
+  const { AsyncLocalStorage } = await import("node:async_hooks");
+  return { workUnitAsyncStorage: new AsyncLocalStorage<object>() };
+});
 vi.mock("@/server/db/client", () => ({ prisma: { user: { findUnique: h.findUnique } } }));
 
-import { actionRole, actionUser, requireRole, requireUser } from "./guards";
+import { workUnitAsyncStorage } from "next/dist/server/app-render/work-unit-async-storage.external";
+import { forbidden, PASSWORD_OWED_COPY } from "@/server/action-result";
+import { actionRole, actionUser, passwordOwedUser, requirePasswordOwedUser, requireRole, requireUser } from "./guards";
 
 const newRequest = () => h.stores.forEach((s) => s.clear());
 const ACTIVE = { id: "u1", role: "it_staff", disabled: false, sessionVersion: 0, approvalState: "APPROVED" };
@@ -164,5 +173,80 @@ describe("session version and approval (Users & access spec §4.2, Review Focus 
     h.user = { ...ACTIVE, approvalState: "DECLINED" };
     await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
     expect(await actionUser()).toBeNull();
+  });
+});
+
+describe("a password still owed (Users & access spec §4.3, Review Focus #2)", () => {
+  /** One server-action request: Next runs the action inside its work-unit store. */
+  const inRequest = <T,>(fn: () => Promise<T>) => (workUnitAsyncStorage as unknown as { run: (s: object, f: () => Promise<T>) => Promise<T> }).run({}, fn);
+
+  beforeEach(() => {
+    h.user = { ...ACTIVE, mustChangePassword: true };
+  });
+
+  it("requireUser and requireRole send every page to /welcome/password", async () => {
+    await expect(requireUser()).rejects.toThrow("REDIRECT /welcome/password");
+    newRequest();
+    await expect(requireRole("it_staff")).rejects.toThrow("REDIRECT /welcome/password");
+  });
+
+  it("a stale or disabled account that also owes a password is logged out, not sent to the password page", async () => {
+    h.user = { ...ACTIVE, mustChangePassword: true, sessionVersion: 4 };
+    await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    newRequest();
+    h.user = { ...ACTIVE, mustChangePassword: true, disabled: true };
+    await expect(requirePasswordOwedUser()).rejects.toThrow("REDIRECT /logout");
+  });
+
+  it("requirePasswordOwedUser lets /welcome/password render, and sends someone who owes nothing Home", async () => {
+    expect(await requirePasswordOwedUser()).toEqual(h.user);
+    newRequest();
+    h.user = { ...ACTIVE };
+    await expect(requirePasswordOwedUser()).rejects.toThrow("REDIRECT /");
+    newRequest();
+    h.session = null;
+    await expect(requirePasswordOwedUser()).rejects.toThrow("REDIRECT /login");
+  });
+
+  it("actionUser and actionRole refuse, and the action's own bare forbidden() says \"Choose your own password first\"", async () => {
+    await inRequest(async () => {
+      expect(await actionUser()).toBeNull();
+      expect(forbidden()).toMatchObject({ kind: "forbidden", reason: "password_owed", message: PASSWORD_OWED_COPY });
+    });
+    await inRequest(async () => {
+      expect(await actionRole("it_staff")).toBeNull();
+      expect(forbidden()).toMatchObject({ message: PASSWORD_OWED_COPY });
+    });
+  });
+
+  it("the reason belongs to its own request: another request's forbidden() keeps the default sentence", async () => {
+    await inRequest(async () => {
+      await actionUser();
+    });
+    h.user = { ...ACTIVE };
+    await inRequest(async () => {
+      expect(await actionRole("admin")).toBeNull(); // refused for the role, not for a password
+      expect(forbidden()).toEqual({ ok: false, kind: "forbidden", message: "You don't have permission to do that." });
+    });
+    expect(forbidden()).toMatchObject({ message: "You don't have permission to do that." }); // outside any request
+  });
+
+  it("passwordOwedUser returns the user only while the flag is set, and never a stale or disabled one", async () => {
+    expect(await passwordOwedUser()).toEqual(h.user);
+    h.user = { ...ACTIVE };
+    expect(await passwordOwedUser()).toBeNull();
+    h.user = { ...ACTIVE, mustChangePassword: true, disabled: true };
+    expect(await passwordOwedUser()).toBeNull();
+    h.user = { ...ACTIVE, mustChangePassword: true, sessionVersion: 9 };
+    expect(await passwordOwedUser()).toBeNull();
+    h.user = { ...ACTIVE, mustChangePassword: true };
+    h.session = null;
+    expect(await passwordOwedUser()).toBeNull();
+  });
+
+  it("an account that owes nothing passes actionUser as before", async () => {
+    h.user = { ...ACTIVE, mustChangePassword: false };
+    expect(await actionUser()).toEqual(h.user);
+    expect(await requireUser()).toEqual(h.user);
   });
 });
