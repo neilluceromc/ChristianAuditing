@@ -2,6 +2,7 @@ import type { Prisma, Role } from "@prisma/client";
 import { emitWebhook } from "@/server/webhooks/emit";
 import { lineProgress } from "@/lib/po-flow";
 import { notify } from "@/server/notifications/notify";
+import { FINANCE_WORDS } from "@/server/modules/finance/review-notify";
 
 /**
  * Spec §3 / Global Constraints (controller ruling R5): a purchase order is fully approved when every line is registered
@@ -41,7 +42,7 @@ export async function emitIfPoFullyApproved(
   await emitWebhook(tx, "purchase_order.approved", { purchaseOrderId: po.id, refNo: po.refNo });
   await emitWebhook(tx, "purchase_request.completed", { purchaseRequestId: po.id, refNo: po.refNo });
   await notify(tx, {
-    team: "PURCHASING", kind: "CHANGED", title: `${po.refNo}: Finance approved all its assets`, href: `/purchases/${po.id}`,
+    team: "PURCHASING", kind: "CHANGED", title: FINANCE_WORDS.poApproved(po.refNo), href: `/purchases/${po.id}`,
     actorId: actor.id, actorRole: actor.role, entityType: "purchase-order", entityId: po.id,
   });
   return true;

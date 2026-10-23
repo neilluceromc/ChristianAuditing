@@ -26,6 +26,7 @@ import { storePoFiles, type PoFile, type StoredFile } from "./po-files";
 import { moneyForAsset } from "@/lib/po-money";
 import { fieldLabels, shouldReopen } from "@/lib/registration";
 import { returnOne, undoOne } from "@/server/modules/finance/review-writes";
+import { FINANCE_WORDS } from "@/server/modules/finance/review-notify";
 import { emitIfPoFullyApproved } from "./po-complete";
 import { readPoSendBackUndo } from "./po-undo";
 import {
@@ -1021,7 +1022,7 @@ async function undoSendBackImpl(input: unknown): Promise<ActionResult<{ refNo: s
     await tx.noteEntry.create({ data: { orderId: id, authorId: user.id, kind: "COMMENT", text: "Undid the send-back to Purchasing." } });
     // 2026-10-23: Purchasing heard of the send-back, so it hears it was taken back (the earlier one stays).
     await notify(tx, {
-      team: "PURCHASING", kind: "CHANGED", title: `${po.refNo}: the send-back was taken back`, href: poHref(id),
+      team: "PURCHASING", kind: "CHANGED", title: FINANCE_WORDS.poSendBackUndone(po.refNo), href: poHref(id),
       actorId: user.id, actorRole: user.role, entityType: ENTITY, entityId: id,
     });
     out = { refNo: po.refNo, undone: check.items.length };

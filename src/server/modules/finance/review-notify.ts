@@ -108,7 +108,10 @@ export async function notifyAssetsByTeam(
   }
 }
 
-/** The words for each of Finance's steps (Global Constraints: verbatim). */
+/**
+ * The words for each of Finance's steps (Global Constraints: verbatim). The one definition of each: every call site,
+ * the PO ones included (po-complete.ts, po-actions.ts's undoPoSendBack), uses these.
+ */
 export const FINANCE_WORDS = {
   accepted: { one: (tag: string) => `${tag}: Finance accepted the correction`, many: (n: number) => `${n} corrections accepted by Finance` },
   reopened: { one: (tag: string) => `${tag}: Finance reopened its review`, many: (n: number) => `${n} reviews reopened by Finance` },

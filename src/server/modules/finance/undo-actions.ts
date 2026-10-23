@@ -18,7 +18,6 @@ import { lockPo } from "@/server/modules/purchases/po-lock";
 import { undoOne, type ReturnTeam } from "./review-writes";
 import { GROUP_ASSET_SELECT, lockGroupAssets, revalidateGroup, StaleGroupError } from "./group-shared";
 import { correctionTeams, FINANCE_WORDS, notifyAssetsByTeam } from "./review-notify";
-import { notify } from "@/server/notifications/notify";
 
 /*
  * Finance follow-up (spec §3): Undo for Finance's review actions, and the admin's Reopen review. Every rule runs here,
@@ -120,11 +119,11 @@ export async function undoFinanceAction(input: unknown): Promise<ActionResult<{ 
       }
       const team = kind === "send-back" ? sentBackTeam(asset) : fixedBy;
       if (team) {
-        await notify(tx, {
-          team, kind: "CHANGED",
-          title: kind === "send-back" ? FINANCE_WORDS.tookBack.one(asset.tag) : FINANCE_WORDS.reopened.one(asset.tag),
-          href: `/inventory/${asset.id}`, actorId: user.id, actorRole: user.role, entityType: "asset", entityId: asset.id,
-        });
+        await notifyAssetsByTeam(
+          tx, [{ team, id: asset.id, tag: asset.tag }],
+          kind === "send-back" ? FINANCE_WORDS.tookBack : FINANCE_WORDS.reopened, user,
+          { group: { entityType: "asset", entityId: asset.id } },
+        );
       }
       out = { tag: asset.tag, id: asset.id };
       return;
@@ -213,10 +212,10 @@ export async function reopenFinanceReview(input: unknown): Promise<ActionResult<
     // A corrected asset's review reopened: the team that corrected it heard "accepted"; now it hears this, and why.
     const fixedBy = (await correctionTeams(tx, [asset])).get(asset.id);
     if (fixedBy) {
-      await notify(tx, {
-        team: fixedBy, kind: "CHANGED", title: FINANCE_WORDS.reopened.one(asset.tag), body: reason,
-        href: `/inventory/${asset.id}`, actorId: user.id, actorRole: user.role, entityType: "asset", entityId: asset.id,
-      });
+      await notifyAssetsByTeam(
+        tx, [{ team: fixedBy, id: asset.id, tag: asset.tag }], FINANCE_WORDS.reopened, user,
+        { body: reason, group: { entityType: "asset", entityId: asset.id } },
+      );
     }
     out = { tag: asset.tag, id: asset.id };
   });

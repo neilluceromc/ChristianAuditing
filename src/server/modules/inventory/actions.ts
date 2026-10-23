@@ -48,7 +48,7 @@ import {
 } from "@/server/modules/finance/review-writes";
 import { lockPo } from "@/server/modules/purchases/po-lock";
 import { emitIfPoFullyApproved } from "@/server/modules/purchases/po-complete";
-import { correctionTeams, FINANCE_WORDS } from "@/server/modules/finance/review-notify";
+import { correctionTeams, FINANCE_WORDS, notifyAssetsByTeam } from "@/server/modules/finance/review-notify";
 
 /** Phase 15: IT's lifecycle changes apply directly (Change status, Assign, Return) — the request path is closed to it. */
 const DIRECT_REFUSAL = "IT changes apply directly — use Change status, Assign or Return.";
@@ -782,10 +782,10 @@ export async function confirmAssetDetails(
     }
     // A corrected asset approved: the team that corrected it hears Finance accepted it (in the same transaction).
     if (fixedBy) {
-      await notify(tx, {
-        team: fixedBy, kind: "CHANGED", title: FINANCE_WORDS.accepted.one(asset.tag), href: `/inventory/${asset.id}`,
-        actorId: user.id, actorRole: user.role, entityType: "asset", entityId: asset.id,
-      });
+      await notifyAssetsByTeam(
+        tx, [{ team: fixedBy, id: asset.id, tag: asset.tag }], FINANCE_WORDS.accepted, user,
+        { group: { entityType: "asset", entityId: asset.id } },
+      );
     }
     // The last asset of a fully registered PO approved: the PO's approval webhooks (and Purchasing's bell), once.
     if (asset.purchaseOrderId) await emitIfPoFullyApproved(tx, asset.purchaseOrderId, user);
