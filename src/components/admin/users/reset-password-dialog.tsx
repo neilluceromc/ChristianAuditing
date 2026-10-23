@@ -5,6 +5,7 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { resetUserPassword } from "@/server/modules/admin/user-actions";
+import { closeBlocked } from "./panel-actions";
 import { TempPasswordBox } from "./temp-password-box";
 
 /**
@@ -42,7 +43,8 @@ export function ResetPasswordDialog({
 
   // While the reset runs, nothing closes the dialog: the password may already have changed, and the new one must not
   // unmount unseen (fix round 1, Minor 1).
-  const guardedClose = () => { if (!pending) onClose(); };
+  // Blocked only until the password shows (Task 5): the list refresh after it runs in the same transition.
+  const guardedClose = () => { if (!closeBlocked(pending, temp !== null)) onClose(); };
   return (
     <Dialog
       open

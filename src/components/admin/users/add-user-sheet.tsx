@@ -11,6 +11,7 @@ import type { ComboOption } from "@/components/patterns/entity-combobox";
 import { accountCreated } from "@/lib/admin-users";
 import { createUser } from "@/server/modules/admin/user-actions";
 import { EmployeePicker } from "./employee-picker";
+import { closeBlocked } from "./panel-actions";
 import { RoleCards } from "./role-cards";
 import { TempPasswordBox } from "./temp-password-box";
 
@@ -75,7 +76,9 @@ export function AddUserForm({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [done, setDone] = useState<CreatedAccount | null>(initialDone);
   const [pending, startTransition] = useTransition();
-  useEffect(() => { onPending?.(pending); }, [pending, onPending]);
+  // Blocked only until the password shows (Task 5): the selection that follows runs in the same transition.
+  const blocked = closeBlocked(pending, done !== null);
+  useEffect(() => { onPending?.(blocked); }, [blocked, onPending]);
 
   function create() {
     setErrors({});
@@ -99,7 +102,7 @@ export function AddUserForm({
       <button
         type="button"
         onClick={onClose}
-        disabled={pending}
+        disabled={blocked}
         aria-label="Close"
         className="inline-flex size-11 items-center justify-center rounded-(--radius-btn) bg-surface-subtle text-fg-secondary hover:bg-border-faint disabled:opacity-55"
       >

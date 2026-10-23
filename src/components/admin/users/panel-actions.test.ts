@@ -12,7 +12,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/server/modules/admin/user-actions", () => h);
 vi.mock("@/server/modules/admin/employee-link-search", () => ({ searchLinkableEmployees: vi.fn() }));
 
-import { leavingAfterDirtyChange, panelHandlers, runUserAction, type ActionDeps, type RunAction } from "./panel-actions";
+import { closeBlocked, leavingAfterDirtyChange, panelHandlers, runUserAction, type ActionDeps, type RunAction } from "./panel-actions";
 import { draftChanges } from "./user-panel";
 
 const row = {
@@ -123,3 +123,18 @@ describe("leavingAfterDirtyChange", () => {
   });
 });
 
+
+// Task 5 (found by e2e): Create account and Reset run their call and then a navigation (select / refresh) in one
+// transition, so `pending` stays true after the password shows. Closing is blocked only until it shows.
+describe("closeBlocked", () => {
+  it("blocks closing while the call runs and nothing is shown yet", () => {
+    expect(closeBlocked(true, false)).toBe(true);
+  });
+  it("lets Done, Escape and Close work once the temporary password shows, even while the page still moves", () => {
+    expect(closeBlocked(true, true)).toBe(false);
+  });
+  it("never blocks when nothing runs", () => {
+    expect(closeBlocked(false, false)).toBe(false);
+    expect(closeBlocked(false, true)).toBe(false);
+  });
+});

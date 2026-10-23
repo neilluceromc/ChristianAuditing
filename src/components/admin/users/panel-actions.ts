@@ -75,3 +75,13 @@ export function panelHandlers(row: UserRow, run: RunAction, openReset: (row: Use
     onDecline: () => run(row, () => declineSignup({ id: row.id }), () => `${row.name}'s sign-up declined`),
   };
 }
+
+/**
+ * Add user and Reset password (Task 5, found by e2e): may closing be refused now? Only while the call runs and its
+ * temporary password isn't shown yet: the account may already exist, and the password must not unmount unseen. The
+ * call and the navigation after it (selecting the new account, refreshing the list) share one transition, so
+ * `pending` stays true after the password shows; without `shown`, Done, Escape and ✕ did nothing until it finished.
+ */
+export function closeBlocked(pending: boolean, shown: boolean): boolean {
+  return pending && !shown;
+}
