@@ -70,6 +70,7 @@ export function FormTab({
   canRecord: boolean;
 }) {
   const status = formStatus(latest ? { signedAt: latest.signedAt, items: itemCount(latest.items) } : null, uncovered.length);
+  const latestLine = latest ? uploadedLine(latest.uploadedAt, latest.uploadedBy) : "";
   return (
     <div className="flex flex-col gap-3">
       <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-fg-secondary">
@@ -92,9 +93,7 @@ export function FormTab({
           </>
         )}
       </p>
-      {latest && uploadedLine(latest.uploadedAt, latest.uploadedBy) && (
-        <p className="-mt-2 pl-3.5 text-[11px] text-fg-muted">{uploadedLine(latest.uploadedAt, latest.uploadedBy)}</p>
-      )}
+      {latestLine && <p className="-mt-2 pl-3.5 text-[11px] text-fg-muted">{latestLine}</p>}
       {status.since && (
         <p className="-mt-2 pl-3.5 font-mono text-[11px] text-fg-muted">{tagLine(uncovered.map((u) => u.tag))}</p>
       )}

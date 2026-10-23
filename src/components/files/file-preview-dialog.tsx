@@ -38,6 +38,8 @@ const UNSUPPORTED = "This file type can't be shown here";
  */
 function readFrame(frame: HTMLIFrameElement): FrameSeen {
   try {
+    // the frame's initial about:blank is not the file; never judge it
+    if (frame.contentWindow?.location.href.startsWith("about:")) return null;
     const doc = frame.contentDocument;
     if (!doc) return null;
     return { contentType: doc.contentType || null, pathname: frame.contentWindow?.location.pathname ?? null };

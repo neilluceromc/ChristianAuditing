@@ -303,9 +303,9 @@ test("3 · a stored object that has gone missing: Couldn't load this file, and D
   const assetDoc = await db.assetDocument.findUniqueOrThrow({ where: { id: rows.assetDocId } });
   const ack = await db.acknowledgement.findUniqueOrThrow({ where: { id: rows.ackId } });
   // point each row at an object that was never stored; put them back afterwards
-  await db.assetDocument.update({ where: { id: assetDoc.id }, data: { path: "e2e-missing/never-stored.pdf" } });
-  await db.acknowledgement.update({ where: { id: ack.id }, data: { path: "e2e-missing/never-stored.png" } });
   try {
+    await db.assetDocument.update({ where: { id: assetDoc.id }, data: { path: "e2e-missing/never-stored.pdf" } });
+    await db.acknowledgement.update({ where: { id: ack.id }, data: { path: "e2e-missing/never-stored.png" } });
     // a PDF frame: the route's plain-text 404 is read and shown as a failure
     await login(page, PURCHASING);
     const missingPdf = await page.request.get(`${surfaces.asset.href}?inline=1`);
@@ -329,6 +329,7 @@ test("3 · a stored object that has gone missing: Couldn't load this file, and D
   }
   // restored: the file loads again
   expect((await page.request.get(`${surfaces.form.href}?inline=1`)).status()).toBe(200);
+  expect((await page.request.get(`${surfaces.asset.href}?inline=1`)).status()).toBe(200);
 });
 
 test("4 · a file held on the new-PO form previews with Not saved yet; closing revokes its object URL", async ({ page }) => {
