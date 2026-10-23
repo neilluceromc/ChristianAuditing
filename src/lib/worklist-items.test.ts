@@ -375,8 +375,9 @@ describe("approvalItem", () => {
   it("a failed approval whose slaAt has passed is never overdue and never red (fix round 1, I1)", () => {
     const i = approvalItem({ ...base, workerError: "Asset is not SPARE" }, "failed", NOW);
     expect(base.slaAt.getTime()).toBeLessThan(NOW.getTime());
-    expect(cols(i, "queue").sla).toEqual({ text: "3 d overdue", overdue: false });
-    expect(i.detail.facts).toContainEqual({ label: "SLA", value: "3 d overdue" });
+    expect(cols(i, "queue").sla).toEqual({ text: "Execution failed", overdue: false });
+    expect(i.detail.facts).toContainEqual({ label: "SLA", value: "Execution failed" });
+    expect(i.detail.facts.map((f) => f.value)).not.toContain("3 d overdue");
     expect(i.detail.facts.some((f) => f.tone === "fault")).toBe(false);
     expect(i.overdue).toBeUndefined();
   });

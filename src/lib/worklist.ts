@@ -669,8 +669,9 @@ export interface WorkApprovalLike {
 /** A queue row: an SLA breach (rank 0) or an execution failure (rank 1), as the worklist always ranked them. */
 export function approvalItem(a: WorkApprovalLike, kind: "breached" | "failed", now: Date): WorkItem {
   const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
-  // a failed approval was decided — its SLA is over, not breached: never overdue, never red (Global Constraints)
-  const sla: WorkSla = kind === "breached" ? slaLabel(a.slaAt, now) : { text: slaLabel(a.slaAt, now).text, overdue: false };
+  // a failed approval was decided — its SLA is over, not breached: never overdue, never red (Global Constraints), and
+  // it says it failed rather than a grey "3 d overdue" (controller ruling)
+  const sla: WorkSla = kind === "breached" ? slaLabel(a.slaAt, now) : { text: "Execution failed", overdue: false };
   const title = `${a.refNo} · ${s.line1}`;
   const row = kind === "breached"
     ? { meta: `${sla.text} · ${a.priority.toLowerCase()}`, rank: 0, age: daysSince(a.slaAt, now) }
