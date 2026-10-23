@@ -63,7 +63,7 @@ function SecretOnce({ secret, onDone }: { secret: string; onDone: () => void }) 
  * Shared plumbing: the same ActionResult ladder as every other admin screen.
  *
  * `acting` is a per-CONTROL key rather than one boolean, copied from
- * `flag-rows.tsx`/`user-table.tsx`: a single shared `pending` would spin every
+ * `flag-rows.tsx` (and the old, since retired `user-table.tsx`): a single shared `pending` would spin every
  * button on a card while one of them is in flight, and — worse — a card here
  * has five controls, of which Rotate hands back a value that is only ever
  * shown once. Every control gates on `acting !== null`, so a double-click on

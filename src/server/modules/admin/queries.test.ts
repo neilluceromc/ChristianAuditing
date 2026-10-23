@@ -15,14 +15,17 @@ const h = vi.hoisted(() => ({
 vi.mock("@/server/db/client", () => {
   const prisma = {
     user: { findMany: h.findMany, findUnique: h.findUnique, count: h.count, groupBy: h.groupBy },
+    featureFlag: { findMany: async () => [] },
+    webhookEndpoint: { count: async () => 0 },
+    webhookDelivery: { count: async () => 0 },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
   };
   return { prisma };
 });
 
-import { usersListWhere } from "@/lib/admin-lists";
+import { ACTIVE_ACCOUNTS_WHERE, userStatusWhere, usersListWhere } from "@/lib/admin-lists";
 import { PERMANENT_LOCK } from "@/lib/admin-users";
-import { findUserRow, listUsers } from "./queries";
+import { adminHome, findUserRow, listUsers } from "./queries";
 
 const at = (s: string) => new Date(`2026-10-${s}Z`);
 
@@ -139,5 +142,22 @@ describe("findUserRow", () => {
   it("is null for an unknown id", async () => {
     h.findUnique.mockResolvedValue(null);
     expect(await findUserRow("gone")).toBeNull();
+  });
+});
+
+// Task 4 fix round 1 (ruling): the Admin overview's account tiles count what their links list. "Disabled accounts" is
+// the Disabled status (approved, turned off), never a waiting or declined sign-up; "Active accounts" is the accounts
+// that can sign in (approved, turned on).
+describe("adminHome's account counts", () => {
+  it("counts Disabled as the Disabled status and Active as approved and turned on", async () => {
+    h.groupBy.mockResolvedValue([{ role: "viewer", _count: { _all: 9 } }]);
+    h.count.mockImplementation(async ({ where }: { where: unknown }) =>
+      JSON.stringify(where) === JSON.stringify(userStatusWhere("DISABLED")) ? 2
+        : JSON.stringify(where) === JSON.stringify(ACTIVE_ACCOUNTS_WHERE) ? 5 : -1,
+    );
+    const home = await adminHome();
+    expect(home.users).toMatchObject({ total: 9, disabled: 2, active: 5 });
+    expect(h.count).toHaveBeenCalledWith({ where: { approvalState: "APPROVED", disabled: true } });
+    expect(h.count).toHaveBeenCalledWith({ where: { approvalState: "APPROVED", disabled: false } });
   });
 });

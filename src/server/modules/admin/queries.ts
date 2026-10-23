@@ -3,7 +3,7 @@ import {
   groupLabel, lockReason, roleWorkspaces, ROLE_OPTIONS, USER_STATUS_LABEL, userStatus, type TargetUser, type UserStatus,
 } from "@/lib/admin-users";
 import { FLAG_SPECS, flagEnabled, type FlagState } from "@/lib/admin-flags";
-import { isFlagUnavailable, usersListWhere, type UsersFilter } from "@/lib/admin-lists";
+import { ACTIVE_ACCOUNTS_WHERE, isFlagUnavailable, userStatusWhere, usersListWhere, type UsersFilter } from "@/lib/admin-lists";
 import { fmtDateTime } from "@/lib/format";
 import {
   deliveryStage, deliveryTabWhere, partitionEvents, replayBlockedReason, type DeliveryTab,
@@ -266,15 +266,20 @@ export async function listEndpoints(): Promise<EndpointRow[]> {
 }
 
 export interface AdminHome {
-  users: { total: number; disabled: number; byRole: Array<{ role: Role; count: number }> };
+  /**
+   * Task 4 fix round 1: `active` can sign in (approved, turned on: ?disabled=0) and `disabled` is the Disabled status
+   * (approved, turned off: ?status=DISABLED). Waiting and declined sign-ups are in `total` only.
+   */
+  users: { total: number; active: number; disabled: number; byRole: Array<{ role: Role; count: number }> };
   flags: Array<{ key: string; label: string; enabled: boolean; unavailable: boolean }>;
   webhooks: { endpoints: number; inactive: number; dead: number; delivered: number };
 }
 
 export async function adminHome(): Promise<AdminHome> {
-  const [byRole, disabled, flagRows, endpoints, inactive, dead, delivered] = await Promise.all([
+  const [byRole, active, disabled, flagRows, endpoints, inactive, dead, delivered] = await Promise.all([
     prisma.user.groupBy({ by: ["role"], _count: { _all: true } }),
-    prisma.user.count({ where: { disabled: true } }),
+    prisma.user.count({ where: ACTIVE_ACCOUNTS_WHERE }),
+    prisma.user.count({ where: userStatusWhere("DISABLED") }),
     prisma.featureFlag.findMany(),
     prisma.webhookEndpoint.count(),
     prisma.webhookEndpoint.count({ where: { active: false } }),
@@ -286,6 +291,7 @@ export async function adminHome(): Promise<AdminHome> {
   return {
     users: {
       total: byRole.reduce((sum, g) => sum + g._count._all, 0),
+      active,
       disabled,
       // Driven by ROLE_OPTIONS so a role nobody holds still shows as 0 rather
       // than vanishing — "no admins" is exactly the kind of thing a zero row

@@ -322,3 +322,88 @@ describe("Add user and the temporary password", () => {
     expect(done).toContain("Shown once. They choose their own at their next sign-in.");
   });
 });
+
+/** Every button and link opening tag in `html` whose class gives it no 44 px target. */
+function smallTargets(html: string): string[] {
+  const tags = html.match(/<(button|a)\b[^>]*>/g) ?? [];
+  expect(tags.length).toBeGreaterThan(0); // never vacuous
+  return tags.filter((tag) => {
+    if (tag.includes('role="switch"')) return !tag.includes("before:-inset-y-[13px]");
+    return !/(^|[\s"])(h-11|size-11|min-h-11|min-h-\[44px\])[\s"]/.test(tag);
+  });
+}
+
+describe("fix round 1, I-2: every target in the panel, the sheet and the dialogs is at least 44 px", () => {
+  it("the panel, in each of its shapes", () => {
+    const shapes = [
+      panel({ row: userRow(), onClose: noop }),
+      panel({ row: userRow(), initial: { draft: { role: "viewer" }, confirmingOff: true, editingName: true, picking: true } }),
+      panel({ row: userRow({ employee: null }) }),
+      panel({ row: userRow({ id: "admin-1", name: "M. Cruz", role: "admin" }) }),
+      panel({ row: pending() }),
+      panel({ row: pending(), initial: { confirmingDecline: true } }),
+      panel({ row: userRow(), leaving: true, initial: { draft: { role: "viewer" } } }),
+    ];
+    for (const html of shapes) expect(smallTargets(html)).toEqual([]);
+  });
+
+  it("Add user, before and after creating, and the reset dialog's password", () => {
+    expect(smallTargets(render(<AddUserForm domain="thebackroomop.com" onClose={noop} onCreated={noop} />))).toEqual([]);
+    expect(
+      smallTargets(render(<AddUserForm domain={null} onClose={noop} onCreated={noop} initialDone={{ id: "u", name: "A", tempPassword: "Maple-4207-river" }} />)),
+    ).toEqual([]);
+    expect(smallTargets(render(<ResetPasswordBody name="Nina Reyes" temp="Cedar-3388-lumen" error={null} />))).toEqual([]);
+  });
+});
+
+describe("fix round 1, I-1: focus targets in the inline steps", () => {
+  it("the turn-off confirm puts Cancel first and the switch stays enabled (focus never falls off it)", () => {
+    const html = panel({ row: userRow(), initial: { confirmingOff: true } });
+    expect(html.indexOf('data-focus="turn-off-cancel"')).toBeGreaterThan(-1);
+    expect(html.indexOf('data-focus="turn-off-cancel"')).toBeLessThan(html.indexOf("Turn off account"));
+    expect(html).not.toMatch(/role="switch"[^>]*disabled=""/);
+    expect(html).toContain('data-focus="switch"');
+  });
+
+  it("the decline confirm puts Cancel first; Decline, Approve, Edit, Change and the title are targets", () => {
+    const html = panel({ row: pending(), initial: { confirmingDecline: true } });
+    expect(html.indexOf('data-focus="decline-cancel"')).toBeLessThan(html.indexOf("Decline sign-up"));
+    const closed = panel({ row: pending() });
+    for (const name of ["decline", "approve", "edit", "title"]) expect(closed).toContain(`data-focus="${name}"`);
+    expect(panel({ row: userRow() })).toContain('data-focus="pick"');
+  });
+
+  it("the name fields, the employee search and Save carry their targets", () => {
+    expect(panel({ row: userRow(), initial: { editingName: true } })).toContain('data-focus="name"');
+    expect(panel({ row: userRow(), initial: { picking: true } })).toContain('data-focus="pick-search"');
+    expect(panel({ row: userRow(), initial: { draft: { role: "viewer" } } })).toContain('data-focus="save"');
+  });
+});
+
+describe("fix round 1, Minor 5: unsaved drafts are never dropped silently", () => {
+  it("moving to another person while drafts differ asks first, instead of the Save bar", () => {
+    const html = panel({ row: userRow(), leaving: true, initial: { draft: { role: "viewer" } } });
+    expect(html).toContain("Discard unsaved changes?");
+    expect(html).toMatch(/>Keep editing</);
+    expect(html).toMatch(/>Discard</);
+    expect(html).not.toContain('aria-label="Unsaved changes"');
+    // with nothing drafted there is nothing to ask
+    expect(panel({ row: userRow(), leaving: true })).not.toContain("Discard unsaved changes?");
+  });
+
+  it("a refresh that changed the row while drafts differ asks, naming the change", () => {
+    const base = userRow();
+    const fresher = userRow({ updatedAt: "2026-10-21T03:00:00.000Z", disabled: true, status: "DISABLED", statusLabel: "Disabled" });
+    const html = panel({ row: fresher, initial: { base, draft: { role: "viewer" } } });
+    expect(html).toContain("Nina Reyes's account changed since you started editing. Discard unsaved changes?");
+  });
+
+  it("a refresh that matches the drafts (our own save) is taken over silently", () => {
+    const base = userRow();
+    const saved = userRow({ role: "viewer", updatedAt: "2026-10-21T03:00:00.000Z" });
+    const html = panel({ row: saved, initial: { base, draft: { role: "viewer" } } });
+    expect(html).not.toContain("Discard unsaved changes?");
+    expect(html).not.toContain("Unsaved changes");
+  });
+});
+

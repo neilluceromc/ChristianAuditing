@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Role } from "@prisma/client";
 import { cn } from "@/lib/cn";
 import { normalizeEmail } from "@/lib/auth-shared";
@@ -14,7 +14,11 @@ import { Switch } from "@/components/ui/switch";
 import type { ComboOption } from "@/components/patterns/entity-combobox";
 import {
   accessHistoryHref, canTurnOff, createdLabel, lastSignInLabel, passwordLabel, roleChangeNote, selfRoleChangeWarning,
+  turnOffConfirm,
 } from "@/lib/admin-users";
+import {
+  focusAfterAction, focusOnClose, focusOnOpen, panelMayTakeFocus, type PanelAction, type PanelStep,
+} from "@/lib/users-panel-focus";
 import type { UserEmployee, UserRow } from "@/server/modules/admin/queries";
 import { EmployeePicker } from "./employee-picker";
 import { RoleCards } from "./role-cards";
@@ -52,14 +56,25 @@ export interface UserPanelProps {
   notice: PanelNotice | null;
   /** given when the panel is a drawer or sheet: shows Close */
   onClose?: () => void;
-  onSave: (changes: UserChanges) => void;
+  /** every changed field, and the version the drafts were made on (`expectedUpdatedAt`) */
+  onSave: (changes: UserChanges, expectedUpdatedAt: string) => void;
   onSetActive: (active: boolean) => void;
   onReset: () => void;
   onApprove: (role: Role, employeeId: string | null) => void;
   onDecline: () => void;
+  /** Discard cleared the drafts: the field errors held by the page go too */
+  onClearNotice?: () => void;
+  /** told whenever the drafts start or stop differing (the page asks before moving away) */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** the page wants to show someone else (or close) while drafts differ: ask first */
+  leaving?: boolean;
+  /** the answer: true discards the drafts and lets the page move on; false keeps editing */
+  onLeave?: (discard: boolean) => void;
   /** tests only (no DOM to click in): the state to render */
   initial?: {
     draft?: Partial<PanelDraft>;
+    /** the row the drafts were made on, when the page has since refreshed to `row` */
+    base?: UserRow;
     confirmingOff?: boolean;
     editingName?: boolean;
     picking?: boolean;
@@ -70,8 +85,12 @@ export interface UserPanelProps {
 const employeeOption = (e: UserEmployee | null): ComboOption | null =>
   e ? { value: e.id, label: e.name, sub: `${e.employeeNo} · ${e.groupLabel}` } : null;
 
+const draftOf = (row: UserRow): PanelDraft => ({
+  role: row.role, name: row.name, email: row.email, employee: employeeOption(row.employee),
+});
+
 /** The fields of `draft` that differ from `row` — what one Save writes. */
-export function draftChanges(row: UserRow, draft: PanelDraft): UserChanges {
+export function draftChanges(row: Pick<UserRow, "role" | "name" | "email" | "employee">, draft: PanelDraft): UserChanges {
   const changes: UserChanges = {};
   if (draft.role !== row.role) changes.role = draft.role;
   if (draft.name.trim() !== row.name) changes.name = draft.name.trim();
@@ -79,6 +98,10 @@ export function draftChanges(row: UserRow, draft: PanelDraft): UserChanges {
   if ((draft.employee?.value ?? null) !== (row.employee?.id ?? null)) changes.employeeId = draft.employee?.value ?? null;
   return changes;
 }
+
+/** Every control here is at least 44 px (fix round 1, I-2): the panel is the full-screen sheet on a phone. */
+const TARGET = "h-11";
+const LINK = "inline-flex min-h-11 items-center text-accent-soft-text underline-offset-2 hover:underline";
 
 function Section({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   const id = useId();
@@ -100,29 +123,54 @@ function Section({ title, children, className }: { title: string; children: Reac
  * sign-up instead (role, employee record pre-searched with their name, Approve, Decline asking once), plus Name &
  * email. The permanent admin's panel states the lock and offers nothing that would be refused.
  *
- * The panel holds only drafts; the caller runs the actions (`on…`), refreshes the list, and re-keys this panel on the
- * row's `updatedAt`, so a saved or refreshed row starts clean.
+ * Drafts (fix round 1): they are made on `base`, the row as it was when editing began. A refreshed row with nothing
+ * drafted, or one that now matches the drafts (our own Save), is taken over silently; otherwise the panel asks
+ * "Discard unsaved changes?" rather than dropping them, and Save keeps sending `base`'s version, so a stale save is
+ * refused by the server instead of overwriting the other admin's change.
+ *
+ * Focus (fix round 1, I-1): every inline step moves focus to its first control and gives it back on close; an action's
+ * answer puts focus where `focusAfterAction` says (users-panel-focus.ts).
  */
 export function UserPanel({
-  row, actorId, now, busy, notice, onClose, onSave, onSetActive, onReset, onApprove, onDecline, initial,
+  row, actorId, now, busy, notice, onClose, onSave, onSetActive, onReset, onApprove, onDecline, onClearNotice,
+  onDirtyChange, leaving = false, onLeave, initial,
 }: UserPanelProps) {
   const titleId = useId();
   const switchId = useId();
   const switchReasonId = useId();
-  const saved: PanelDraft = { role: row.role, name: row.name, email: row.email, employee: employeeOption(row.employee) };
-  const [draft, setDraft] = useState<PanelDraft>({ ...saved, ...initial?.draft });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [base, setBase] = useState<UserRow>(initial?.base ?? row);
+  const [draft, setDraft] = useState<PanelDraft>(() => ({ ...draftOf(initial?.base ?? row), ...initial?.draft }));
   const [editingName, setEditingName] = useState(initial?.editingName ?? false);
   const [picking, setPicking] = useState(initial?.picking ?? false);
   const [confirmingOff, setConfirmingOff] = useState(initial?.confirmingOff ?? false);
   const [confirmingDecline, setConfirmingDecline] = useState(initial?.confirmingDecline ?? false);
   const [approveRole, setApproveRole] = useState<Role>("viewer");
   const [approveEmployee, setApproveEmployee] = useState<ComboOption | null>(null);
+  /** the newer version the person chose to keep editing over */
+  const [keptOver, setKeptOver] = useState<string | null>(null);
+  const [focusReq, setFocusReq] = useState<string[] | null>(null);
+  const lastAction = useRef<PanelAction | null>(null);
+
+  const changes = draftChanges(base, draft);
+  const dirty = Object.keys(changes).length > 0;
+
+  // A refreshed row: take it over when nothing would be lost; otherwise keep the drafts and ask (below).
+  if (row.updatedAt !== base.updatedAt && (!dirty || Object.keys(draftChanges(row, draft)).length === 0)) {
+    setBase(row);
+    setDraft(draftOf(row));
+    setEditingName(false);
+    setPicking(false);
+    setConfirmingOff(false);
+    setConfirmingDecline(false);
+    setKeptOver(null);
+  }
+  const stale = row.updatedAt !== base.updatedAt && keptOver !== row.updatedAt;
+  const asking = dirty && (leaving || stale);
 
   const locked = row.locked;
   const self = row.id === actorId;
   const signUp = row.approvalState !== "APPROVED";
-  const changes = draftChanges(row, draft);
-  const dirty = Object.keys(changes).length > 0;
   const errors = notice?.fieldErrors ?? {};
   const note = roleChangeNote(row.name, row.role, draft.role);
   const selfWarning = selfRoleChangeWarning(row.target, draft.role, actorId);
@@ -130,19 +178,80 @@ export function UserPanel({
   const switchReason = locked ?? (!row.disabled && !turnOff.allowed ? turnOff.reason : null);
   const at = new Date(now);
   const set = (patch: Partial<PanelDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const focus = (selectors: string[]) => setFocusReq(selectors);
 
+  // Focus requests run after the render that shows their target.
+  useEffect(() => {
+    if (!focusReq) return;
+    const root = rootRef.current;
+    const active = document.activeElement;
+    if (root && panelMayTakeFocus(!active || active === document.body, !!active && root.contains(active))) {
+      for (const selector of focusReq) {
+        const el = root.querySelector<HTMLElement>(selector);
+        if (el && !el.matches(":disabled")) {
+          el.focus();
+          break;
+        }
+      }
+    }
+    setFocusReq(null);
+  }, [focusReq]);
+
+  // An action's answer: the row refreshed (done) or a refusal showed.
+  useEffect(() => {
+    if (!lastAction.current) return;
+    setFocusReq(focusAfterAction(lastAction.current, "done"));
+    lastAction.current = null;
+  }, [row.updatedAt]);
+  useEffect(() => {
+    if (!notice || !lastAction.current) return;
+    setFocusReq(focusAfterAction(lastAction.current, "refused"));
+    lastAction.current = null;
+  }, [notice]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
+  // The discard question takes focus when it appears.
+  const [wasAsking, setWasAsking] = useState(asking);
+  if (asking !== wasAsking) {
+    setWasAsking(asking);
+    if (asking) setFocusReq(focusOnOpen("discard"));
+  }
+
+  function act(action: PanelAction, run: () => void) {
+    lastAction.current = action;
+    run();
+  }
+  function open(step: PanelStep, show: () => void) {
+    show();
+    focus(focusOnOpen(step));
+  }
+  function close(step: PanelStep, hide: () => void) {
+    hide();
+    focus(focusOnClose(step));
+  }
+
+  /** Back to the row as it is now: drafts, open steps and the field errors all go. */
   function discard() {
-    setDraft(saved);
+    setBase(row);
+    setDraft(draftOf(row));
     setEditingName(false);
     setPicking(false);
+    setKeptOver(null);
+    onClearNotice?.();
   }
 
   return (
-    <div data-users-panel={row.id} className="flex h-full min-h-0 flex-col">
+    <div ref={rootRef} data-users-panel={row.id} className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-border-faint px-5 py-4">
         <Avatar name={row.name} size="xl" className="shrink-0" />
         <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="truncate text-[17px] font-semibold leading-tight text-fg">{row.name}</h2>
+          <h2 id={titleId} tabIndex={-1} data-focus="title" className="truncate text-[17px] font-semibold leading-tight text-fg focus:outline-none">
+            {row.name}
+          </h2>
           <span className="block truncate text-[12.5px] text-fg-muted">{row.email}</span>
         </div>
         {onClose && (
@@ -190,15 +299,34 @@ export function UserPanel({
                   {`Decline ${row.name}'s sign-up? They can't sign in. You can still approve them later from Declined.`}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="danger" loading={busy} onClick={() => { setConfirmingDecline(false); onDecline(); }}>Decline sign-up</Button>
-                  <Button variant="ghost" onClick={() => setConfirmingDecline(false)}>Cancel</Button>
+                  <Button variant="ghost" className={TARGET} data-focus="decline-cancel" onClick={() => close("decline", () => setConfirmingDecline(false))}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className={TARGET}
+                    loading={busy}
+                    onClick={() => act("decline", () => { setConfirmingDecline(false); focus(focusOnClose("decline")); onDecline(); })}
+                  >
+                    Decline sign-up
+                  </Button>
                 </div>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                <Button variant="primary" loading={busy} onClick={() => onApprove(approveRole, approveEmployee?.value ?? null)}>Approve</Button>
+                <Button
+                  variant="primary"
+                  className={TARGET}
+                  data-focus="approve"
+                  loading={busy}
+                  onClick={() => act("approve", () => onApprove(approveRole, approveEmployee?.value ?? null))}
+                >
+                  Approve
+                </Button>
                 {row.approvalState === "PENDING" && (
-                  <Button variant="secondary" disabled={busy} onClick={() => setConfirmingDecline(true)}>Decline</Button>
+                  <Button variant="secondary" className={TARGET} data-focus="decline" disabled={busy} onClick={() => open("decline", () => setConfirmingDecline(true))}>
+                    Decline
+                  </Button>
                 )}
               </div>
             )}
@@ -229,9 +357,9 @@ export function UserPanel({
 
             <Section title="Employee record">
               {draft.employee ? (
-                <div className="flex items-center gap-2.5 rounded-(--radius-card) border border-border px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2.5 rounded-(--radius-card) border border-border px-3 py-1.5">
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <Link href={`/employees/${draft.employee.value}`} className="truncate text-[13px] font-medium text-accent-soft-text underline-offset-2 hover:underline">
+                    <Link href={`/employees/${draft.employee.value}`} className={cn(LINK, "truncate text-[13px] font-medium")}>
                       {draft.employee.label}
                     </Link>
                     <span className="truncate text-[11.5px] text-fg-muted">{draft.employee.sub}</span>
@@ -239,24 +367,43 @@ export function UserPanel({
                   </span>
                   {!locked && (
                     <span className="flex shrink-0 gap-1.5">
-                      <Button size="sm" disabled={busy} onClick={() => setPicking((p) => !p)} aria-expanded={picking}>Change</Button>
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => { set({ employee: null }); setPicking(false); }}>Unlink</Button>
+                      <Button
+                        className={TARGET}
+                        data-focus="pick"
+                        disabled={busy}
+                        aria-expanded={picking}
+                        onClick={() => (picking ? close("pick", () => setPicking(false)) : open("pick", () => setPicking(true)))}
+                      >
+                        Change
+                      </Button>
+                      <Button variant="ghost" className={TARGET} disabled={busy} onClick={() => close("pick", () => { set({ employee: null }); setPicking(false); })}>
+                        Unlink
+                      </Button>
                     </span>
                   )}
                 </div>
               ) : (
-                <div className="flex items-center gap-2.5 rounded-(--radius-card) border border-dashed border-border px-3 py-2.5">
+                <div className="flex items-center gap-2.5 rounded-(--radius-card) border border-dashed border-border px-3 py-1.5">
                   <span className="flex-1 text-[12.5px] text-fg-muted">Not linked to an employee record.</span>
                   {!locked && (
-                    <Button size="sm" disabled={busy} onClick={() => setPicking((p) => !p)} aria-expanded={picking}>Link…</Button>
+                    <Button
+                      className={TARGET}
+                      data-focus="pick"
+                      disabled={busy}
+                      aria-expanded={picking}
+                      onClick={() => (picking ? close("pick", () => setPicking(false)) : open("pick", () => setPicking(true)))}
+                    >
+                      Link…
+                    </Button>
                   )}
                 </div>
               )}
               {picking && !locked && (
                 <EmployeePicker
                   label="Find the employee"
+                  focusKey="pick-search"
                   value={null}
-                  onPick={(o) => { if (o) { set({ employee: o }); setPicking(false); } }}
+                  onPick={(o) => { if (o) close("pick", () => { set({ employee: o }); setPicking(false); }); }}
                   disabled={busy}
                 />
               )}
@@ -269,11 +416,18 @@ export function UserPanel({
           {editingName && !locked ? (
             <div className="flex flex-col gap-3">
               <FormField label="Full name" error={errors.name}>
-                {(p) => <Input {...p} value={draft.name} autoComplete="off" maxLength={120} className="h-11" onChange={(e) => set({ name: e.currentTarget.value })} />}
+                {(p) => <Input {...p} data-focus="name" value={draft.name} autoComplete="off" maxLength={120} className="h-11" onChange={(e) => set({ name: e.currentTarget.value })} />}
               </FormField>
               <FormField label="Work email" error={errors.email}>
                 {(p) => <Input {...p} type="email" value={draft.email} autoComplete="off" maxLength={320} className="h-11" onChange={(e) => set({ email: e.currentTarget.value })} />}
               </FormField>
+              <Button
+                variant="ghost"
+                className={cn(TARGET, "self-start")}
+                onClick={() => close("edit", () => { set({ name: base.name, email: base.email }); setEditingName(false); })}
+              >
+                Cancel
+              </Button>
             </div>
           ) : (
             <div className="flex items-start gap-2.5">
@@ -282,13 +436,20 @@ export function UserPanel({
                 <dt className="text-fg-muted">Email</dt><dd className="m-0 break-all text-fg">{draft.email}</dd>
               </dl>
               {!locked && (
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditingName(true)} aria-label="Edit name and email">Edit</Button>
+                <Button
+                  variant="secondary"
+                  className={TARGET}
+                  data-focus="edit"
+                  disabled={busy}
+                  onClick={() => open("edit", () => setEditingName(true))}
+                  aria-label="Edit name and email"
+                >
+                  Edit
+                </Button>
               )}
             </div>
           )}
-          {!editingName && (errors.name || errors.email) && (
-            <FieldError message={errors.name ?? errors.email} />
-          )}
+          {!editingName && <FieldError message={errors.name ?? errors.email} />}
         </Section>
 
         {!signUp && (
@@ -302,7 +463,7 @@ export function UserPanel({
               </dl>
               <Button
                 variant="secondary"
-                className="self-start"
+                className={cn(TARGET, "self-start")}
                 disabled={!!locked || self || busy || row.signIn === "SSO only"}
                 onClick={onReset}
               >
@@ -311,7 +472,7 @@ export function UserPanel({
               {self && !locked && (
                 <p className="text-[12px] text-fg-muted">
                   Change your own password in Account settings.{" "}
-                  <Link href="/settings/account" className="text-accent-soft-text underline-offset-2 hover:underline">Open Account settings</Link>
+                  <Link href="/settings/account" className={LINK}>Open Account settings</Link>
                 </p>
               )}
             </Section>
@@ -324,14 +485,24 @@ export function UserPanel({
                     {row.disabled ? "Turned off: they can't sign in. Their history stays." : "They can sign in."}
                   </span>
                 </label>
-                <Switch
-                  id={switchId}
-                  checked={!row.disabled}
-                  aria-label="Account active"
-                  aria-describedby={switchReason ? switchReasonId : undefined}
-                  disabled={!!switchReason || busy || confirmingOff}
-                  onCheckedChange={(on) => (on ? onSetActive(true) : setConfirmingOff(true))}
-                />
+                <span data-focus="switch" className="inline-flex min-h-11 min-w-11 items-center justify-center">
+                  <Switch
+                    id={switchId}
+                    checked={!row.disabled}
+                    aria-label="Account active"
+                    aria-describedby={switchReason ? switchReasonId : undefined}
+                    // Not disabled while the confirm is open or a call runs: a focused control must never vanish from
+                    // under the keyboard (I-1). The handler ignores presses then instead.
+                    disabled={!!switchReason}
+                    // A 44 × 44 px hit area around the 32 × 18 px track (I-2).
+                    className="before:absolute before:-inset-x-1.5 before:-inset-y-[13px] before:content-['']"
+                    onCheckedChange={(on) => {
+                      if (busy || confirmingOff) return;
+                      if (on) act("turn-on", () => onSetActive(true));
+                      else open("turn-off", () => setConfirmingOff(true));
+                    }}
+                  />
+                </span>
               </div>
               {switchReason && !locked && <p id={switchReasonId} className="text-[12px] text-fg-muted">{switchReason}</p>}
               {switchReason && locked && <span id={switchReasonId} className="sr-only">{switchReason}</span>}
@@ -340,11 +511,20 @@ export function UserPanel({
                   style={{ background: "var(--st-fault-bg)", borderColor: "var(--st-fault-border)" }}
                 >
                   <p id={`${titleId}-off`} className="text-[12.5px]" style={{ color: "var(--st-fault-text)" }}>
-                    {`Turn off ${row.name}'s account? They're signed out now and can't sign in. Their history stays.`}
+                    {turnOffConfirm(row.name)}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="danger" loading={busy} onClick={() => { setConfirmingOff(false); onSetActive(false); }}>Turn off account</Button>
-                    <Button variant="ghost" onClick={() => setConfirmingOff(false)}>Cancel</Button>
+                    <Button variant="ghost" className={TARGET} data-focus="turn-off-cancel" onClick={() => close("turn-off", () => setConfirmingOff(false))}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className={TARGET}
+                      loading={busy}
+                      onClick={() => act("turn-off", () => { close("turn-off", () => setConfirmingOff(false)); onSetActive(false); })}
+                    >
+                      Turn off account
+                    </Button>
                   </div>
                 </div>
               )}
@@ -352,16 +532,47 @@ export function UserPanel({
           </>
         )}
 
-        <Link href={accessHistoryHref(row.id)} className="self-start text-[12.5px] font-medium text-accent-soft-text underline-offset-2 hover:underline">
+        <Link href={accessHistoryHref(row.id)} className={cn(LINK, "self-start text-[12.5px] font-medium")}>
           See this person&apos;s access history →
         </Link>
       </div>
 
-      {dirty && (
+      {asking && (
+        <div role="group" aria-labelledby={`${titleId}-ask`} data-discard-prompt="" className="flex shrink-0 flex-col gap-2.5 border-t px-5 py-3"
+          style={{ background: "var(--st-attention-bg)", borderColor: "var(--st-attention-border)" }}
+        >
+          <p id={`${titleId}-ask`} className="text-[12.5px] text-fg">
+            {stale && !leaving ? `${row.name}'s account changed since you started editing. ` : ""}Discard unsaved changes?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              className={TARGET}
+              data-focus="keep-editing"
+              onClick={() => close("discard", () => { if (leaving) onLeave?.(false); else setKeptOver(row.updatedAt); })}
+            >
+              Keep editing
+            </Button>
+            <Button
+              variant="danger"
+              className={TARGET}
+              onClick={() => { discard(); if (leaving) onLeave?.(true); else focus(focusOnClose("edit")); }}
+            >
+              Discard
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {dirty && !asking && (
         <div role="region" aria-label="Unsaved changes" className="flex shrink-0 items-center gap-2.5 border-t border-border bg-surface-subtle px-5 py-3">
           <span className="flex-1 text-[12.5px] text-fg-secondary">Unsaved changes</span>
-          <Button variant="ghost" disabled={busy} onClick={discard}>Discard</Button>
-          <Button variant="primary" loading={busy} onClick={() => onSave(changes)}>Save</Button>
+          <Button variant="ghost" className={TARGET} disabled={busy} onClick={() => { discard(); focus(focusOnClose("edit")); }}>
+            Discard
+          </Button>
+          <Button variant="primary" className={TARGET} data-focus="save" loading={busy} onClick={() => act("save", () => onSave(changes, base.updatedAt))}>
+            Save
+          </Button>
         </div>
       )}
     </div>

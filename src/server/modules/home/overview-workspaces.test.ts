@@ -75,7 +75,8 @@ vi.mock("@/server/modules/finance/depreciation-queries", () => ({
 vi.mock("@/server/modules/admin/queries", () => ({
   adminHome: async () => ({
     users: {
-      total: 40, disabled: 4,
+      // fix round 1 (Users & access Task 4): active and disabled are counted, not derived (sign-ups are neither)
+      total: 40, active: 34, disabled: 4,
       byRole: [
         { role: "admin", count: 2 }, { role: "it_staff", count: 20 }, { role: "purchasing_staff", count: 8 },
         { role: "finance_staff", count: 6 }, { role: "viewer", count: 4 },
@@ -317,12 +318,12 @@ describe("adminOverview", () => {
   it("six tiles with the ruling's links; Direct changes and Flags on are plain cards", async () => {
     const o = await adminOverview(user("admin"), NOW);
     expect(o.kpis.map((k) => [k.label, k.value, k.href])).toEqual([
-      ["Active accounts", 36, "/admin/users?disabled=0"],
+      ["Active accounts", 34, "/admin/users?disabled=0"],
       ["Webhook deliveries failed", 7, "/admin/webhooks/deliveries?state=DEAD"],
       ["Direct changes", 2, undefined],
       ["Flags on", 2, undefined],
       ["Approvals open", 9, "/approvals"],
-      ["Disabled accounts", 4, "/admin/users?disabled=1"],
+      ["Disabled accounts", 4, "/admin/users?status=DISABLED"],
     ]);
     expect(o.kpis[4].hint).toBe("2 past SLA");
   });

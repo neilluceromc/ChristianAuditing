@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FLAG_SPECS } from "./admin-flags";
 import {
   filterFlags, flagsHref, isFlagUnavailable, parseFlagsState, parseUserRole, parseUserStatus, parseUsersDisabled,
-  parseUsersFilter, userStatusWhere, usersHref, usersListHref, usersListWhere, usersWhere,
+  ACTIVE_ACCOUNTS_WHERE, parseUsersFilter, userStatusWhere, usersHref, usersListHref, usersListWhere, usersWhere,
 } from "./admin-lists";
 import { USER_STATUSES, userStatus } from "./admin-users";
 
@@ -120,6 +120,13 @@ describe("Users & access list filters (spec §4.4, Task 3)", () => {
       "/admin/users?role=viewer&status=PENDING&q=ana+lim&page=2",
     );
     expect(usersListHref({ disabled: true }, 1)).toBe("/admin/users?disabled=1");
+  });
+
+  // Task 4 fix round 1: ?disabled=0 (the overview's "Active accounts") is the accounts that can sign in — approved and
+  // turned on, the same set adminHome counts; a sign-up never reads as active.
+  it("?disabled=0 lists approved, turned-on accounts", () => {
+    expect(usersListWhere({ disabled: false })).toEqual({ AND: [{ approvalState: "APPROVED", disabled: false }] });
+    expect(usersListWhere({ disabled: false })).toEqual({ AND: [ACTIVE_ACCOUNTS_WHERE] });
   });
 
   // Task 4: the selected person (`?sel=`) rides along, so Back and a refresh keep the panel open on them.

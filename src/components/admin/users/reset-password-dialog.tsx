@@ -40,10 +40,13 @@ export function ResetPasswordDialog({
     });
   }
 
+  // While the reset runs, nothing closes the dialog: the password may already have changed, and the new one must not
+  // unmount unseen (fix round 1, Minor 1).
+  const guardedClose = () => { if (!pending) onClose(); };
   return (
     <Dialog
       open
-      onClose={onClose}
+      onClose={guardedClose}
       title={`Reset ${name}'s password?`}
       bottomOnPhone
       footer={
@@ -51,7 +54,7 @@ export function ResetPasswordDialog({
           <Button variant="primary" className="h-11" onClick={onClose}>Done</Button>
         ) : (
           <>
-            <Button variant="ghost" className="h-11" onClick={onClose}>Cancel</Button>
+            <Button variant="ghost" className="h-11" disabled={pending} onClick={guardedClose}>Cancel</Button>
             <Button variant="primary" className="h-11" loading={pending} onClick={reset}>Reset password</Button>
           </>
         )

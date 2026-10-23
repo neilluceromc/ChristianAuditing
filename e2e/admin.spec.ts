@@ -51,7 +51,7 @@ test.describe.serial("users & roles", () => {
     await expect(permanent.getByRole("combobox")).toHaveCount(0);
     await expect(permanent.getByRole("button", { name: /Disable/ })).toHaveCount(0);
     // The full reason lives in the caption BELOW the table, not squeezed into
-    // a 170px cell (user-table.tsx's own comment on permanentLockCaption).
+    // a 170px cell (the old user-table.tsx, retired by Users & access Task 4: Task 5 rewrites this spec).
     await expect(page.getByText(/permanent admin account/)).toBeVisible();
   });
 

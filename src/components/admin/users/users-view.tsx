@@ -2,7 +2,6 @@
 
 import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Role } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Icon } from "@/components/ui/icon";
@@ -10,14 +9,12 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { useToast } from "@/components/ui/toast";
 import { useListNavigation } from "@/components/patterns/list-navigation";
-import { ROLE_LABELS, accountCreated } from "@/lib/admin-users";
 import { usersListHref, type UsersFilter } from "@/lib/admin-lists";
-import type { ActionResult } from "@/server/action-result";
 import type { UserRow, UsersList } from "@/server/modules/admin/queries";
-import { approveSignup, declineSignup, setUserDisabled, updateUser } from "@/server/modules/admin/user-actions";
 import { AddUserSheet } from "./add-user-sheet";
 import { ResetPasswordDialog } from "./reset-password-dialog";
-import { UserPanel, type PanelNotice, type UserChanges } from "./user-panel";
+import { panelHandlers, runUserAction, type RunAction } from "./panel-actions";
+import { UserPanel, type PanelNotice } from "./user-panel";
 import { UsersTable } from "./users-table";
 import { UsersToolbar } from "./users-toolbar";
 import { WaitingChip } from "./waiting-chip";
@@ -81,67 +78,52 @@ export function UsersView({
   const shown = selected ?? (wide ? rows[0] ?? null : null);
   const filtered = !!(filter.role || filter.status || filter.q || filter.disabled !== null);
 
+  /** The open panel has drafts that differ: moving away asks first (fix round 1, Minor 5). */
+  const [dirty, setDirty] = useState(false);
+  /** where the page was asked to go while drafts differed (null = close the details) */
+  const [leaving, setLeaving] = useState<{ to: string | null } | null>(null);
+
   const select = useCallback(
-    (id: string | null) => {
+    (id: string | null, force = false) => {
+      if (!force && dirty && id !== (shown?.id ?? null)) {
+        setLeaving({ to: id });
+        return;
+      }
+      setLeaving(null);
       setNotice(null);
       router.replace(usersListHref(filter, page, id), { scroll: false });
     },
-    [router, filter, page],
+    [router, filter, page, dirty, shown?.id],
   );
 
-  /** Runs one action for `row`: a toast when it stood, the refusal in the panel otherwise; the list refreshes. */
-  function run<T>(row: UserRow, action: () => Promise<ActionResult<T>>, done: (data: T) => string) {
-    setNotice(null);
-    startAction(async () => {
-      const res = await action();
-      if (res.ok) {
-        toast(done(res.data), "settled");
-        router.refresh();
-        return;
-      }
-      if (res.kind === "forbidden") {
-        toast(res.message, "fault");
-        return;
-      }
-      setNotice({ userId: row.id, notice: res.kind === "validation" ? { fieldErrors: res.fieldErrors } : { message: res.message } });
-      // A conflict means the row moved under us: the fresh one replaces the stale panel (its drafts are moot).
-      if (res.kind === "conflict") router.refresh();
-    });
-  }
-
-  const handlers = (row: UserRow) => ({
-    onSave: (changes: UserChanges) =>
-      run(row, () => updateUser({ id: row.id, expectedUpdatedAt: row.updatedAt, ...changes }), (data) => {
-        if (!data.changed) return `Nothing to save for ${row.name}`;
-        const signedOut = changes.role !== undefined || changes.email !== undefined;
-        const who = changes.name ?? row.name;
-        return changes.role
-          ? `${who} is now ${ROLE_LABELS[changes.role]} · signed out`
-          : `Saved ${who}'s changes${signedOut ? " · signed out" : ""}`;
+  const run: RunAction = (row, action, done) =>
+    startAction(() =>
+      runUserAction(row, action, done, {
+        toast: (message, tone) => toast(message, tone),
+        refresh: () => router.refresh(),
+        setNotice: (userId, n) => setNotice(n ? { userId, notice: n } : null),
       }),
-    onSetActive: (active: boolean) =>
-      run(row, () => setUserDisabled({ userId: row.id, disabled: !active, expectedUpdatedAt: row.updatedAt }), () =>
-        active ? `${row.name} can sign in again` : `${row.name}'s account is off · signed out`,
-      ),
-    onReset: () => setResetting({ id: row.id, name: row.name }),
-    onApprove: (role: Role, employeeId: string | null) =>
-      run(row, () => approveSignup({ id: row.id, role, employeeId, expectedUpdatedAt: row.updatedAt }), () =>
-        `${row.name} approved as ${ROLE_LABELS[role]} — they can sign in now`,
-      ),
-    onDecline: () => run(row, () => declineSignup({ id: row.id }), () => `${row.name}'s sign-up declined`),
-  });
+    );
 
   const panelFor = (row: UserRow, onClose?: () => void) => (
     <UserPanel
-      // A saved or refreshed row starts clean: new version, new drafts.
-      key={`${row.id}:${row.updatedAt}`}
+      // Keyed on the person only: a refreshed row is taken over inside the panel, which asks before dropping drafts.
+      key={row.id}
       row={row}
       actorId={actorId}
       now={now}
       busy={busy}
       notice={notice?.userId === row.id ? notice.notice : null}
       onClose={onClose}
-      {...handlers(row)}
+      onClearNotice={() => setNotice(null)}
+      onDirtyChange={setDirty}
+      leaving={leaving !== null}
+      onLeave={(discard) => {
+        const to = leaving?.to ?? null;
+        setLeaving(null);
+        if (discard) select(to, true);
+      }}
+      {...panelHandlers(row, run, (r) => setResetting({ id: r.id, name: r.name }))}
     />
   );
 
@@ -207,8 +189,8 @@ export function UsersView({
           setCreatedId(null);
         }}
         domain={domain}
-        onCreated={({ id, name }) => {
-          toast(accountCreated(name), "settled");
+        onCreated={({ id }) => {
+          // No toast: the sheet itself shows the verbatim "Account created for {name} …" line (fix round 1, Minor 3).
           // Select the new account (the page reads it even when the filters hide it): beside the list at once when
           // wide; otherwise after the sheet closes, since its drawer would open over the temporary password.
           if (wide) select(id);

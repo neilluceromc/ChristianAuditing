@@ -37,6 +37,7 @@ export function EmployeePicker({
   onPick,
   error,
   disabled,
+  focusKey,
 }: {
   label: React.ReactNode;
   hint?: string;
@@ -45,6 +46,8 @@ export function EmployeePicker({
   onPick: (option: ComboOption | null) => void;
   error?: string;
   disabled?: boolean;
+  /** the search field's `data-focus` name, so a caller can move focus to it (users-panel-focus.ts) */
+  focusKey?: string;
 }) {
   const id = useId();
   const [query, setQuery] = useState(initialQuery);
@@ -92,6 +95,7 @@ export function EmployeePicker({
       <label htmlFor={id} className="text-xs font-medium text-fg">{label}</label>
       <Input
         id={id}
+        data-focus={focusKey}
         type="search"
         value={query}
         disabled={disabled}

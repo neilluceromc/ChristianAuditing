@@ -17,7 +17,8 @@ export function parseUsersDisabled(raw: string | null | undefined): UsersDisable
 
 /**
  * The users page lists every User with no other exclusion, so `disabled=0`'s count is the Admin overview's "Active
- * accounts" (`adminHome().users.total - disabled`) and `disabled=1`'s is its "Disabled accounts".
+ * accounts" (`adminHome().users.active`). Task 4: `disabled=0` lists ACTIVE_ACCOUNTS_WHERE below, and the page redirects
+ * `disabled=1` to `?status=DISABLED` (`adminHome().users.disabled`).
  */
 export function usersWhere(disabled: UsersDisabled): Prisma.UserWhereInput {
   return disabled === null ? {} : { disabled };
@@ -79,12 +80,19 @@ export function userStatusWhere(status: UserStatus): Prisma.UserWhereInput {
   }
 }
 
+/**
+ * Task 4 fix round 1: the accounts that can sign in — approved and turned on. `?disabled=0` (the Admin overview's
+ * "Active accounts") lists these, and adminHome counts them, so a waiting or declined sign-up never reads as active.
+ */
+export const ACTIVE_ACCOUNTS_WHERE = { approvalState: "APPROVED", disabled: false } as const satisfies Prisma.UserWhereInput;
+
 /** Every filter given, ANDed; the search matches name, email, employee no. or department, ignoring case. */
 export function usersListWhere(filter: Partial<UsersFilter>): Prisma.UserWhereInput {
   const and: Prisma.UserWhereInput[] = [];
   if (filter.role) and.push({ role: filter.role });
   if (filter.status) and.push(userStatusWhere(filter.status));
-  if (filter.disabled !== undefined && filter.disabled !== null) and.push({ disabled: filter.disabled });
+  if (filter.disabled === true) and.push({ disabled: true });
+  if (filter.disabled === false) and.push(ACTIVE_ACCOUNTS_WHERE);
   const q = filter.q?.trim();
   if (q) {
     const has = { contains: q, mode: "insensitive" as const };

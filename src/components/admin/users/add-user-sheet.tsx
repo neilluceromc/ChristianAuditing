@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import type { Role } from "@prisma/client";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -35,9 +35,13 @@ export function AddUserSheet({
   domain: string | null;
   onCreated: (account: { id: string; name: string }) => void;
 }) {
+  // While Create account runs, nothing closes the sheet (Escape, the veil, ✕, Cancel): the account may already exist,
+  // and its temporary password must not unmount unseen (fix round 1, Minor 1).
+  const creating = useRef(false);
+  const guardedClose = () => { if (!creating.current) onClose(); };
   return (
-    <Drawer open={open} onClose={onClose} title="Add user" width={480} bare className="max-[700px]:w-full!">
-      <AddUserForm domain={domain} onClose={onClose} onCreated={onCreated} />
+    <Drawer open={open} onClose={guardedClose} title="Add user" width={480} bare className="max-[700px]:w-full!">
+      <AddUserForm domain={domain} onClose={guardedClose} onCreated={onCreated} onPending={(p) => { creating.current = p; }} />
     </Drawer>
   );
 }
@@ -52,10 +56,13 @@ export function AddUserForm({
   onClose,
   onCreated,
   initialDone = null,
+  onPending,
 }: {
   domain: string | null;
   onClose: () => void;
   onCreated: (account: { id: string; name: string }) => void;
+  /** told while Create account runs, so the sheet can refuse to close */
+  onPending?: (pending: boolean) => void;
   /** tests only: render the created step */
   initialDone?: CreatedAccount | null;
 }) {
@@ -68,6 +75,7 @@ export function AddUserForm({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [done, setDone] = useState<CreatedAccount | null>(initialDone);
   const [pending, startTransition] = useTransition();
+  useEffect(() => { onPending?.(pending); }, [pending, onPending]);
 
   function create() {
     setErrors({});
@@ -91,8 +99,9 @@ export function AddUserForm({
       <button
         type="button"
         onClick={onClose}
+        disabled={pending}
         aria-label="Close"
-        className="inline-flex size-11 items-center justify-center rounded-(--radius-btn) bg-surface-subtle text-fg-secondary hover:bg-border-faint"
+        className="inline-flex size-11 items-center justify-center rounded-(--radius-btn) bg-surface-subtle text-fg-secondary hover:bg-border-faint disabled:opacity-55"
       >
         ✕
       </button>
@@ -156,7 +165,7 @@ export function AddUserForm({
         </p>
       </div>
       <div className="flex shrink-0 justify-end gap-2 border-t border-border-faint px-5 py-3.5">
-        <Button type="button" variant="ghost" className="h-11" onClick={onClose}>Cancel</Button>
+        <Button type="button" variant="ghost" className="h-11" disabled={pending} onClick={onClose}>Cancel</Button>
         <Button type="submit" variant="primary" className="h-11" loading={pending}>Create account</Button>
       </div>
     </form>
