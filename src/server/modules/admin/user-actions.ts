@@ -8,11 +8,11 @@ import { prisma } from "@/server/db/client";
 import { unstable_update } from "@/server/auth";
 import { actionRole } from "@/server/auth/guards";
 import { bumpSessionVersion, signedSessionUpdate } from "@/server/auth/session-version";
-import { clearCurrentPasswordFailures, clearSignInFailures } from "@/server/auth/sign-in-limit";
+import { currentPasswordKey, signInKey } from "@/server/auth/sign-in-limit";
 import { generateTempPassword } from "@/server/auth/temp-password";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
-import { asActionResult, isUniqueViolation } from "@/server/prisma-errors";
+import { asActionResult, isUniqueViolation, uniqueTarget } from "@/server/prisma-errors";
 import { flagDomain, normalizeEmail } from "@/lib/auth-shared";
 import {
   PERMANENT_LOCK, ROLE_OPTIONS, disableChange, emailProblem, lockReason, roleChange, selfRoleChangeWarning,
@@ -56,6 +56,7 @@ const EMPLOYEE_TAKEN = "That employee already has an account.";
 const EMPLOYEE_NOT_ACTIVE = "Only an active employee can be linked.";
 const EMPLOYEE_GONE = "That employee record no longer exists.";
 const EMAIL_TAKEN = "Another account already uses that email.";
+const ROLE_NEEDS_APPROVAL = "This sign-up hasn't been approved — choose the role when you approve it.";
 
 const id = z.string().min(1);
 const name = z.string().trim().min(2, "Enter their full name.").max(120, "Keep the name under 120 characters.");
@@ -98,7 +99,7 @@ async function inTransaction<T>(run: (tx: Tx) => Promise<ActionResult<T>>): Prom
     return await asActionResult(() => prisma.$transaction(run), { goneMessage: GONE });
   } catch (err) {
     if (isUniqueViolation(err)) {
-      return JSON.stringify(err.meta?.target ?? "").includes("employeeId")
+      return uniqueTarget(err).some((t) => t.includes("employeeId"))
         ? validationError({ employeeId: EMPLOYEE_TAKEN })
         : validationError({ email: EMAIL_TAKEN });
     }
@@ -237,6 +238,8 @@ export async function updateUser(
     }
     const roleChanged = next.role !== undefined && next.role !== target.role;
     if (roleChanged) {
+      // A sign-up's role is set by Approve (approveSignup), never by Save: no role without a decision.
+      if (target.approvalState !== "APPROVED") return conflict(ROLE_NEEDS_APPROVAL);
       const verdict = roleChange(target, next.role!, actor.id);
       if (!verdict.allowed) return conflict(verdict.reason);
       changes.role = next.role;
@@ -422,6 +425,12 @@ export async function resetUserPassword(input: unknown): Promise<ActionResult<{ 
     });
     if (written.count === 0) return conflict(CHANGED_TRY_AGAIN);
     await bumpSessionVersion(tx, target.id);
+    // Spec §4.6: a reset clears the sign-in pause for the email and the account's Account settings count. Inside the
+    // transaction (fix round 1, #1): if the clear fails, the whole reset rolls back, so a reset that stands always
+    // returns its temporary password.
+    await tx.signInAttempt.deleteMany({
+      where: { emailKey: { in: [signInKey(target.email), currentPasswordKey(target.id)] } },
+    });
     await writeAudit(tx, {
       ...auditBase(actor, target),
       action: "password.reset",
@@ -431,12 +440,9 @@ export async function resetUserPassword(input: unknown): Promise<ActionResult<{ 
         ...(target.mustChangePassword ? {} : { mustChangePassword: { from: false, to: true } }),
       },
     });
-    return ok({ email: target.email, id: target.id });
+    return ok(null);
   });
   if (!result.ok) return result;
-  // Spec §4.6: an admin reset clears the sign-in pause for that email, and the Account settings count for the account.
-  await clearSignInFailures(result.data.email);
-  await clearCurrentPasswordFailures(result.data.id);
   revalidatePath(PAGE);
   return ok({ tempPassword });
 }
@@ -444,12 +450,19 @@ export async function resetUserPassword(input: unknown): Promise<ActionResult<{ 
 // ---------------------------------------------------------------------------------------------------------------
 // Approve / decline a sign-up
 
-const approveSchema = z.object({ id, role, employeeId: employeeId.optional() });
+const approveSchema = z.object({
+  id,
+  role,
+  employeeId: employeeId.optional(),
+  /** Optional: the row's `updatedAt` as the panel read it; when given, a row changed since is a conflict. */
+  expectedUpdatedAt: z.string().min(1).optional(),
+});
 
 /**
  * Approve sign-up (spec §4.4, §4.6): APPROVED and turned on in the same write, with the role the admin picked and
  * the employee link (when given). From PENDING, or later from DECLINED. Guarded on the approval state read, so two
- * admins deciding at once can't both win. The person keeps the password they chose: nothing is owed.
+ * admins deciding at once can't both win, and (when the panel passes it) on `expectedUpdatedAt`, so an edit landing
+ * in between isn't silently overwritten. The person keeps the password they chose: nothing is owed.
  */
 export async function approveSignup(input: unknown): Promise<ActionResult<null>> {
   const actor = await actionRole("admin");
@@ -468,13 +481,18 @@ export async function approveSignup(input: unknown): Promise<ActionResult<null>>
     if (target.approvalState !== "PENDING" && target.approvalState !== "DECLINED") {
       return conflict("This account isn't waiting for approval — refresh.");
     }
+    const expected = next.expectedUpdatedAt;
+    if (expected !== undefined && target.updatedAt.toISOString() !== expected) return conflict(CHANGED_TRY_AGAIN);
     const linkChanged = next.employeeId !== undefined && next.employeeId !== target.employeeId;
     if (linkChanged && next.employeeId) {
       const linkError = await employeeProblem(tx, next.employeeId, target.id);
       if (linkError) return validationError({ employeeId: linkError });
     }
     const written = await tx.user.updateMany({
-      where: { id: target.id, approvalState: target.approvalState, isPermanentAdmin: false },
+      where: {
+        id: target.id, approvalState: target.approvalState, isPermanentAdmin: false,
+        ...(expected !== undefined ? { updatedAt: target.updatedAt } : {}),
+      },
       data: {
         approvalState: "APPROVED", disabled: false, role: next.role,
         ...(linkChanged ? { employeeId: next.employeeId } : {}),

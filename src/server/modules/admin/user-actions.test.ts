@@ -19,8 +19,8 @@ const h = vi.hoisted(() => {
     domain: "thebackroomop.com" as string | null,
     checkRate: vi.fn(),
     unstableUpdate: vi.fn(),
-    clearSignIn: vi.fn(),
-    clearCurrent: vi.fn(),
+    attempts: [] as Array<{ id: string; emailKey: string }>,
+    failAttemptDelete: false,
     updateManyCalls: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
     seq: 0,
     clock: 0,
@@ -83,10 +83,6 @@ vi.mock("@/server/auth/guards", () => ({
   actionRole: async (...roles: string[]) => (h.actor && roles.includes(h.actor.role as string) ? h.actor : null),
 }));
 vi.mock("@/server/auth", () => ({ unstable_update: h.unstableUpdate }));
-vi.mock("@/server/auth/sign-in-limit", () => ({
-  clearSignInFailures: h.clearSignIn,
-  clearCurrentPasswordFailures: h.clearCurrent,
-}));
 vi.mock("@/server/rate-limit", () => ({ checkRate: h.checkRate }));
 vi.mock("@/server/audit", () => ({
   writeAudit: async (_tx: unknown, entry: Record<string, unknown>) => {
@@ -102,7 +98,29 @@ vi.mock("@/server/db/client", () => {
     featureFlag: {
       findUnique: async () => (h.domain ? { key: "allowed_domain", enabled: true, value: h.domain } : null),
     },
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+    signInAttempt: {
+      async deleteMany({ where }: { where: { emailKey: { in: string[] } } }) {
+        if (h.failAttemptDelete) throw new Error("connection reset");
+        const before = h.attempts.length;
+        h.attempts = h.attempts.filter((a) => !where.emailKey.in.includes(a.emailKey));
+        return { count: before - h.attempts.length };
+      },
+    },
+    // Rolls back like Postgres: a throw inside the callback restores every table to its state before the call.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      const users = new Map([...h.users].map(([k, v]) => [k, { ...v }]));
+      const audits = [...h.audits];
+      const attempts = [...h.attempts];
+      try {
+        return await fn(prisma);
+      } catch (err) {
+        h.users.clear();
+        for (const [k, v] of users) h.users.set(k, v);
+        h.audits = audits;
+        h.attempts = attempts;
+        throw err;
+      }
+    },
   };
   return { prisma };
 });
@@ -138,6 +156,12 @@ beforeEach(() => {
   h.audits = [];
   h.updateManyCalls = [];
   h.domain = "thebackroomop.com";
+  h.failAttemptDelete = false;
+  h.attempts = [
+    { id: "s1", emailKey: "nina@thebackroomop.com" },
+    { id: "s2", emailKey: "CURRENT:nina" },
+    { id: "s3", emailKey: "m.cruz@thebackroomop.com" },
+  ];
   h.checkRate.mockResolvedValue({ allowed: true, retryAfterSec: 0 });
   h.actor = put({ id: "admin-1", name: "M. Cruz", email: "m.cruz@thebackroomop.com", role: "admin", sessionVersion: 0 });
   put({ id: "perm", name: "Owner Admin", email: "owner@thebackroomop.com", role: "admin", isPermanentAdmin: true });
@@ -360,8 +384,8 @@ describe("resetUserPassword", () => {
     expect(row("nina")).toMatchObject({ mustChangePassword: true, sessionVersion: 4 });
     expect(row("nina").passwordChangedAt).toBeInstanceOf(Date);
     expect(await bcrypt.compare(r.data.tempPassword, row("nina").passwordHash as string)).toBe(true);
-    expect(h.clearSignIn).toHaveBeenCalledWith("nina@thebackroomop.com");
-    expect(h.clearCurrent).toHaveBeenCalledWith("nina");
+    // Both buckets cleared, in the reset's own transaction; another email's count is untouched.
+    expect(h.attempts.map((a) => a.emailKey)).toEqual(["m.cruz@thebackroomop.com"]);
     expect(h.unstableUpdate).not.toHaveBeenCalled();
   });
 
@@ -381,12 +405,22 @@ describe("resetUserPassword", () => {
     expect(h.updateManyCalls[0].where).toMatchObject({ id: "nina", sessionVersion: 3, isPermanentAdmin: false });
   });
 
+  // Fix round 1 (#1): the clears are in the reset's transaction, so a reset never stands without its password shown.
+  it("rolls the whole reset back when clearing the failure counts fails", async () => {
+    const before = { ...row("nina") };
+    h.failAttemptDelete = true;
+    await expect(resetUserPassword({ id: "nina" })).rejects.toThrow("connection reset");
+    expect(row("nina")).toEqual(before); // same hash, version and owed flag
+    expect(h.audits).toEqual([]);
+    expect(h.attempts).toHaveLength(3);
+  });
+
   it("refuses your own account (Account settings is the place) and an account waiting for approval", async () => {
     expect(await resetUserPassword({ id: "admin-1" })).toMatchObject({ ok: false, kind: "conflict" });
     put({ id: "pend", approvalState: "PENDING", disabled: true });
     expect(await resetUserPassword({ id: "pend" })).toMatchObject({ ok: false, kind: "conflict" });
     expect(h.audits).toEqual([]);
-    expect(h.clearSignIn).not.toHaveBeenCalled();
+    expect(h.attempts).toHaveLength(3);
   });
 });
 
@@ -479,5 +513,60 @@ describe("approveSignup and declineSignup", () => {
       ok: false, kind: "validation", fieldErrors: { employeeId: "That employee already has an account." },
     });
     expect(row("pend").approvalState).toBe("PENDING");
+  });
+
+  it("approve with expectedUpdatedAt: a row edited since is a conflict, and the guard carries it", async () => {
+    const stale = iso("pend");
+    await updateUser({ id: "pend", name: "Ana B. Lim", expectedUpdatedAt: stale });
+    h.audits = [];
+    h.updateManyCalls = [];
+    expect(await approveSignup({ id: "pend", role: "viewer", expectedUpdatedAt: stale })).toEqual({
+      ok: false, kind: "conflict", message: CHANGED_TRY_AGAIN,
+    });
+    expect(row("pend").approvalState).toBe("PENDING");
+    expect(h.updateManyCalls).toEqual([]);
+    expect(await approveSignup({ id: "pend", role: "viewer", expectedUpdatedAt: iso("pend") })).toMatchObject({ ok: true });
+    expect(h.updateManyCalls[0].where.updatedAt).toBeInstanceOf(Date);
+  });
+
+  /** Another admin's decision lands between this action's read and its guarded write. */
+  async function withDecisionBetween(state: "APPROVED" | "DECLINED", run: () => Promise<unknown>) {
+    const realUpdateMany = userTable.updateMany;
+    userTable.updateMany = async (args) => {
+      row("pend").approvalState = state;
+      return realUpdateMany(args);
+    };
+    try {
+      return await run();
+    } finally {
+      userTable.updateMany = realUpdateMany;
+    }
+  }
+
+  it("approve loses the race to a decision made after its read: conflict, nothing written", async () => {
+    const r = await withDecisionBetween("DECLINED", () => approveSignup({ id: "pend", role: "finance_staff" }));
+    expect(r).toEqual({ ok: false, kind: "conflict", message: "Someone else just decided this sign-up — refresh." });
+    expect(row("pend")).toMatchObject({ approvalState: "DECLINED", role: "viewer", disabled: true, approvalDecidedById: null });
+    expect(h.audits).toEqual([]);
+  });
+
+  it("decline loses the race to an approval made after its read: conflict, nothing written", async () => {
+    const r = await withDecisionBetween("APPROVED", () => declineSignup({ id: "pend" }));
+    expect(r).toEqual({ ok: false, kind: "conflict", message: "Someone else just decided this sign-up — refresh." });
+    expect(row("pend")).toMatchObject({ approvalState: "APPROVED", approvalDecidedById: null });
+    expect(h.audits).toEqual([]);
+  });
+
+  // Fix round 1 (#3): a sign-up's role is chosen by Approve, never by Save.
+  it("updateUser refuses a role change on a sign-up that isn't approved, but still edits its name", async () => {
+    for (const state of ["PENDING", "DECLINED"] as const) {
+      row("pend").approvalState = state;
+      expect(await updateUser({ id: "pend", role: "admin", expectedUpdatedAt: iso("pend") })).toEqual({
+        ok: false, kind: "conflict", message: "This sign-up hasn't been approved — choose the role when you approve it.",
+      });
+      expect(row("pend")).toMatchObject({ role: "viewer", sessionVersion: 0 });
+    }
+    expect(h.updateManyCalls).toEqual([]);
+    expect(await updateUser({ id: "pend", name: "Ana B. Lim", expectedUpdatedAt: iso("pend") })).toMatchObject({ ok: true });
   });
 });

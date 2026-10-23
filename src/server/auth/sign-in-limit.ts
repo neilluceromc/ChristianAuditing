@@ -28,7 +28,12 @@ export const currentPasswordKey = (userId: string) => `CURRENT:${userId}`;
 /** The first key of the two-key advisory lock: sign-in attempts' own namespace, apart from any other lock. */
 const LOCK_NAMESPACE = 410_024;
 
-const key = (emailKey: string) => normalizeEmail(emailKey).slice(0, 320);
+/**
+ * The sign-in bucket key for an email: trimmed, lower-cased, at most 320 characters. Exported (with
+ * currentPasswordKey) so a password reset can clear both buckets inside its own transaction.
+ */
+export const signInKey = (emailKey: string) => normalizeEmail(emailKey).slice(0, 320);
+const key = signInKey;
 type Db = Pick<Prisma.TransactionClient, "signInAttempt">;
 
 /**
