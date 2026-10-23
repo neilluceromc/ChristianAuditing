@@ -30,7 +30,7 @@ CRIS still runs on staging "quick sign-in", and that shortcut is due to be remov
    - cards, plus a full-screen details sheet, on a phone;
    - Add user as a side sheet;
    - Reset password as ask-then-show-once;
-   - Disable with an inline confirm;
+   - an "Account active" on/off switch, with an inline confirm when turning it off;
    - an "Unsaved changes" bar.
 7. **Three wrong passwords pause sign-in** (owner, 2026-10-24: "too many wrong password only has 3 failed tries").
 
@@ -150,7 +150,11 @@ Rename the page to **Users & access**. Rebuild it per the `Users2`, `Tablet2` an
   - When a linked employee is offboarding or offboarded, the account is **not** changed automatically. The list and the panel show an amber "Employee offboarded" note, and the admin decides whether to disable it **(my call)**.
 - **Name and email:** editable inline (pencil, then fields) **(my call; the owner asked for "edit users")**. The email must match the allowed domain and be unique.
 - **Sign-in:** status, last sign-in, password (the date the person set it, or "Temporary, given {date}"), and "Account created {date} by {admin}". It has **Reset password…**.
-- **Account:** **Disable account…** with an inline confirm: "Disable {name}? They're signed out now and can't sign in. Their history stays." **Enable account** needs no confirm.
+- **Account:** an **"Account active" on/off switch** (owner, 2026-10-24: "on/off to disable their account is still needed").
+  - Turning it **off** asks inline first: "Turn off {name}'s account? They're signed out now and can't sign in. Their history stays." Confirming disables the account and bumps `sessionVersion`.
+  - Turning it **on** needs no confirm.
+  - The switch is `role="switch"` with `aria-checked`, and is labelled "Account active".
+  - It is greyed out, with the reason, for the permanent admin and for your own account.
 - An **Unsaved changes** bar (Discard / Save) appears only when a field differs. A save writes every changed field in one action.
 
 **Approving a sign-up.** A `PENDING` account's panel replaces Sign-in and Account with an **Approve sign-up** section:
