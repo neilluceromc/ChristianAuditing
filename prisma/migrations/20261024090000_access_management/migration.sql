@@ -48,11 +48,13 @@ ALTER TABLE "User" ADD CONSTRAINT "User_createdById_fkey" FOREIGN KEY ("createdB
 -- ── 5. Data: sign-ups still waiting become PENDING ────────────────────
 -- Before this release a sign-up under SIGNUP_REQUIRES_APPROVAL=1 was created disabled, with a `signup` audit entry
 -- (entityType 'user', entityId = the new user), and an admin "approved" it by enabling it. So a disabled account
--- with a signup entry and no enable or disable entry has only ever waited: it becomes PENDING, and stops being
--- disabled, since waiting is no longer spelled `disabled`. An account an admin ever enabled or disabled keeps its
--- state. Everyone else stays APPROVED (the column default).
+-- with a signup entry and no enable or disable entry has only ever waited: it becomes PENDING. An account an admin
+-- ever enabled or disabled keeps its state. Everyone else stays APPROVED (the column default).
+-- Fix round 1 (I-2, owner's ruling): a waiting sign-up STAYS disabled as well. The previous deployment keeps serving
+-- while this migration runs in the build (and again after any rollback past this release); it knows only
+-- `disabled`, so it must keep refusing them. Approving a sign-up clears `disabled` together with setting APPROVED.
 UPDATE "User" u
-SET "approvalState" = 'PENDING', "disabled" = false
+SET "approvalState" = 'PENDING'
 WHERE u."disabled" = true
   AND EXISTS (
     SELECT 1 FROM "AuditEntry" a

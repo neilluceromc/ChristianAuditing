@@ -2,42 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * Users & access (spec §4.6, Review Focus #5): three failed sign-ins for one lower-cased email within 15 minutes
- * pause that email for 15 minutes. The SignInAttempt table is faked in memory with the same filters Postgres applies.
+ * pause that email for 15 minutes. The SignInAttempt table and the advisory-locked transaction are the in-memory
+ * double in sign-in-attempts.fake.ts.
  */
 
-type Row = { id: string; emailKey: string; createdAt: Date };
+vi.mock("../db/client", async () => {
+  const fake = await import("./sign-in-attempts.fake");
+  return { prisma: { signInAttempt: fake.signInAttemptTable, $transaction: fake.fakeTransaction } };
+});
 
-const h = vi.hoisted(() => ({ rows: [] as Row[], seq: 0 }));
-
-vi.mock("../db/client", () => ({
-  prisma: {
-    signInAttempt: {
-      create: async ({ data }: { data: { emailKey: string; createdAt?: Date } }) => {
-        const row = { id: `a${++h.seq}`, emailKey: data.emailKey, createdAt: data.createdAt ?? new Date() };
-        h.rows.push(row);
-        return row;
-      },
-      findMany: async ({ where, orderBy, take }: {
-        where: { emailKey: string; createdAt: { gt: Date } };
-        orderBy?: { createdAt: "asc" | "desc" };
-        take?: number;
-      }) => {
-        const found = h.rows
-          .filter((r) => r.emailKey === where.emailKey && r.createdAt > where.createdAt.gt)
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-        if (orderBy?.createdAt === "desc") found.reverse();
-        return (take ? found.slice(0, take) : found).map((r) => ({ createdAt: r.createdAt }));
-      },
-      deleteMany: async ({ where }: { where: { emailKey: string } }) => {
-        const before = h.rows.length;
-        h.rows = h.rows.filter((r) => r.emailKey !== where.emailKey);
-        return { count: before - h.rows.length };
-      },
-    },
-  },
-}));
-
-import { SIGN_IN_LIMIT, clearSignInFailures, recordSignInFailure, signInPaused } from "./sign-in-limit";
+import { attempts, resetAttempts } from "./sign-in-attempts.fake";
+import {
+  SIGN_IN_LIMIT, clearSignInFailures, recordSignInFailure, releaseSignInAttempt, reserveSignInAttempt, signInPaused,
+} from "./sign-in-limit";
 
 const T0 = new Date("2026-10-24T02:00:00Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -49,8 +26,9 @@ async function failAt(email: string, ms: number) {
 }
 
 beforeEach(() => {
-  h.rows = [];
+  resetAttempts();
   vi.useFakeTimers();
+  vi.setSystemTime(T0);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -108,7 +86,7 @@ describe("signInPaused", () => {
     await failAt("Nina@Example.com", 0);
     await failAt(" nina@example.com ", MIN);
     await failAt("NINA@EXAMPLE.COM", 2 * MIN);
-    expect(h.rows.every((r) => r.emailKey === "nina@example.com")).toBe(true);
+    expect(attempts.rows.every((r) => r.emailKey === "nina@example.com")).toBe(true);
     expect(await signInPaused("nina@example.com", at(3 * MIN))).toBe(true);
     expect(await signInPaused("other@example.com", at(3 * MIN))).toBe(false);
   });
@@ -123,5 +101,41 @@ describe("clearSignInFailures", () => {
     await clearSignInFailures("A@B.co");
     expect(await signInPaused("a@b.co", at(3 * MIN))).toBe(false);
     expect(await signInPaused("c@b.co", at(3 * MIN))).toBe(true);
+  });
+});
+
+describe("reserveSignInAttempt (fix round 1, I-1)", () => {
+  it("records the attempt up front, under the email's lock, until the third; the 4th is paused", async () => {
+    const results = [];
+    for (let i = 0; i < 4; i++) results.push(await reserveSignInAttempt("Nina@Example.com"));
+    expect(results.slice(0, 3).map((r) => r.paused)).toEqual([false, false, false]);
+    expect(results[3]).toEqual({ paused: true });
+    expect(attempts.rows).toHaveLength(3); // a paused attempt is not recorded
+    expect(attempts.locked).toEqual(Array(4).fill("nina@example.com"));
+  });
+
+  it("a burst of parallel attempts gets three tries, not one per request", async () => {
+    const results = await Promise.all(Array.from({ length: 8 }, () => reserveSignInAttempt("a@b.co")));
+    expect(results.filter((r) => !r.paused)).toHaveLength(3);
+    expect(results.filter((r) => r.paused)).toHaveLength(5);
+    expect(attempts.rows).toHaveLength(3);
+  });
+
+  it("locks per email: another email's burst is not held back", async () => {
+    const results = await Promise.all([
+      ...Array.from({ length: 4 }, () => reserveSignInAttempt("a@b.co")),
+      ...Array.from({ length: 2 }, () => reserveSignInAttempt("c@b.co")),
+    ]);
+    expect(results.slice(4).every((r) => !r.paused)).toBe(true);
+  });
+
+  it("a released reservation no longer counts", async () => {
+    const first = await reserveSignInAttempt("a@b.co");
+    await reserveSignInAttempt("a@b.co");
+    await reserveSignInAttempt("a@b.co");
+    if (first.paused) throw new Error("not reserved");
+    await releaseSignInAttempt(first.attemptId);
+    expect(attempts.rows).toHaveLength(2);
+    expect(await reserveSignInAttempt("a@b.co")).toMatchObject({ paused: false });
   });
 });

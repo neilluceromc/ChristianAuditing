@@ -7,7 +7,7 @@ import { normalizeEmail } from "@/lib/auth-shared";
 import { isQuickLoginEmail, parseQuickLoginEmails, quickLoginUser } from "@/lib/quick-login";
 import { authConfigEdge } from "./config.edge";
 import { passwordMatches } from "./password-check";
-import { recordSignInFailure, signInPaused } from "./sign-in-limit";
+import { clearSignInFailures, releaseSignInAttempt, reserveSignInAttempt } from "./sign-in-limit";
 
 const providers: NextAuthConfig["providers"] = [
   Credentials({
@@ -16,19 +16,25 @@ const providers: NextAuthConfig["providers"] = [
       const email = normalizeEmail(String(credentials?.email ?? "")).slice(0, 320);
       const password = String(credentials?.password ?? "");
       if (!email || !password) return null;
-      // Users & access (spec §4.6): the sign-in form (signInWithCredentials) checks the pause and counts failures
-      // before it calls signIn. These two lines hold the same rule for a direct POST to /api/auth/callback/credentials,
-      // which never passes through that action. From the action they are no-ops: a paused or wrong attempt never
-      // reaches signIn, and a right one has just cleared the count.
-      if (await signInPaused(email)) return null;
+      // Users & access (spec §4.6): the same rule as the sign-in form (signInWithCredentials), for a direct POST to
+      // /api/auth/callback/credentials, which never passes through that action. Reserve under the per-email lock
+      // (refused when paused), check the password once, then keep, release or clear the attempt exactly as the form
+      // does. From the form this runs only after a right password, whose count the form has just cleared.
+      const attempt = await reserveSignInAttempt(email);
+      if (attempt.paused) return null;
       const user = await prisma.user.findUnique({ where: { email } });
       // Always one bcrypt compare (a dummy hash when the row is missing/passwordless)
       // so response timing doesn't reveal whether an account exists or is disabled.
-      if (!(await passwordMatches(password, user?.passwordHash))) {
-        await recordSignInFailure(email);
+      const matches = await passwordMatches(password, user?.passwordHash);
+      if (!user || !matches) return null; // the reserved attempt stays as the failure
+      if (user.approvalState !== "APPROVED") {
+        await releaseSignInAttempt(attempt.attemptId); // the right password: not a failure
         return null;
       }
-      if (!user || user.disabled || user.approvalState !== "APPROVED") return null;
+      if (user.disabled) return null; // counted, so it reads exactly like a wrong password (fix round 1, M-2)
+      // Fix round 1 (M-1): a successful sign-in clears the count and stamps lastSignInAt on this path too.
+      await clearSignInFailures(email);
+      await prisma.user.update({ where: { id: user.id }, data: { lastSignInAt: new Date() } });
       return {
         id: user.id,
         email: user.email,
@@ -81,7 +87,8 @@ if (parseQuickLoginEmails(process.env.QUICK_LOGIN_EMAILS).length > 0) {
   );
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+// unstable_update: for Tasks 2/3, always with `await signedSessionUpdate(...)` (session-version.ts) as its argument.
+export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ...authConfigEdge,
   providers,
 });

@@ -70,6 +70,27 @@ describe("jwt on trigger: update", () => {
   });
 });
 
+describe("sessionUpdateProof's key (fix round 1, M-3)", () => {
+  const hex = (buf: ArrayBuffer) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+  const message = "cris.session-update.v1|u1|2|0";
+
+  it("is HKDF-SHA256 of AUTH_SECRET labelled cris-session-update, not the raw secret", async () => {
+    const enc = new TextEncoder();
+    const secret = enc.encode("test-secret-test-secret-test-secret");
+    const raw = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const rawProof = hex(await crypto.subtle.sign("HMAC", raw, enc.encode(message)));
+    const ikm = await crypto.subtle.importKey("raw", secret, "HKDF", false, ["deriveKey"]);
+    const label = enc.encode("cris-session-update");
+    const derived = await crypto.subtle.deriveKey(
+      { name: "HKDF", hash: "SHA-256", salt: label, info: label }, ikm, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"],
+    );
+    const derivedProof = hex(await crypto.subtle.sign("HMAC", derived, enc.encode(message)));
+    const proof = await sessionUpdateProof("u1", 2, false);
+    expect(proof).toBe(derivedProof);
+    expect(proof).not.toBe(rawProof);
+  });
+});
+
 describe("session", () => {
   it("exposes sessionVersion and mustChangePassword", () => {
     const out = authConfigEdge.callbacks.session({

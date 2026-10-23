@@ -52,13 +52,27 @@ describe("access management migration", () => {
     expect(flat).toContain(`CREATE INDEX "SignInAttempt_emailKey_createdAt_idx" ON "SignInAttempt"("emailKey", "createdAt");`);
   });
 
-  it("turns waiting sign-ups (disabled, a signup entry, never enabled or disabled by an admin) into PENDING, enabled", () => {
-    const update = /UPDATE "User" u SET "approvalState" = 'PENDING', "disabled" = false WHERE (.*?);/.exec(flat);
+  it("turns waiting sign-ups (disabled, a signup entry, never enabled or disabled by an admin) into PENDING", () => {
+    const update = /UPDATE "User" u SET "approvalState" = 'PENDING' WHERE (.*?);/.exec(flat);
     expect(update, "the data step's UPDATE").not.toBeNull();
     const where = update![1];
     expect(where).toContain(`u."disabled" = true`);
     expect(where).toMatch(/EXISTS \( SELECT 1 FROM "AuditEntry" a WHERE a\."entityType" = 'user' AND a\."entityId" = u\."id" AND a\."action" = 'signup' \)/);
     expect(where).toMatch(/NOT EXISTS \( SELECT 1 FROM "AuditEntry" a WHERE a\."entityType" = 'user' AND a\."entityId" = u\."id" AND a\."action" IN \('enable', 'disable'\) \)/);
+  });
+
+  it("leaves them disabled too (fix round 1, I-2): code still serving during the deploy, or after a rollback, refuses them", () => {
+    expect(flat).not.toMatch(/"disabled" = false/);
+    const set = /UPDATE "User" u SET (.*?) WHERE/.exec(flat)![1];
+    expect(set).toBe(`"approvalState" = 'PENDING'`);
+  });
+
+  it("indexes SignInAttempt.createdAt for the prune, in the follow-up migration (fix round 1, M-4)", () => {
+    const followUp = readFileSync(
+      path.resolve(__dirname, "../../../prisma/migrations/20261024091000_sign_in_attempt_created_index/migration.sql"),
+      "utf8",
+    );
+    expect(followUp).toContain(`CREATE INDEX "SignInAttempt_createdAt_idx" ON "SignInAttempt"("createdAt");`);
   });
 
   it("runs the data step after the columns exist", () => {

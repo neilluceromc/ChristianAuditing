@@ -24,8 +24,8 @@ vi.mock("./guards", () => ({ requireUser: vi.fn() }));
 vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn() }));
 // Users & access: the pause and the password check have their own tests (sign-in-limit, actions); here they pass.
 vi.mock("./sign-in-limit", () => ({
-  signInPaused: async () => false,
-  recordSignInFailure: async () => {},
+  reserveSignInAttempt: async () => ({ paused: false, attemptId: "a1" }),
+  releaseSignInAttempt: async () => {},
   clearSignInFailures: async () => {},
 }));
 vi.mock("./password-check", () => ({ passwordMatches: async () => true }));

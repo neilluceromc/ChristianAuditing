@@ -19,7 +19,6 @@ const h = vi.hoisted(() => ({
   cookieSet: vi.fn(),
   userFindUnique: vi.fn(),
   userUpdate: vi.fn(),
-  attempts: [] as Array<{ emailKey: string; createdAt: Date }>,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -32,45 +31,29 @@ vi.mock("next-auth", () => ({ AuthError: class AuthError extends Error {} }));
 vi.mock("./index", () => ({ signIn: h.signIn, signOut: h.signOut, auth: h.auth }));
 vi.mock("./guards", () => ({ requireUser: h.requireUser }));
 vi.mock("@/server/ui-prefs", () => ({ saveUiPref: h.saveUiPref }));
-vi.mock("../db/client", () => ({
-  prisma: {
-    featureFlag: { findUnique: async () => null },
-    user: {
-      findUnique: h.userFindUnique,
-      create: h.userCreate,
-      update: h.userUpdate,
+// The SignInAttempt table and the advisory-locked interactive transaction are the in-memory double; its
+// $transaction also takes the array form signOutAction uses.
+vi.mock("../db/client", async () => {
+  const fake = await import("./sign-in-attempts.fake");
+  return {
+    prisma: {
+      featureFlag: { findUnique: async () => null },
+      user: {
+        findUnique: h.userFindUnique,
+        create: h.userCreate,
+        update: h.userUpdate,
+      },
+      signInAttempt: fake.signInAttemptTable,
+      auditEntry: { create: h.auditCreate },
+      crisConversation: { updateMany: h.convUpdateMany },
+      crisPendingAction: { deleteMany: h.pendingDeleteMany },
+      $transaction: fake.fakeTransaction,
     },
-    // The SignInAttempt table in memory, filtered the way Postgres would (sign-in-limit.ts's three queries)
-    signInAttempt: {
-      create: async ({ data }: { data: { emailKey: string; createdAt?: Date } }) => {
-        h.attempts.push({ emailKey: data.emailKey, createdAt: data.createdAt ?? new Date() });
-        return {};
-      },
-      findMany: async ({ where, orderBy, take }: {
-        where: { emailKey: string; createdAt: { gt: Date } };
-        orderBy?: { createdAt: "asc" | "desc" };
-        take?: number;
-      }) => {
-        const found = h.attempts
-          .filter((r) => r.emailKey === where.emailKey && r.createdAt > where.createdAt.gt)
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-        if (orderBy?.createdAt === "desc") found.reverse();
-        return (take ? found.slice(0, take) : found).map((r) => ({ createdAt: r.createdAt }));
-      },
-      deleteMany: async ({ where }: { where: { emailKey: string } }) => {
-        const before = h.attempts.length;
-        h.attempts = h.attempts.filter((r) => r.emailKey !== where.emailKey);
-        return { count: before - h.attempts.length };
-      },
-    },
-    auditEntry: { create: h.auditCreate },
-    crisConversation: { updateMany: h.convUpdateMany },
-    crisPendingAction: { deleteMany: h.pendingDeleteMany },
-    $transaction: async (ops: Array<Promise<unknown>>) => Promise.all(ops),
-  },
-}));
+  };
+});
 
 import bcrypt from "bcryptjs";
+import { attempts, resetAttempts } from "./sign-in-attempts.fake";
 import { quickSignIn, signInWithCredentials, signOutAction, signUp, switchWorkspace } from "./actions";
 
 function form(): FormData {
@@ -88,7 +71,7 @@ beforeEach(() => {
   h.userCreate.mockResolvedValue({ id: "u-new", name: "Nina Reyes" });
   h.userFindUnique.mockReset().mockResolvedValue(null);
   h.userUpdate.mockReset().mockResolvedValue({});
-  h.attempts = [];
+  resetAttempts();
   h.auditCreate.mockResolvedValue({});
   h.signIn.mockResolvedValue(undefined);
 });
@@ -245,7 +228,7 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
 
   it("three wrong passwords for an unknown email: the 4th attempt gets the pause copy", async () => {
     for (let i = 0; i < 3; i++) expect(await login("ghost@thebackroomop.com", `guess-${i}`)).toEqual({ error: WRONG });
-    expect(h.attempts).toHaveLength(3);
+    expect(attempts.rows).toHaveLength(3);
     expect(await login("ghost@thebackroomop.com", "guess-4")).toEqual({ error: PAUSED });
     expect(h.signIn).not.toHaveBeenCalled();
   });
@@ -253,7 +236,7 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
   it("the same for a known email, even with the right password on the 4th attempt", async () => {
     h.userFindUnique.mockResolvedValue(account());
     for (let i = 0; i < 3; i++) expect(await login("Nina@TheBackroomOp.com", `guess-${i}`)).toEqual({ error: WRONG });
-    expect(h.attempts.every((a) => a.emailKey === "nina@thebackroomop.com")).toBe(true);
+    expect(attempts.rows.every((a) => a.emailKey === "nina@thebackroomop.com")).toBe(true);
     const compare = vi.spyOn(bcrypt, "compare");
     expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: PAUSED });
     expect(compare).not.toHaveBeenCalled(); // paused: the password is not even checked
@@ -263,17 +246,25 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
   });
 
   it("right password for a PENDING account: the PENDING copy, no failure recorded, no session", async () => {
-    h.userFindUnique.mockResolvedValue(account({ approvalState: "PENDING" }));
+    // Fix round 1 (I-2): a waiting sign-up is disabled as well; its copy still wins over the generic one
+    h.userFindUnique.mockResolvedValue(account({ approvalState: "PENDING", disabled: true }));
     expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: PENDING });
-    expect(h.attempts).toHaveLength(0);
+    expect(attempts.rows).toHaveLength(0);
     expect(h.signIn).not.toHaveBeenCalled();
   });
 
-  it("right password for a DECLINED account: the DECLINED copy", async () => {
+  it("right password for a DECLINED account: the DECLINED copy, even when it is disabled", async () => {
+    h.userFindUnique.mockResolvedValue(account({ approvalState: "DECLINED", disabled: true }));
+    expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: DECLINED });
+    expect(attempts.rows).toHaveLength(0);
+    expect(h.signIn).not.toHaveBeenCalled();
     h.userFindUnique.mockResolvedValue(account({ approvalState: "DECLINED" }));
     expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: DECLINED });
-    expect(h.attempts).toHaveLength(0);
-    expect(h.signIn).not.toHaveBeenCalled();
+  });
+
+  it("the PENDING copy shows for an enabled PENDING account too", async () => {
+    h.userFindUnique.mockResolvedValue(account({ approvalState: "PENDING" }));
+    expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: PENDING });
   });
 
   it("a wrong password for a PENDING or DECLINED account says only 'wrong', and counts", async () => {
@@ -281,25 +272,41 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
       h.userFindUnique.mockResolvedValue(account({ approvalState }));
       expect(await login("nina@thebackroomop.com", "not it")).toEqual({ error: WRONG });
     }
-    expect(h.attempts).toHaveLength(2);
+    expect(attempts.rows).toHaveLength(2);
   });
 
-  it("the right password for a disabled account is refused with the usual copy", async () => {
+  it("the right password for a turned-off (APPROVED) account reads exactly like a wrong one: same copy, counted", async () => {
     h.userFindUnique.mockResolvedValue(account({ disabled: true }));
-    expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: WRONG });
+    for (let i = 0; i < 3; i++) {
+      expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: WRONG });
+    }
+    expect(attempts.rows).toHaveLength(3); // fix round 1, M-2: the 4th is paused, as after three wrong passwords
+    expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: PAUSED });
     expect(h.signIn).not.toHaveBeenCalled();
+  });
+
+  it("a burst of parallel wrong passwords gets three tries; the rest are paused (fix round 1, I-1)", async () => {
+    h.userFindUnique.mockResolvedValue(account());
+    const compare = vi.spyOn(bcrypt, "compare");
+    const replies = await Promise.all(Array.from({ length: 6 }, (_, i) => login("nina@thebackroomop.com", `guess-${i}`)));
+    expect(replies.filter((r) => r.error === WRONG)).toHaveLength(3);
+    expect(replies.filter((r) => r.error === PAUSED)).toHaveLength(3);
+    expect(compare).toHaveBeenCalledTimes(3); // only the three that got through checked a password
+    compare.mockRestore();
+    expect(attempts.rows).toHaveLength(3);
+    expect(await login("nina@thebackroomop.com", "correct horse battery")).toEqual({ error: PAUSED });
   });
 
   it("success clears the failures, writes lastSignInAt, then signs in and goes to a safe next", async () => {
     h.userFindUnique.mockResolvedValue(account());
     await login("nina@thebackroomop.com", "nope-1");
     await login("nina@thebackroomop.com", "nope-2");
-    h.attempts.push({ emailKey: "someone@else.com", createdAt: new Date() });
+    attempts.rows.push({ id: "other", emailKey: "someone@else.com", createdAt: new Date() });
     const before = Date.now();
     await expect(login(" NINA@thebackroomop.com ", "correct horse battery", "/finance/assets")).rejects.toThrow(
       "REDIRECT:/finance/assets",
     );
-    expect(h.attempts).toEqual([{ emailKey: "someone@else.com", createdAt: expect.any(Date) }]);
+    expect(attempts.rows).toEqual([{ id: "other", emailKey: "someone@else.com", createdAt: expect.any(Date) }]);
     expect(h.userUpdate).toHaveBeenCalledTimes(1);
     const { where, data } = h.userUpdate.mock.calls[0][0];
     expect(where).toEqual({ id: "u1" });
@@ -333,7 +340,7 @@ describe("signInWithCredentials (Users & access spec §4.6, Review Focus #5)", (
   it("an empty email or password is refused without counting", async () => {
     expect(await login("", "x")).toEqual({ error: WRONG });
     expect(await login("nina@thebackroomop.com", "")).toEqual({ error: WRONG });
-    expect(h.attempts).toHaveLength(0);
+    expect(attempts.rows).toHaveLength(0);
   });
 });
 

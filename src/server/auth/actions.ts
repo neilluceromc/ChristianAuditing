@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import { auth, signIn, signOut } from "./index";
 import { requireUser } from "./guards";
 import { passwordMatches } from "./password-check";
-import { clearSignInFailures, recordSignInFailure, signInPaused } from "./sign-in-limit";
+import { clearSignInFailures, releaseSignInAttempt, reserveSignInAttempt } from "./sign-in-limit";
 import { prisma } from "../db/client";
 import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
@@ -29,11 +29,16 @@ function safeNext(raw: FormDataEntryValue | null): string | undefined {
 }
 
 /**
- * Users & access (spec §4.6). In order: a paused email is refused before its password is checked; the password is
- * checked once (bcrypt, the dummy hash for an unknown email); a wrong one is counted; a right one for an account
- * still waiting, or declined, gets its own copy and is not counted; a right one for an active account clears the
- * count, stamps lastSignInAt and signs in. Auth.js's signIn then runs the provider's authorize(), which checks the
- * password again: that second compare is the provider's own gate and happens only on success.
+ * Users & access (spec §4.6). In order:
+ * - under a per-email lock, a paused email is refused before its password is checked, and otherwise this attempt is
+ *   recorded up front as a failure (fix round 1, I-1: a parallel burst gets 3 tries, not one per request);
+ * - the password is checked once (bcrypt, the dummy hash for an unknown email); a wrong one keeps its record;
+ * - a right one for an account still waiting, or declined, gets its own copy, checked before `disabled` (a waiting
+ *   sign-up is also disabled, I-2), and its record is taken back;
+ * - a right one for a turned-off account keeps its record, so the reply matches a wrong password (M-2);
+ * - a right one for an active account clears the count, stamps lastSignInAt and signs in.
+ * Auth.js's signIn then runs the provider's authorize(), which checks the password again: that second compare is the
+ * provider's own gate and happens only on success.
  */
 export async function signInWithCredentials(
   _prev: AuthFormState,
@@ -42,20 +47,22 @@ export async function signInWithCredentials(
   const email = normalizeEmail(String(formData.get("email") ?? "")).slice(0, 320);
   const password = String(formData.get("password") ?? "");
   if (!email || !password) return { error: SIGN_IN_COPY.wrong };
-  if (await signInPaused(email)) return { error: SIGN_IN_COPY.paused };
+  const attempt = await reserveSignInAttempt(email);
+  if (attempt.paused) return { error: SIGN_IN_COPY.paused };
 
   const user = await prisma.user.findUnique({
     where: { email },
     select: { id: true, passwordHash: true, disabled: true, approvalState: true },
   });
-  if (!(await passwordMatches(password, user?.passwordHash))) {
-    await recordSignInFailure(email);
-    return { error: SIGN_IN_COPY.wrong };
-  }
+  // One compare, against the dummy hash for an unknown email. A wrong password: the reserved attempt stays as the failure.
+  const matches = await passwordMatches(password, user?.passwordHash);
+  if (!user || !matches) return { error: SIGN_IN_COPY.wrong };
   // The right password from here on: only now may the copy say the account exists.
-  if (user?.approvalState === "PENDING") return { error: SIGN_IN_COPY.pending };
-  if (user?.approvalState === "DECLINED") return { error: SIGN_IN_COPY.declined };
-  if (!user || user.disabled) return { error: SIGN_IN_COPY.wrong };
+  if (user.approvalState !== "APPROVED") {
+    await releaseSignInAttempt(attempt.attemptId);
+    return { error: user.approvalState === "PENDING" ? SIGN_IN_COPY.pending : SIGN_IN_COPY.declined };
+  }
+  if (user.disabled) return { error: SIGN_IN_COPY.wrong }; // counted, like a wrong password
 
   await clearSignInFailures(email);
   await prisma.user.update({ where: { id: user.id }, data: { lastSignInAt: new Date() } });

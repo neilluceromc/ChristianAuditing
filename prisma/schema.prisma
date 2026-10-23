@@ -260,6 +260,7 @@ model SignInAttempt {
   createdAt DateTime @default(now())
 
   @@index([emailKey, createdAt])
+  @@index([createdAt]) // the worker's day-old prune (fix round 1, M-4)
 }
 
 model RateEvent {

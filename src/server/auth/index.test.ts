@@ -10,8 +10,7 @@ type Provider = { authorize?: (credentials: unknown) => Promise<unknown> };
 const h = vi.hoisted(() => ({
   config: null as null | { providers: Provider[] },
   findUnique: vi.fn(),
-  paused: vi.fn(),
-  recordFailure: vi.fn(),
+  update: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({
@@ -22,10 +21,20 @@ vi.mock("next-auth", () => ({
 }));
 vi.mock("next-auth/providers/credentials", () => ({ default: (opts: object) => opts }));
 vi.mock("next-auth/providers/microsoft-entra-id", () => ({ default: {} }));
-vi.mock("../db/client", () => ({ prisma: { user: { findUnique: h.findUnique } } }));
-vi.mock("./sign-in-limit", () => ({ signInPaused: h.paused, recordSignInFailure: h.recordFailure }));
+// The real sign-in limit over the in-memory SignInAttempt table and advisory-locked transaction
+vi.mock("../db/client", async () => {
+  const fake = await import("./sign-in-attempts.fake");
+  return {
+    prisma: {
+      user: { findUnique: h.findUnique, update: h.update },
+      signInAttempt: fake.signInAttemptTable,
+      $transaction: fake.fakeTransaction,
+    },
+  };
+});
 
 import bcrypt from "bcryptjs";
+import { attempts, resetAttempts } from "./sign-in-attempts.fake";
 
 // The quick-login provider registers only when QUICK_LOGIN_EMAILS lists someone at startup
 vi.stubEnv("QUICK_LOGIN_EMAILS", "it@thebackroomop.com");
@@ -39,8 +48,8 @@ async function authorize(email: string, password: string) {
 describe("credentials sign-in and a disabled account", () => {
   beforeEach(() => {
     h.findUnique.mockReset();
-    h.paused.mockReset().mockResolvedValue(false);
-    h.recordFailure.mockReset().mockResolvedValue(undefined);
+    h.update.mockReset().mockResolvedValue({});
+    resetAttempts();
   });
 
   it("refuses a disabled user even with the right password", async () => {
@@ -66,8 +75,8 @@ describe("credentials authorize (Users & access spec §4.2, §4.6)", () => {
   beforeEach(async () => {
     passwordHash ||= await bcrypt.hash("correct horse battery", 4);
     h.findUnique.mockReset();
-    h.paused.mockReset().mockResolvedValue(false);
-    h.recordFailure.mockReset().mockResolvedValue(undefined);
+    h.update.mockReset().mockResolvedValue({});
+    resetAttempts();
   });
 
   it("returns sessionVersion and mustChangePassword with the user", async () => {
@@ -77,20 +86,32 @@ describe("credentials authorize (Users & access spec §4.2, §4.6)", () => {
     });
   });
 
-  it.each(["PENDING", "DECLINED"])("refuses a %s account even with the right password", async (approvalState) => {
-    h.findUnique.mockResolvedValue(row({ approvalState }));
+  it.each([
+    ["PENDING", true], ["PENDING", false], ["DECLINED", true], ["DECLINED", false],
+  ])("refuses a %s account (disabled: %s) with the right password, without counting it", async (approvalState, disabled) => {
+    h.findUnique.mockResolvedValue(row({ approvalState, disabled }));
     expect(await authorize("nina@thebackroomop.com", "correct horse battery")).toBeNull();
-    expect(h.recordFailure).not.toHaveBeenCalled();
+    expect(attempts.rows).toHaveLength(0);
+    expect(h.update).not.toHaveBeenCalled();
   });
 
   it("a direct POST to the callback is paused too: a paused email is refused before the password is checked", async () => {
     h.findUnique.mockResolvedValue(row());
-    h.paused.mockResolvedValue(true);
+    for (let i = 0; i < 3; i++) expect(await authorize("Nina@thebackroomop.com", `nope-${i}`)).toBeNull();
     const compare = vi.spyOn(bcrypt, "compare");
-    expect(await authorize("Nina@thebackroomop.com", "correct horse battery")).toBeNull();
-    expect(h.paused).toHaveBeenCalledWith("nina@thebackroomop.com");
+    expect(await authorize("nina@thebackroomop.com", "correct horse battery")).toBeNull();
     expect(compare).not.toHaveBeenCalled();
     compare.mockRestore();
+    expect(attempts.locked.every((k) => k === "nina@thebackroomop.com")).toBe(true);
+  });
+
+  it("a parallel burst through the callback gets three tries (fix round 1, I-1)", async () => {
+    h.findUnique.mockResolvedValue(row());
+    const compare = vi.spyOn(bcrypt, "compare");
+    await Promise.all(Array.from({ length: 6 }, (_, i) => authorize("nina@thebackroomop.com", `nope-${i}`)));
+    expect(compare).toHaveBeenCalledTimes(3);
+    compare.mockRestore();
+    expect(attempts.rows).toHaveLength(3);
   });
 
   it("a wrong password through the callback counts as a failure, for known and unknown emails", async () => {
@@ -98,7 +119,24 @@ describe("credentials authorize (Users & access spec §4.2, §4.6)", () => {
     expect(await authorize("nina@thebackroomop.com", "nope")).toBeNull();
     h.findUnique.mockResolvedValue(null);
     expect(await authorize("ghost@thebackroomop.com", "nope")).toBeNull();
-    expect(h.recordFailure.mock.calls).toEqual([["nina@thebackroomop.com"], ["ghost@thebackroomop.com"]]);
+    expect(attempts.rows.map((r) => r.emailKey)).toEqual(["nina@thebackroomop.com", "ghost@thebackroomop.com"]);
+  });
+
+  it("the right password for a turned-off APPROVED account is counted, like a wrong one (fix round 1, M-2)", async () => {
+    h.findUnique.mockResolvedValue(row({ disabled: true }));
+    expect(await authorize("nina@thebackroomop.com", "correct horse battery")).toBeNull();
+    expect(attempts.rows).toHaveLength(1);
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("success clears earlier failures and stamps lastSignInAt (fix round 1, M-1)", async () => {
+    h.findUnique.mockResolvedValue(row());
+    await authorize("nina@thebackroomop.com", "nope-1");
+    await authorize("nina@thebackroomop.com", "nope-2");
+    attempts.rows.push({ id: "other", emailKey: "someone@else.com", createdAt: new Date() });
+    expect(await authorize("nina@thebackroomop.com", "correct horse battery")).toMatchObject({ id: "u1" });
+    expect(attempts.rows.map((r) => r.id)).toEqual(["other"]);
+    expect(h.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { lastSignInAt: expect.any(Date) } });
   });
 });
 
