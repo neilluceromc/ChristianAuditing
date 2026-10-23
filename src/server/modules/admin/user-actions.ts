@@ -273,61 +273,6 @@ export async function updateUser(
   return result;
 }
 
-const roleSchema = z.object({
-  userId: id,
-  // zod 4 accepts ROLE_OPTIONS's plain `Role[]` directly and preserves the
-  // element type, so `parsed.data.role` below is already `Role` — no cast.
-  role,
-});
-
-/**
- * The role alone (the old Users & roles table). Kept beside updateUser: the same rule, the same guard on the
- * before-value, and (spec §4.2) a session-version bump.
- */
-export async function setUserRole(
-  input: unknown,
-): Promise<ActionResult<{ changed: boolean; signsOutActor: boolean }>> {
-  const actor = await actionRole("admin");
-  if (!actor) return forbidden();
-  const rate = await checkRate(actor.id);
-  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
-  const parsed = roleSchema.safeParse(input);
-  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
-  const nextRole = parsed.data.role;
-
-  let bumpedTo: number | null = null;
-  const result = await inTransaction(async (tx) => {
-    const target = await loadTarget(tx, parsed.data.userId);
-    if (!target) return conflict(GONE);
-    // Called by the server independently of the UI: a hand-rolled request is refused on the page's own grounds.
-    const verdict = roleChange(target, nextRole, actor.id);
-    if (!verdict.allowed) return conflict(verdict.reason);
-    // A warning, not a refusal (scope decision #3): an admin changing their OWN role is signed out at their next
-    // request, because the token's role no longer matches.
-    const signsOutActor = selfRoleChangeWarning(target, nextRole, actor.id) !== null;
-    if (target.role === nextRole) return ok({ changed: false, signsOutActor }); // no-op: don't pollute the trail
-    // As updateUser: a sign-up's role is set by Approve (approveSignup), never on its own.
-    if (target.approvalState !== "APPROVED") return conflict(ROLE_NEEDS_APPROVAL);
-
-    const written = await tx.user.updateMany({
-      where: { id: target.id, role: target.role, isPermanentAdmin: false },
-      data: { role: nextRole },
-    });
-    if (written.count === 0) return conflict("Someone else just changed that user's role — refresh.");
-    bumpedTo = await bumpSessionVersion(tx, target.id);
-    await writeAudit(tx, {
-      ...auditBase(actor, target),
-      action: "role-change",
-      diff: { role: { from: target.role, to: nextRole } },
-    });
-    return ok({ changed: true, signsOutActor });
-  });
-  if (!result.ok) return result;
-  if (bumpedTo !== null && parsed.data.userId === actor.id) await keepOwnSession(actor, bumpedTo);
-  if (result.data.changed) revalidatePath(PAGE);
-  return result;
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // Turn on / off
 

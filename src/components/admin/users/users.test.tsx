@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/server/modules/admin/user-actions", () => ({
   createUser: vi.fn(), updateUser: vi.fn(), resetUserPassword: vi.fn(), setUserDisabled: vi.fn(),
-  approveSignup: vi.fn(), declineSignup: vi.fn(), setUserRole: vi.fn(),
+  approveSignup: vi.fn(), declineSignup: vi.fn(),
 }));
 vi.mock("@/server/modules/admin/employee-link-search", () => ({ searchLinkableEmployees: vi.fn() }));
 

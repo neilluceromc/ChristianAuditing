@@ -6,7 +6,7 @@ import { randomInt } from "node:crypto";
  * admin reads it out or a person types it from a screen: no word starts with i, l or o (capitalised, I/l and O/0
  * look alike), none contains "rn" (reads as "m"), and no two are near-twins. Each has one spelling (no
  * harbor/harbour, desert/dessert). Nothing that could offend or embarrass read aloud (fix round 1, M2: no honey,
- * cherry or ginger).
+ * cherry or ginger). Task 5: "pepper" gave way to "button", since copper/pepper read as twins.
  */
 export const TEMP_PASSWORD_WORDS: readonly string[] = [
   "amber", "anchor", "apple", "aspen", "badger", "bamboo", "basil", "beacon",
@@ -14,7 +14,7 @@ export const TEMP_PASSWORD_WORDS: readonly string[] = [
   "comet", "coral", "crane", "daisy", "delta", "teapot", "dune", "eagle",
   "ember", "falcon", "forest", "garden", "copper", "granite", "sparrow", "hazel",
   "pencil", "jasper", "juniper", "kettle", "maple", "marble", "meadow", "mango",
-  "nutmeg", "pebble", "pepper", "planet", "poppy", "prairie", "quartz", "raven",
+  "nutmeg", "pebble", "button", "planet", "poppy", "prairie", "quartz", "raven",
   "ridge", "river", "robin", "saffron", "sage", "spruce", "summit", "tulip",
   "tundra", "velvet", "violet", "walnut", "willow", "wren", "yarrow", "zinnia",
   "rocket", "plum", "fennel", "galaxy", "hammock", "kiwi", "puffin", "thistle",

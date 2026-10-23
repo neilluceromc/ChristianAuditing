@@ -48,4 +48,11 @@ describe("calm words (fix round 1, M2)", () => {
   it("leaves out words that are awkward read aloud or have two spellings", () => {
     for (const w of ["honey", "cherry", "ginger", "desert", "harbor"]) expect(TEMP_PASSWORD_WORDS).not.toContain(w);
   });
+
+  it("keeps no copper/pepper near-twins (Users & access, Task 5)", () => {
+    expect(TEMP_PASSWORD_WORDS).toContain("copper");
+    expect(TEMP_PASSWORD_WORDS).not.toContain("pepper");
+    expect(TEMP_PASSWORD_WORDS).toContain("button");
+    expect(TEMP_PASSWORD_WORDS.length).toBeGreaterThanOrEqual(64);
+  });
 });

@@ -129,7 +129,7 @@ import { CHANGED_TRY_AGAIN } from "@/lib/lifecycle";
 import { PERMANENT_LOCK } from "@/lib/admin-users";
 import { sessionUpdateProof } from "@/server/auth/config.edge";
 import {
-  approveSignup, createUser, declineSignup, resetUserPassword, setUserDisabled, setUserRole, updateUser,
+  approveSignup, createUser, declineSignup, resetUserPassword, setUserDisabled, updateUser,
 } from "./user-actions";
 
 const TEMP_SHAPE = /^[A-Z][a-z]{3,6}-[2-9]{4}-[a-z]{4,7}$/;
@@ -194,7 +194,7 @@ describe("every action is admin-only and rate-limited", () => {
 
 describe("the permanent admin is refused for every action, with the lock copy", () => {
   it.each([
-    ["role", () => setUserRole({ userId: "perm", role: "viewer" })],
+    ["role", () => updateUser({ id: "perm", role: "viewer", expectedUpdatedAt: iso("perm") })],
     ["turn off", () => setUserDisabled({ userId: "perm", disabled: true })],
     ["reset", () => resetUserPassword({ id: "perm" })],
     ["name", () => updateUser({ id: "perm", name: "Someone Else", expectedUpdatedAt: iso("perm") })],
@@ -568,18 +568,5 @@ describe("approveSignup and declineSignup", () => {
     }
     expect(h.updateManyCalls).toEqual([]);
     expect(await updateUser({ id: "pend", name: "Ana B. Lim", expectedUpdatedAt: iso("pend") })).toMatchObject({ ok: true });
-  });
-
-  // Task 4 (Task 3 re-review #A): the old role-only action holds the same line as updateUser.
-  it("setUserRole refuses a sign-up that isn't approved, with the same copy, and writes nothing", async () => {
-    for (const state of ["PENDING", "DECLINED"] as const) {
-      row("pend").approvalState = state;
-      expect(await setUserRole({ userId: "pend", role: "admin" })).toEqual({
-        ok: false, kind: "conflict", message: "This sign-up hasn't been approved — choose the role when you approve it.",
-      });
-      expect(row("pend")).toMatchObject({ role: "viewer", sessionVersion: 0 });
-    }
-    expect(h.updateManyCalls).toEqual([]);
-    expect(h.audits).toEqual([]);
   });
 });
