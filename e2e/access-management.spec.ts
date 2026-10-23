@@ -2,6 +2,7 @@ import { test, expect, type Browser, type Locator, type Page } from "@playwright
 import AxeBuilder from "@axe-core/playwright";
 import bcrypt from "bcryptjs";
 import { execSync } from "node:child_process";
+import path from "node:path";
 import { PrismaClient, type Role } from "@prisma/client";
 import { SEED_PASSWORD } from "../prisma/fixtures";
 import { login, submitSignIn } from "./fixtures/login";
@@ -32,8 +33,14 @@ const ADMIN = "admin@thebackroomop.com";
 const DOMAIN = "thebackroomop.com";
 const TEMP_SHAPE = /^[A-Z][a-z]{3,6}-[2-9]{4}-[a-z]{4,7}$/;
 const NEW_PASSWORD = "harbour-lights-42";
-const SCRATCH =
-  "C:/Users/Server/AppData/Local/Temp/claude/C--Users-Server-Desktop-ChristianAuditing/a1332c51-99d3-455d-bbf7-db176dd74e5a/scratchpad/";
+/**
+ * Where the owner's screenshots go: the test's own output folder under test-results/ (gitignored, per test), or the
+ * folder in E2E_SHOT_DIR when set, e.g. `E2E_SHOT_DIR=../shots npx playwright test e2e/access-management.spec.ts`.
+ */
+function shotPath(name: string): string {
+  const dir = process.env.E2E_SHOT_DIR;
+  return dir ? path.resolve(dir, name) : test.info().outputPath(name);
+}
 
 const COPY = {
   wrong: /Wrong email or password — or the account is disabled\./,
@@ -652,6 +659,7 @@ test.describe("users & access: layout, screenshots and axe", () => {
     expect(pill.x + pill.width, "the Permanent pill stays left of the Role chip").toBeLessThanOrEqual(chip.x);
     await expectNoSidewaysScroll(page, "1440");
     await expectTallTargets(panel, "1440 panel");
+    await page.screenshot({ path: shotPath("access-1440.png") }); // before any draft or scrolling below
     // Cris's corner (the controller's finding on the first 1440 screenshot: Cris sat over the panel's Edit): every
     // panel control, brought into view, is clear of Cris; so are the Unsaved changes bar's.
     await expect(page.locator("[data-cris-dock]")).toBeVisible();
@@ -666,7 +674,6 @@ test.describe("users & access: layout, screenshots and axe", () => {
       window.scrollTo(0, 0);
       document.querySelector("[data-panel-scroll]")?.scrollTo(0, 0);
     });
-    await page.screenshot({ path: `${SCRATCH}access-1440.png` });
 
     // 1024: no side panel; picking a row opens a drawer, Close removes ?sel=.
     await page.setViewportSize({ width: 1024, height: 900 });
@@ -698,7 +705,7 @@ test.describe("users & access: layout, screenshots and axe", () => {
     expect((await page.getByRole("columnheader", { name: "Person" }).boundingBox())!.width, "Person at 834").toBeGreaterThanOrEqual(200);
     await expect(page.getByRole("columnheader", { name: "Employee record" })).toBeHidden();
     await expectNoSidewaysScroll(page, "834");
-    await page.screenshot({ path: `${SCRATCH}access-834.png` });
+    await page.screenshot({ path: shotPath("access-834.png") });
 
     // 375: cards instead of the table; the details full screen; Reset a bottom dialog; Add user full screen.
     await page.setViewportSize({ width: 375, height: 812 });
@@ -746,11 +753,11 @@ test.describe("users & access: layout, screenshots and axe", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openUsers(page);
     await expectNoSidewaysScroll(page, "390");
-    await page.screenshot({ path: `${SCRATCH}access-390.png` });
+    await page.screenshot({ path: shotPath("access-390.png") });
     await page.goto("/settings/account");
     await expect(page.getByRole("heading", { name: "Account settings", level: 1 })).toBeVisible({ timeout: 30_000 });
     await expectNoSidewaysScroll(page, "390 account");
-    await page.screenshot({ path: `${SCRATCH}account-390.png` });
+    await page.screenshot({ path: shotPath("account-390.png") });
   });
 
   test("11. axe: Users & access, Add user, Account settings and /welcome/password; light and dark; 1440 and 375", async ({ page, browser, baseURL }) => {
