@@ -22,6 +22,8 @@ const h = vi.hoisted(() => ({
   revalidated: [] as string[],
   ops: [] as string[],
   transactions: 0,
+  /** Task 2 fix round 1: the lock on this asset id throws it (a timeout, a dropped connection, a deadlock). */
+  throwOn: null as null | { id: string; err: unknown },
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => { h.revalidated.push(p); } }));
@@ -92,6 +94,7 @@ vi.mock("@/server/db/client", () => {
     findMany: async ({ where }: { where: Record<string, unknown> }) => structuredClone(h.audits.filter((r) => matches(r, where))),
   };
   const $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    if (h.throwOn && values.includes(h.throwOn.id)) throw h.throwOn.err;
     h.ops.push(`lock:${strings.join("$").replace(/\s+/g, " ").trim()}:${values.join(",")}`);
     return [];
   };
@@ -117,7 +120,10 @@ vi.mock("@/server/db/client", () => {
   };
 });
 
+import { Prisma } from "@prisma/client";
 import { triageAsset, triageMany, undoTriage, undoTriageMany } from "./actions";
+import { eachAlone } from "./triage";
+import { BULK_ITEM_FAILED } from "@/lib/triage-undo";
 
 const NEIL = { id: "u-neil", name: "Neil Lucero", role: "it_staff" };
 const IVY = { id: "u-ivy", name: "Ivy Santos", role: "it_staff" };
@@ -162,6 +168,7 @@ beforeEach(() => {
   h.revalidated = [];
   h.ops = [];
   h.transactions = 0;
+  h.throwOn = null;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -387,5 +394,40 @@ describe("triageMany", () => {
       .toEqual({ ok: true, data: { done: [], failed: [{ id: "0001", reason: "You don't have permission to do that." }], auditIds: [] } });
     h.user = null;
     expect(await triageMany({ assetIds: ["0001"], outcome: "SPARE" })).toMatchObject({ ok: false, kind: "forbidden" });
+  });
+});
+
+describe("a bulk item that throws (Task 2 fix round 1, review M2 and M4)", () => {
+  const known = (code: string, meta?: Record<string, unknown>) =>
+    new Prisma.PrismaClientKnownRequestError("boom", { code, clientVersion: "6", meta });
+
+  it("a deadlock (P2034, or P2010 with 40P01) fails that item as changed since; the batch goes on", async () => {
+    const run = async (id: string) => {
+      if (id === "b") throw known("P2034");
+      if (id === "c") throw known("P2010", { code: "40P01" });
+      return { ok: true as const, data: { auditId: `aud-${id}` } };
+    };
+    expect(await eachAlone(["a", "b", "c", "d"], run)).toEqual({
+      done: ["a", "d"],
+      failed: [{ id: "b", reason: TRIAGE_CHANGED_SINCE }, { id: "c", reason: TRIAGE_CHANGED_SINCE }],
+      results: [{ auditId: "aud-a" }, { auditId: "aud-d" }],
+    });
+  });
+
+  it("any other error is logged and reported as couldn't save; the items that landed keep their report", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    seed("0001");
+    seed("0002");
+    seed("0004");
+    h.throwOn = { id: "0002", err: known("P2028") }; // an interactive-transaction timeout
+    const r = await triageMany({ assetIds: ["0001", "0002", "0004"], outcome: "SPARE" });
+    expect(r).toEqual({
+      ok: true,
+      data: { done: ["0001", "0004"], failed: [{ id: "0002", reason: BULK_ITEM_FAILED }], auditIds: ["aud001", "aud002"] },
+    });
+    expect(BULK_ITEM_FAILED).toBe("Couldn't save — try again");
+    expect(asset("0002").returnedAt).toEqual(BACK); // nothing of it was written
+    expect(log).toHaveBeenCalledWith("[worklist bulk] item failed", "0002", expect.any(Prisma.PrismaClientKnownRequestError));
+    log.mockRestore();
   });
 });

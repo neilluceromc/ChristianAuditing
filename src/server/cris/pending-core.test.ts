@@ -72,7 +72,8 @@ function makeTx() {
   return {
     $queryRaw: async (_strings: TemplateStringsArray, ...values: Array<{ values?: unknown[] }>) => {
       if (h.lockThrow) throw h.lockThrow;
-      h.locks.push(values[0]?.values ?? []);
+      // a Prisma.join of ids (the undo's one-statement lock), or one id (loadDirect's lock, Task 2 fix round 1)
+      h.locks.push(values[0]?.values ?? [values[0]]);
       return [];
     },
     crisPendingAction: {
@@ -381,7 +382,8 @@ describe("undoPending", () => {
     h.clock = later(59);
     const r = await undoPending(user, "p1", later(59));
     expect(r.result.ok && r.result.data.messages[0].text).toBe("Undone — BR-LT-0230 is back in spares.");
-    expect(h.locks).toEqual([["a1"]]);
+    // the undo's lock first; loadDirect then re-takes the row it already holds (a no-op in Postgres)
+    expect(h.locks).toEqual([["a1"], ["a1"]]);
     expect(h.state.assets[0]).toMatchObject({ status: "SPARE", assigneeId: null, returnedAt: null });
     expect(h.state.holds[0].state).toBe("ACTIVE");
     expect(h.written).toMatchObject([{ action: "lifecycle.return", entityId: "a1", diff: { reason: { to: "Undone" }, via: { to: "Cris" }, status: { from: "DEPLOYED", to: "SPARE" } } }]);
@@ -396,7 +398,7 @@ describe("undoPending", () => {
     h.clock = later(30);
     const r = await undoPending(user, "p1", later(30));
     expect(r.result.ok).toBe(true);
-    expect(h.locks).toEqual([["a0", "a1"]]);
+    expect(h.locks).toEqual([["a0", "a1"], ["a1"], ["a0"]]);
     expect(h.state.assets.find((a) => a.id === "a0")).toMatchObject({ status: "DEPLOYED", assigneeId: "emp1", defectiveSince: null });
     expect(h.state.assets.find((a) => a.id === "a1")).toMatchObject({ status: "SPARE", assigneeId: null });
     expect(h.written.map((w) => [w.action, w.entityId])).toEqual([["lifecycle.return", "a1"], ["lifecycle.assign", "a0"]]);

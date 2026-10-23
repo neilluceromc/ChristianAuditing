@@ -26,6 +26,8 @@ export const TRIAGE_CHANGED_SINCE = "Changed by someone else since — open the 
 export const TRIAGE_UNDO_NOT_YOURS = "Undo is only for your own decision within 15 minutes";
 export const TRIAGE_UNDO_FINAL = "Dispose and Donate can't be undone — open the record";
 export const TRIAGE_ALREADY_UNDONE = "That decision is already undone";
+/** A bulk item that failed for a reason other than a refusal (a timeout, a dropped connection): nothing of it was written. */
+export const BULK_ITEM_FAILED = "Couldn't save — try again";
 
 /** "8 done, 1 couldn't (changed by someone else)". */
 export function bulkReport(done: number, failed: number): string {

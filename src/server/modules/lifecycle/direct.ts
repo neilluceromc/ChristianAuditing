@@ -29,8 +29,18 @@ export const assetSelect = {
   id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, repairEndedAt: true, returnedAt: true, loanDueAt: true, model: true,
 } as const;
 
-/** Load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
+/**
+ * `SELECT … FOR UPDATE` on the asset's row, held until the transaction ends (no row: nothing locked, the read refuses).
+ * Worklist H4 (Task 2 fix round 1): every reader that goes on to write the asset takes it first, so an undo running at
+ * the same moment either finishes before the read or waits behind the write — never reads stale between the two.
+ */
+export async function lockAsset(tx: Tx, id: string): Promise<void> {
+  await tx.$queryRaw`SELECT "id" FROM "Asset" WHERE "id" = ${id} FOR UPDATE`;
+}
+
+/** Lock, load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
 export async function loadDirect(tx: Tx, actor: { role: Role }, assetId: string) {
+  await lockAsset(tx, assetId);
   const asset = await tx.asset.findUnique({ where: { id: assetId }, select: assetSelect });
   if (!asset) return { failure: conflict("That asset no longer exists.") } as const;
   if (!isDirectLifecycle(actor.role, asset.cls)) return { failure: forbidden() } as const;

@@ -1,4 +1,4 @@
-import type { AssetStatus, Prisma } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
 import type { z } from "zod";
 import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/guards";
@@ -10,11 +10,11 @@ import type { AuditDiff } from "@/lib/audit-diff";
 import { isDirectLifecycle } from "@/lib/asset-class";
 import { TRIAGE_LABEL, triageNeedsReason, type triageInputSchema } from "@/lib/lifecycle";
 import {
-  TRIAGE_ALREADY_UNDONE, TRIAGE_CHANGED_SINCE, TRIAGE_UNDONE, TRIAGE_UNDO_FINAL, TRIAGE_UNDO_NOT_YOURS,
+  BULK_ITEM_FAILED, TRIAGE_ALREADY_UNDONE, TRIAGE_CHANGED_SINCE, TRIAGE_UNDONE, TRIAGE_UNDO_FINAL, TRIAGE_UNDO_NOT_YOURS,
   blocksTriageUndo, isUndoableTriage, notesBefore, triageOutcomeOf, triageRestore, triageVersion, undoWindowOpen, undoneTarget,
   type TriageRestore,
 } from "@/lib/triage-undo";
-import { assetSelect, loadDirect, recordDirect } from "./direct";
+import { assetSelect, loadDirect, lockAsset, recordDirect } from "./direct";
 
 /*
  * Worklist split view (H4) Task 2: one triage decision and its undo, each in its own transaction. NOT "use server":
@@ -105,11 +105,6 @@ export async function triageCore(user: SessionUser, d: TriageInput, now: Date = 
   return ok(out!);
 }
 
-/** `SELECT … FOR UPDATE` on the asset's row, held until the transaction ends (the Finance undo's lock). */
-async function lockAsset(tx: Prisma.TransactionClient, id: string): Promise<void> {
-  await tx.$queryRaw`SELECT "id" FROM "Asset" WHERE "id" = ${id} FOR UPDATE`;
-}
-
 const sameValue = (a: unknown, b: unknown) =>
   a instanceof Date || b instanceof Date ? (a as Date | null)?.valueOf() === (b as Date | null)?.valueOf() : a === b;
 
@@ -189,7 +184,8 @@ export async function undoTriageCore(user: SessionUser, auditId: string, now: Da
 
 /**
  * Worklist H4 bulk: one call per item, each in its own transaction (`run` opens it), so one refusal never touches
- * another item and nothing is left half-written. A deadlock fails that item alone; any other error is thrown.
+ * another item and nothing is left half-written. A thrown item fails alone — a deadlock as "changed since", anything
+ * else logged and reported as "Couldn't save — try again" — so the items that landed are always reported.
  */
 export async function eachAlone<T>(
   ids: readonly string[], run: (id: string) => Promise<ActionResult<T>>,
@@ -202,8 +198,12 @@ export async function eachAlone<T>(
     try {
       r = await run(id);
     } catch (err) {
-      if (!isDeadlock(err)) throw err;
-      r = conflict(TRIAGE_CHANGED_SINCE);
+      // that item's transaction rolled back whole; the rest of the batch, and the report of what landed, go on
+      if (isDeadlock(err)) r = conflict(TRIAGE_CHANGED_SINCE);
+      else {
+        console.error("[worklist bulk] item failed", id, err);
+        r = conflict(BULK_ITEM_FAILED);
+      }
     }
     if (r.ok) { done.push(id); results.push(r.data); } else failed.push({ id, reason: r.message });
   }
