@@ -6,6 +6,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { sectionStats, WORK_SECTIONS, type WorkGroup, type WorkItem, type WorkSectionId } from "@/lib/worklist";
 import {
   BULK, COLUMNS, DEFAULT_SORT, FILTERED_EMPTY, NO_FILTERS, TAB_LABEL, capNote, categoryChips, emptyQueue, filterRows, filtersActive,
+  focusAfterDecision,
   filtersFor, headerCounts, nextSort, pageLabel, pageOfKey, paginate, queueTabs, selectAfter, sortRows, workHref,
   type WorkFilters, type WorkSort,
 } from "@/lib/worklist-view";
@@ -67,8 +68,14 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [drawer, setDrawer] = useState(false);
   const focusRow = useRef(false);
-  /** a row to bring into view once the list holds it: the URL's `sel` on arrival, a row an Undo put back */
-  const reveal = useRef<string | null>(initial.sel);
+  /**
+   * A row to bring into view once the list holds it: the URL's `sel` on arrival (dropped at once when the list does
+   * not hold it — fix round 1, M7 — so it can never snap back later), or a row an Undo put back (`wait`: the refresh
+   * that brings it is still on its way).
+   */
+  const reveal = useRef<{ key: string; wait: boolean } | null>(initial.sel ? { key: initial.sel, wait: false } : null);
+  /** a decision took a row off: once the answer is in, focus goes where focusAfterDecision says (fix round 1, I1) */
+  const focusNext = useRef(false);
   const tableBox = useRef<HTMLElement>(null);
   const panelBox = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -94,11 +101,15 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   }, [queue, slice.page, selKey]);
 
   useEffect(() => {
-    const key = reveal.current;
-    const p = pageOfKey(list, key);
-    if (!key || !p) return;
+    const r = reveal.current;
+    if (!r) return;
+    const p = pageOfKey(list, r.key);
+    if (!p) {
+      if (!r.wait) reveal.current = null;
+      return;
+    }
     reveal.current = null;
-    setSel(key);
+    setSel(r.key);
     setPage(p);
   }, [list]);
 
@@ -124,6 +135,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   const decisions = useWorklistUndo({
     clear: (keys) => {
       const { list: now, selKey: at } = latest.current;
+      focusNext.current = true;
       const drop = new Set(keys);
       setGone((g) => new Set([...g, ...keys]));
       setChecked((c) => new Set([...c].filter((k) => !drop.has(k))));
@@ -131,23 +143,45 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
     },
     restore: (keys) => {
       setGone((g) => new Set([...g].filter((k) => !keys.includes(k))));
-      reveal.current = keys[0] ?? null;
+      reveal.current = keys[0] ? { key: keys[0], wait: true } : null;
     },
     moveOn: (key) => {
       const { list: now, selKey: at } = latest.current;
+      focusNext.current = true;
       select(selectAfter(now, new Set([key]), at), now.filter((r) => r.key !== key));
     },
   });
+
+  // decide → next, for the keyboard too: the element that had focus is gone (the row left, the buttons remounted),
+  // so focus moves on with the selection — never to the page body — once the answer is in
+  const busy = decisions.busy;
+  useEffect(() => {
+    if (!focusNext.current || busy) return;
+    focusNext.current = false;
+    const target = focusAfterDecision(selKey, wide);
+    // a frame later: the drawer (and its own focus handling) has settled, and the next row's panel is mounted
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(target.selector) ?? document.getElementById(titleId);
+      el?.focus();
+    });
+  }, [selKey, busy, wide, titleId]);
 
   function pick(q: WorkSectionId) {
     reveal.current = null;
     setQueue(q); setPage(1); setSel(null); setFilters(NO_FILTERS); setSort(DEFAULT_SORT[q]); setChecked(new Set()); setDrawer(false);
   }
 
+  /**
+   * Ruling (fix round 1, M6): a filter keeps the selected row and shows its page while it still matches; when the
+   * filter hides it, the first visible row is selected, so the old key can't snap back when the filter clears.
+   */
   function changeFilters(f: WorkFilters) {
     setFilters(f);
     const rows = sortRows(filterRows(live, f), sort);
-    setPage(pageOfKey(rows, selKey) ?? 1);
+    const p = pageOfKey(rows, selKey);
+    reveal.current = null;
+    if (p) setPage(p);
+    else { setPage(1); setSel(rows[0]?.key ?? null); }
   }
 
   function openPanel() {
@@ -176,7 +210,10 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
       : null;
 
   const panel = (
-    <DetailsPanel item={selected} section={queue} canAct={canAct} decisions={decisions} headingId={panelTitleId} />
+    <DetailsPanel
+      item={selected} section={queue} canAct={canAct} decisions={decisions} headingId={panelTitleId}
+      filtered={live.length > 0 && list.length === 0}
+    />
   );
 
   return (
@@ -253,6 +290,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
             ref={panelBox}
             aria-labelledby={selected ? panelTitleId : undefined}
             aria-label={selected ? undefined : "Details"}
+            data-worklist-panel=""
             className="hidden min-h-0 flex-col rounded-(--radius-card) border border-border bg-surface px-5 py-4 shadow-card min-[1100px]:flex"
           >
             {panel}

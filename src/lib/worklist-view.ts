@@ -5,7 +5,8 @@
  */
 import { fmtDate, fmtMoney } from "./format";
 import { REPAIR_STAGE_LABEL } from "./repairs";
-import { TRIAGE_LABEL, type TriageOutcome } from "./lifecycle";
+import { CHANGED_TRY_AGAIN, type TriageOutcome } from "./lifecycle";
+import { bulkReport } from "./triage-undo";
 import { WORK_SECTIONS, type WorkGroup, type WorkItem, type WorkSectionId } from "./worklist";
 
 /** Plan call 9: ten rows a page, so the table fits one screen. */
@@ -248,10 +249,16 @@ export function sortRows(rows: WorkItem[], sort: WorkSort | null): WorkItem[] {
     .map((x) => x.r);
 }
 
-/** A header click: the same column flips; a new one starts descending for numbers and dates, ascending for words. */
+/** Columns whose first click puts the red rows first (late loans, breached SLAs): they start ascending. */
+const RED_FIRST = new Set(["sla", "status", "due"]);
+
+/**
+ * A header click: the same column flips; a new one starts descending for numbers and dates, ascending for words —
+ * except SLA, Status and Due, whose ascending order is the red rows first (fix round 1, M1).
+ */
 export function nextSort(current: WorkSort | null, key: string, numeric: boolean): WorkSort {
   if (current?.key === key) return { key, dir: current.dir === "asc" ? "desc" : "asc" };
-  return { key, dir: numeric ? "desc" : "asc" };
+  return { key, dir: numeric && !RED_FIRST.has(key) ? "desc" : "asc" };
 }
 
 /** Columns whose values are numbers or dates (a new sort on them starts with the largest). */
@@ -330,8 +337,41 @@ export function bulkTriageToast(outcome: "SPARE" | "DEFECTIVE", n: number): stri
 export const checkedToast = (model: string): string => `${model} · checked`;
 export const bulkCheckedToast = (n: number): string => `${plural(n, "item")} · checked`;
 export const undoneToast = (what: string): string => `${what} · back in Triage`;
-/** A single decision refused because the row moved on meanwhile (Review Focus 1); the server's words go under it. */
-export const CHANGED_ELSEWHERE = "Changed by someone else since";
+/**
+ * A refusal that means the row moved on meanwhile (Review Focus 1): the changed-since copies, and the triage claim
+ * refused because someone else decided it first. A rule refusal (an open request, already checked) is not one.
+ */
+export function isChangedElsewhere(message: string): boolean {
+  return message.startsWith("Changed by someone else since") || / is not waiting for triage\.$/.test(message);
+}
+
+/**
+ * A refused decision's toast (fix round 1, M3/M5): a changed-since refusal reads "Changed by someone else since — try
+ * again" (the server's sentence under it when it says more) and moves the selection on; any other refusal toasts the
+ * server's own sentence and keeps the selection.
+ */
+export function refusalToast(message: string): { message: string; detail?: string; moveOn: boolean } {
+  if (!isChangedElsewhere(message)) return { message, moveOn: false };
+  return message.startsWith("Changed by someone else since")
+    ? { message, moveOn: true }
+    : { message: CHANGED_TRY_AGAIN, detail: message, moveOn: true };
+}
+
+/** A bulk Undo that put back only some: "{done} undone, {failed} couldn't ({reason})". */
+export const undoReport = (done: number, failed: number, reason: string): string => `${done} undone, ${failed} couldn't (${reason})`;
+
+const PANEL_ACTIONS = "[data-panel-actions] button:not([disabled]):not([aria-disabled=\"true\"]), [data-panel-actions] a[href], [data-panel-actions] textarea";
+
+/**
+ * Where focus goes after a decision takes a row off (fix round 1, I1; WCAG 2.4.3): the next row's first usable panel
+ * action — in the aside from 1100 px, in the drawer below — or, with no row left, the table's empty state.
+ */
+export function focusAfterDecision(next: string | null, wide: boolean): { kind: "panel" | "drawer" | "empty"; selector: string } {
+  if (!next) return { kind: "empty", selector: "[data-worklist-empty]" };
+  return wide
+    ? { kind: "panel", selector: `[data-worklist-panel] :is(${PANEL_ACTIONS})` }
+    : { kind: "drawer", selector: `[data-worklist-drawer] :is(${PANEL_ACTIONS})` };
+}
 
 /**
  * A bulk decision's toast: one item reads like a single decision; several read "{n} items · …"; any that failed add
@@ -342,7 +382,7 @@ export function bulkToast(
   done: ReadonlyArray<{ model: string }>,
   failed: number,
 ): { message: string; tone: "settled" | "fault"; detail?: string } {
-  const report = failed > 0 ? { detail: `${done.length} done, ${failed} couldn't (changed by someone else)` } : {};
+  const report = failed > 0 ? { detail: bulkReport(done.length, failed) } : {};
   if (done.length === 0) return { message: "Nothing changed", tone: "fault", ...report };
   const message = done.length === 1
     ? (kind === "CHECK" ? checkedToast(done[0].model) : decisionToast(kind, done[0].model))
@@ -355,10 +395,6 @@ export const assetIdOf = (item: WorkItem): string | null => (item.entity?.kind =
 
 /** The model (asset rows) or title a toast names. */
 export const modelOf = (item: WorkItem): string => ("item" in item.columns ? item.columns.item.model : item.title);
-
-/** The triage buttons, in the panel's order: Keep as spare is the primary. */
-export const TRIAGE_BUTTONS: readonly TriageOutcome[] = ["SPARE", "DEFECTIVE", "DISPOSE", "DONATED"];
-export const triageButtonLabel = (o: TriageOutcome): string => TRIAGE_LABEL[o];
 
 /** Which queues take ticks, and their bulk buttons (plan call 7). Others show no checkboxes. */
 export const BULK: Partial<Record<WorkSectionId, ReadonlyArray<{ id: "SPARE" | "DEFECTIVE" | "CHECK"; label: string }>>> = {

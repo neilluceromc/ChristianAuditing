@@ -12,6 +12,7 @@ import { DetailsPanel } from "./details-panel";
 import { QueueFilters } from "./queue-filters";
 import { QueuePager, QueueTable } from "./queue-table";
 import { TriageButtons, reasonError } from "./triage-actions";
+import { loanDueTitle } from "@/components/inventory/loan-due-control";
 
 // Markup tests never navigate or call the server.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }) }));
@@ -172,7 +173,7 @@ describe("table", () => {
   });
   it("Over 90 days reads bold and never red", () => {
     const html = table(rows, null);
-    expect(html).toMatch(/font-semibold text-fg">200 days</);
+    expect(html).toMatch(/font-semibold text-fg"><span[^>]*>Waiting<\/span>200 days</);
     expect(html).not.toContain("st-fault");
   });
   it("a queue without ticks has no checkboxes", () => {
@@ -183,13 +184,13 @@ describe("table", () => {
       <QueueTable label="Loans" columns={COLUMNS.loans} rows={[loan(true), loan(false)]} sort={null} onSort={vi.fn()} selected={null}
         onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()} onCheckAll={vi.fn()} empty={null} />,
     );
-    expect([...loans.matchAll(/st-fault-text[^>]*>([^<]*)</g)].map((m) => m[1])).toEqual(["8 days late"]);
+    expect([...loans.matchAll(/st-fault-text\)"><span[^>]*>[^<]*<\/span>([^<]*)</g)].map((m) => m[1])).toEqual(["8 days late"]);
     const queue = renderToStaticMarkup(
       <QueueTable label="Approvals" columns={COLUMNS.queue} rows={[approval("breached"), approval("failed")]} sort={null} onSort={vi.fn()}
         selected={null} onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()}
         onCheckAll={vi.fn()} empty={null} />,
     );
-    expect([...queue.matchAll(/st-fault-text[^>]*>([^<]*)</g)].map((m) => m[1])).toEqual(["3 d overdue"]);
+    expect([...queue.matchAll(/st-fault-text\)"><span[^>]*>[^<]*<\/span>([^<]*)</g)].map((m) => m[1])).toEqual(["3 d overdue"]);
     expect(text(queue)).toContain("Execution failed");
   });
 });
@@ -320,5 +321,47 @@ describe("empty", () => {
   it("the first queue with work opens when none is named", () => {
     // queueFrom picks it in the page; here the view simply shows what it is given
     expect(tabsOf(page([check()], { q: "check" })).find((t) => t.current)?.text).toBe("IT check 1");
+  });
+});
+
+describe("fix round 1", () => {
+  it("I1: the triage buttons stay focusable while busy — aria-disabled, never disabled", () => {
+    const html = renderToStaticMarkup(
+      <TriageButtons tag="BR-LT-1025" choice={null} reason="" error={null} busy onDecide={vi.fn()} onChoose={vi.fn()} onReason={vi.fn()} onConfirm={vi.fn()} />,
+    );
+    expect(html).not.toContain('disabled=""');
+    expect(html.match(/aria-disabled="true"/g)).toHaveLength(4);
+    const reason = renderToStaticMarkup(
+      <TriageButtons tag="BR-LT-1025" choice="DISPOSE" reason="x" error={null} busy onDecide={vi.fn()} onChoose={vi.fn()} onReason={vi.fn()} onConfirm={vi.fn()} />,
+    );
+    expect(reason).toMatch(/aria-disabled="true"[^>]*>(<span[^>]*>)?Confirm/);
+  });
+  it("I1: Mark checked and Hide stay focusable while busy", () => {
+    const html = renderToStaticMarkup(
+      <ToastProvider><DetailsPanel item={check()} section="check" canAct decisions={{ ...decisions, busy: true }} /></ToastProvider>,
+    );
+    expect(html).not.toMatch(/<button[^>]*disabled=""/);
+    expect(html.match(/aria-disabled="true"/g)).toHaveLength(2);
+  });
+  it("I1: the empty state and the aside are focus targets", () => {
+    expect(page([], { q: "repairs" })).toMatch(/<[a-z]+ tabindex="-1" data-worklist-empty=""/);
+    expect(page([triage("t1", 3)])).toContain("data-worklist-panel");
+  });
+  it("M2: filters hiding every row leave the panel at No row selected, not All clear", () => {
+    const html = renderToStaticMarkup(
+      <ToastProvider><DetailsPanel item={null} section="triage" canAct filtered decisions={decisions} /></ToastProvider>,
+    );
+    expect(text(html)).toBe("No row selected");
+  });
+  it("M10: below 640 px each stacked cell carries its column's name", () => {
+    const html = renderToStaticMarkup(
+      <QueueTable label="Triage" columns={COLUMNS.triage} rows={[triage("t1", 142)]} sort={null} onSort={vi.fn()} selected={null}
+        onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks={false} checked={new Set()} onCheck={vi.fn()} onCheckAll={vi.fn()} empty={null} />,
+    );
+    const labels = [...html.matchAll(/<span class="([^"]*sm:hidden[^"]*)">([^<]*)<\/span>/g)].map((m) => [m[2], m[1].includes("sr-only")]);
+    expect(labels).toEqual([["Item", true], ["Last holder", false], ["Returned", false], ["Waiting", false]]);
+  });
+  it("M5: the loan dialog is titled to match the Set due date button", () => {
+    expect(loanDueTitle("BR-LT-0210")).toBe("Set the due date for BR-LT-0210");
   });
 });

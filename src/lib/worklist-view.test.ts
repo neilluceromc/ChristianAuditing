@@ -3,6 +3,7 @@ import {
   BULK, COLUMNS, DEFAULT_SORT, NO_FILTERS, PER_PAGE, bulkCheckedToast, bulkToast, bulkTriageToast, capNote, categoryChips, decisionToast,
   emptyQueue, filterRows, filtersActive, filtersFor, headerCounts, isRed, nextSort, pageFrom, pageLabel, pageOfKey, paginate,
   queueFrom, queueTabs, recordHref, selectAfter, sortRows, workHref,
+  focusAfterDecision, isChangedElsewhere, refusalToast, undoReport,
 } from "./worklist-view";
 import { allRows, approval, groupsOf, leaver, loan, triage, check, hire, purchase } from "./worklist-view.fixtures";
 import type { WorkItem } from "./worklist";
@@ -218,5 +219,48 @@ describe("bulk toast", () => {
   });
   it("the report matches the server's bulkReport words", () => {
     expect(bulkToast("SPARE", [{ model: "A" }], 1).detail).toBe(bulkReport(1, 1));
+  });
+});
+
+describe("fix round 1", () => {
+  it("M1: the first click on SLA, Status or Due puts the red rows first", () => {
+    expect(nextSort(null, "sla", true)).toEqual({ key: "sla", dir: "asc" });
+    expect(nextSort(null, "status", true)).toEqual({ key: "status", dir: "asc" });
+    expect(nextSort({ key: "waiting", dir: "desc" }, "due", true)).toEqual({ key: "due", dir: "asc" });
+    const queue = [approval("failed"), leaver(), approval("breached")];
+    const first = sortRows(queue, nextSort(null, "sla", true));
+    expect(first.slice(0, 2).every(isRed)).toBe(true);
+    const loans = [loan(false), loan(true)];
+    expect(sortRows(loans, nextSort(null, "status", true))[0].key).toBe("loans:l1");
+    expect(sortRows(loans, nextSort(null, "due", true))[0].key).toBe("loans:l1");
+  });
+
+  it("M3: only the real changed-since refusals read as changed by someone else", () => {
+    expect(isChangedElsewhere("Changed by someone else since — open the record")).toBe(true);
+    expect(isChangedElsewhere("Changed by someone else since — try again")).toBe(true);
+    expect(isChangedElsewhere("BR-LT-0002 is not waiting for triage.")).toBe(true);
+    expect(isChangedElsewhere("BR-LT-0002 was already checked.")).toBe(false);
+    expect(isChangedElsewhere("BR-LT-0002 has an open request (APR-2040).")).toBe(false);
+  });
+
+  it("M3/M5: a changed-since refusal's toast title says try again; the server's sentence is the detail", () => {
+    expect(refusalToast("BR-LT-0002 is not waiting for triage.")).toEqual({
+      message: "Changed by someone else since — try again", detail: "BR-LT-0002 is not waiting for triage.", moveOn: true,
+    });
+    expect(refusalToast("Changed by someone else since — try again")).toEqual({ message: "Changed by someone else since — try again", moveOn: true });
+    expect(refusalToast("BR-LT-0002 was already checked.")).toEqual({ message: "BR-LT-0002 was already checked.", moveOn: false });
+  });
+
+  it("M5: a partial bulk undo reads {done} undone, {failed} couldn't ({reason})", () => {
+    expect(undoReport(2, 1, "Changed by someone else since — open the record"))
+      .toBe("2 undone, 1 couldn't (Changed by someone else since — open the record)");
+  });
+
+  it("I1: focus after a decision — the next row's first panel action, the drawer's on a narrow window, else the empty state", () => {
+    const actions = "[data-panel-actions] button:not([disabled]):not([aria-disabled=\"true\"]), [data-panel-actions] a[href], [data-panel-actions] textarea";
+    expect(focusAfterDecision("triage:t2", true)).toEqual({ kind: "panel", selector: `[data-worklist-panel] :is(${actions})` });
+    expect(focusAfterDecision("triage:t2", false)).toEqual({ kind: "drawer", selector: `[data-worklist-drawer] :is(${actions})` });
+    expect(focusAfterDecision(null, true)).toEqual({ kind: "empty", selector: "[data-worklist-empty]" });
+    expect(focusAfterDecision(null, false)).toEqual({ kind: "empty", selector: "[data-worklist-empty]" });
   });
 });

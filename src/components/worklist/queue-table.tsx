@@ -90,7 +90,10 @@ export function QueueTable({
         </thead>
         <tbody onKeyDown={onKeyDown} className="max-sm:block">
           {rows.length === 0 && empty ? (
-            <tr className="max-sm:block"><td colSpan={span} className="px-4 py-12 text-center text-[13px] text-fg-muted max-sm:block">{empty}</td></tr>
+            <tr className="max-sm:block"><td colSpan={span} className="px-4 py-12 text-center text-[13px] text-fg-muted max-sm:block">
+              {/* where focus lands when the last row is decided (fix round 1, I1) */}
+              <div tabIndex={-1} data-worklist-empty="" className="outline-offset-2">{empty}</div>
+            </td></tr>
           ) : rows.map((r) => (
             <Tr
               key={r.key}
@@ -111,7 +114,7 @@ export function QueueTable({
                   </label>
                 </td>
               )}
-              <Cells item={r} selected={r.key === selected} />
+              <Cells item={r} selected={r.key === selected} columns={columns} />
             </Tr>
           ))}
         </tbody>
@@ -124,6 +127,8 @@ const TD = "overflow-hidden px-3 py-1 align-middle text-fg-secondary max-sm:bloc
 const FIRST = "max-sm:w-full";
 const one = "block truncate";
 const sub = "block truncate text-[11px] leading-tight text-fg-muted";
+const MUTED = "text-fg-muted";
+const RED = "font-medium text-(--st-fault-text)";
 
 function Two({ top, bottom, strong }: { top: React.ReactNode; bottom?: React.ReactNode; strong?: boolean }) {
   return (
@@ -134,93 +139,82 @@ function Two({ top, bottom, strong }: { top: React.ReactNode; bottom?: React.Rea
   );
 }
 
-function ItemCell({ item, strong }: { item: WorkItemCell; strong: boolean }) {
-  return (
-    <td className={cn(TD, FIRST)}>
-      <Two strong={strong} top={item.model} bottom={<>{item.category ?? "Uncategorised"} · <span className="font-mono">{item.tag}</span></>} />
-    </td>
-  );
-}
+const itemCell = (item: WorkItemCell, strong: boolean): CellDef => ({
+  first: true,
+  node: <Two strong={strong} top={item.model} bottom={<>{item.category ?? "Uncategorised"} · <span className="font-mono">{item.tag}</span></>} />,
+});
 
-function PartyCell({ party, none = "Not recorded" }: { party: WorkParty | null; none?: string }) {
-  return (
-    <td className={TD}>
-      {party ? <Two top={<span className="font-normal text-fg-secondary">{party.name}</span>} bottom={party.group ? groupText(party.group) : undefined} />
-        : <span className="text-fg-muted">{none}</span>}
-    </td>
-  );
-}
+const partyCell = (party: WorkParty | null, none = "Not recorded"): CellDef => ({
+  node: party
+    ? <Two top={<span className="font-normal text-fg-secondary">{party.name}</span>} bottom={party.group ? groupText(party.group) : undefined} />
+    : <span className={MUTED}>{none}</span>,
+});
 
 /** Over 90 days reads bold, never red. */
-function DaysCell({ n }: { n: number }) {
-  return <td className={cn(TD, "tabular-nums", n > OVER_DAYS ? "font-semibold text-fg" : "text-fg-muted")}>{daysText(n)}</td>;
-}
+const daysCell = (n: number): CellDef => ({ node: daysText(n), cls: cn("tabular-nums", n > OVER_DAYS ? "font-semibold text-fg" : MUTED) });
 
-const plain = (v: React.ReactNode, extra?: string) => <td className={cn(TD, "truncate", extra)}>{v}</td>;
+const plain = (node: React.ReactNode, cls?: string): CellDef => ({ node, cls: cn("truncate", cls) });
+const muted = (text: string) => <span className={MUTED}>{text}</span>;
+const mono = (text: string) => <span className="font-mono">{text}</span>;
 
-function Cells({ item, selected }: { item: WorkItem; selected: boolean }) {
+interface CellDef { node: React.ReactNode; cls?: string; first?: true }
+
+/** One row's cells, in its queue's column order (COLUMNS). */
+function cellsOf(item: WorkItem, selected: boolean): CellDef[] {
   const c = item.columns;
   switch (c.section) {
     case "triage":
-      return <><ItemCell item={c.item} strong={selected} /><PartyCell party={c.lastHolder} />{plain(dateText(c.returnedAt))}<DaysCell n={c.waitingDays} /></>;
+      return [itemCell(c.item, selected), partyCell(c.lastHolder), plain(dateText(c.returnedAt)), daysCell(c.waitingDays)];
     case "repairs":
-      return (
-        <>
-          <ItemCell item={c.item} strong={selected} />
-          {plain(c.vendor ?? <span className="text-fg-muted">Not sent</span>)}
-          {plain(REPAIR_STAGE_LABEL[c.stage])}
-          <DaysCell n={c.downDays} />
-        </>
-      );
+      return [itemCell(c.item, selected), plain(c.vendor ?? muted("Not sent")), plain(REPAIR_STAGE_LABEL[c.stage]), daysCell(c.downDays)];
     case "check":
-      return (
-        <>
-          <ItemCell item={c.item} strong={selected} />
-          {plain(c.registeredBy ?? <span className="text-fg-muted">Not recorded</span>)}
-          {plain(c.fromPo ? <span className="font-mono">{c.fromPo.refNo}</span> : <span className="text-fg-muted">No PO</span>)}
-          <DaysCell n={c.waitingDays} />
-        </>
-      );
+      return [
+        itemCell(c.item, selected), plain(c.registeredBy ?? muted("Not recorded")),
+        plain(c.fromPo ? mono(c.fromPo.refNo) : muted("No PO")), daysCell(c.waitingDays),
+      ];
     case "purchases":
-      return (
-        <>
-          <td className={cn(TD, FIRST)}><Two strong={selected} top={<span className="font-mono">{c.po.refNo}</span>} bottom={c.po.summary ?? "No lines"} /></td>
-          {plain(c.vendor ?? <span className="text-fg-muted">Not recorded</span>)}
-          {plain(c.siNumber ? <span className="font-mono">{c.siNumber}</span> : <span className="text-fg-muted">Not recorded</span>)}
-          {plain(moneyText(c.total), "text-right tabular-nums")}
-          <DaysCell n={c.waitingDays} />
-        </>
-      );
+      return [
+        { first: true, node: <Two strong={selected} top={mono(c.po.refNo)} bottom={c.po.summary ?? "No lines"} /> },
+        plain(c.vendor ?? muted("Not recorded")), plain(c.siNumber ? mono(c.siNumber) : muted("Not recorded")),
+        plain(moneyText(c.total), "text-right tabular-nums"), daysCell(c.waitingDays),
+      ];
     case "hires":
-      return (
-        <>
-          <td className={cn(TD, FIRST)}><Two strong={selected} top={c.person.name} bottom={<span className="font-mono">{c.person.employeeNo}</span>} /></td>
-          {plain(c.group ? groupText(c.group) : <span className="text-fg-muted">Not recorded</span>)}
-          {plain(dateText(c.startedAt))}
-          {plain(String(c.missingSlots), "text-right tabular-nums")}
-        </>
-      );
+      return [
+        { first: true, node: <Two strong={selected} top={c.person.name} bottom={mono(c.person.employeeNo)} /> },
+        plain(c.group ? groupText(c.group) : muted("Not recorded")), plain(dateText(c.startedAt)),
+        plain(String(c.missingSlots), "text-right tabular-nums"),
+      ];
     case "loans":
-      return (
-        <>
-          <ItemCell item={c.item} strong={selected} />
-          <PartyCell party={c.borrower} none="Unassigned" />
-          {plain(dateText(c.dueAt))}
-          {plain(c.status, isRed(item) ? "font-medium text-(--st-fault-text)" : c.dueAt ? "" : "text-fg-muted")}
-        </>
-      );
+      return [
+        itemCell(c.item, selected), partyCell(c.borrower, "Unassigned"), plain(dateText(c.dueAt)),
+        plain(c.status, isRed(item) ? RED : c.dueAt ? "" : MUTED),
+      ];
     case "missing":
-      return <><ItemCell item={c.item} strong={selected} />{plain(c.problem)}<PartyCell party={c.lastHolder} />{plain(dateText(c.since))}</>;
+      return [itemCell(c.item, selected), plain(c.problem), partyCell(c.lastHolder), plain(dateText(c.since))];
     case "queue":
-      return (
-        <>
-          <td className={cn(TD, FIRST)}><Two strong={selected} top={c.what} /></td>
-          {plain(c.who)}
-          <DaysCell n={c.waitingDays} />
-          {plain(c.sla?.text ?? "—", isRed(item) ? "font-medium text-(--st-fault-text)" : "text-fg-muted")}
-        </>
-      );
+      return [
+        { first: true, node: <Two strong={selected} top={c.what} /> }, plain(c.who), daysCell(c.waitingDays),
+        plain(c.sla?.text ?? "—", isRed(item) ? RED : MUTED),
+      ];
   }
+}
+
+/**
+ * The row's cells. Below 640 px the head is hidden and the rows stack, so each cell carries its column's name
+ * (fix round 1, M10): a small visible label, except the first cell's, which only a screen reader needs. From 640 px
+ * the labels are gone (`sm:hidden`) and the head names the columns.
+ */
+function Cells({ item, selected, columns }: { item: WorkItem; selected: boolean; columns: WorkColumn[] }) {
+  return (
+    <>
+      {cellsOf(item, selected).map((cell, i) => (
+        <td key={columns[i]?.key ?? i} className={cn(TD, cell.first && FIRST, cell.cls)}>
+          <span className={cn("sm:hidden", cell.first ? "sr-only" : "mr-1 text-[11px] text-fg-muted")}>{columns[i]?.label}</span>
+          {cell.node}
+        </td>
+      ))}
+    </>
+  );
 }
 
 /**

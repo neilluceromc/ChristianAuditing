@@ -10,7 +10,7 @@ import { dismissShiftRow, undismissShiftRow } from "@/server/modules/home/action
 import { isUndoableTriage } from "@/lib/triage-undo";
 import type { TriageOutcome } from "@/lib/lifecycle";
 import type { WorkItem } from "@/lib/worklist";
-import { CHANGED_ELSEWHERE, assetIdOf, bulkToast, decisionToast, checkedToast, modelOf, undoneToast } from "@/lib/worklist-view";
+import { assetIdOf, bulkToast, decisionToast, checkedToast, modelOf, refusalToast, undoReport, undoneToast } from "@/lib/worklist-view";
 
 /**
  * Worklist H4: every decision the page makes, with its toast and Undo (plan calls 5–7).
@@ -18,6 +18,7 @@ import { CHANGED_ELSEWHERE, assetIdOf, bulkToast, decisionToast, checkedToast, m
  *   follows brings the server's list.
  * - `restore(keys)` puts rows back after an Undo, and selects the first of them.
  * - `moveOn(key)`: a decision refused because the row changed elsewhere — the selection moves on, the refresh drops it.
+ *   Any other refusal (an open request, already checked) toasts the server's sentence and keeps the selection.
  * Keep as spare and Send to repair carry Undo (undoTriage / undoTriageMany); Dispose, Donate and Mark checked do not.
  */
 export function useWorklistUndo({ clear, restore, moveOn }: {
@@ -29,13 +30,15 @@ export function useWorklistUndo({ clear, restore, moveOn }: {
   const toast = useToast();
   const [busy, start] = useTransition();
 
-  /** A refusal: the rate limit's or validation's words; a conflict says the row changed elsewhere and moves on. */
+  /** A refusal: a changed-since conflict says so and moves on (refusalToast); anything else is the server's words. */
   function refused(res: Extract<ActionResult<unknown>, { ok: false }>, key?: string) {
     if (res.kind === "conflict") {
-      toast(res.message.startsWith(CHANGED_ELSEWHERE) ? res.message : CHANGED_ELSEWHERE, "fault",
-        res.message.startsWith(CHANGED_ELSEWHERE) ? undefined : { detail: res.message });
-      if (key) moveOn(key);
-      router.refresh();
+      const t = refusalToast(res.message);
+      toast(t.message, "fault", t.detail ? { detail: t.detail } : undefined);
+      if (t.moveOn) {
+        if (key) moveOn(key);
+        router.refresh();
+      }
       return;
     }
     const field = res.fieldErrors ? Object.values(res.fieldErrors).find(Boolean) : undefined;
@@ -61,7 +64,7 @@ export function useWorklistUndo({ clear, restore, moveOn }: {
       router.refresh();
       if (res.data.failed.length) {
         toast(back.length ? undoneToast(back.length === 1 ? modelOf(back[0]) : `${back.length} items`) : "Nothing was undone", "fault",
-          { detail: `${res.data.failed.length} couldn't: ${res.data.failed[0].reason}` });
+          { detail: undoReport(back.length, res.data.failed.length, res.data.failed[0].reason) });
       } else toast(undoneToast(back.length === 1 ? modelOf(back[0]) : `${back.length} items`), "neutral");
     });
   }

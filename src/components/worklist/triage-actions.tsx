@@ -10,7 +10,14 @@ export type FinalOutcome = "DISPOSE" | "DONATED";
 type QuickOutcome = "SPARE" | "DEFECTIVE";
 
 /** The panel's tall buttons: 44 px targets (Global Constraints). */
-export const PANEL_BUTTON = "h-11 w-full text-[13px]";
+export const PANEL_BUTTON = "h-11 w-full text-[13px] aria-disabled:cursor-default aria-disabled:opacity-55";
+
+/**
+ * While a decision runs, a panel button stays focusable — `aria-disabled`, not `disabled` — so focus never drops to
+ * the page when the call starts (fix round 1, I1); the caller's handler is the guard (`unlessBusy`).
+ */
+export const busyProps = (busy: boolean) => (busy ? { "aria-disabled": true as const, "aria-busy": true as const } : {});
+export const unlessBusy = (busy: boolean, run: () => void) => () => { if (!busy) run(); };
 
 /** Dispose and Donate need a reason of 2+ characters (the rule triageAsset's schema applies); null when it is fine. */
 export function reasonError(outcome: FinalOutcome, reason: string): string | null {
@@ -43,21 +50,21 @@ export function TriageButtons({
           error={error ?? undefined} disabled={busy} inputRef={reasonRef}
         />
         <div className="grid grid-cols-2 gap-2">
-          <Button variant="ghost" className={PANEL_BUTTON} disabled={busy} onClick={() => onChoose(null)}>Cancel</Button>
-          <Button variant="primary" className={PANEL_BUTTON} loading={busy} onClick={onConfirm}>Confirm</Button>
+          <Button variant="ghost" className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose(null))}>Cancel</Button>
+          <Button variant="primary" className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, onConfirm)}>Confirm</Button>
         </div>
       </div>
     );
   }
   return (
     <div className="flex flex-col gap-2">
-      <Button variant="primary" className={PANEL_BUTTON} loading={busy} onClick={() => onDecide("SPARE")}>
+      <Button variant="primary" className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onDecide("SPARE"))}>
         {TRIAGE_LABEL.SPARE}
       </Button>
       <div className="grid grid-cols-3 gap-2">
-        <Button className={PANEL_BUTTON} disabled={busy} onClick={() => onDecide("DEFECTIVE")}>{TRIAGE_LABEL.DEFECTIVE}</Button>
-        <Button className={PANEL_BUTTON} disabled={busy} onClick={() => onChoose("DISPOSE")}>{TRIAGE_LABEL.DISPOSE}</Button>
-        <Button className={PANEL_BUTTON} disabled={busy} onClick={() => onChoose("DONATED")}>{TRIAGE_LABEL.DONATED}</Button>
+        <Button className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onDecide("DEFECTIVE"))}>{TRIAGE_LABEL.DEFECTIVE}</Button>
+        <Button className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose("DISPOSE"))}>{TRIAGE_LABEL.DISPOSE}</Button>
+        <Button className={PANEL_BUTTON} {...busyProps(busy)} onClick={unlessBusy(busy, () => onChoose("DONATED"))}>{TRIAGE_LABEL.DONATED}</Button>
       </div>
     </div>
   );

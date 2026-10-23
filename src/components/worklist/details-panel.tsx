@@ -10,7 +10,7 @@ import { fmtDate } from "@/lib/format";
 import { workRowHref, type WorkFact, type WorkItem } from "@/lib/worklist";
 import { emptyQueue, recordHref } from "@/lib/worklist-view";
 import type { WorkSectionId } from "@/lib/worklist";
-import { PANEL_BUTTON, TriageActions } from "./triage-actions";
+import { PANEL_BUTTON, TriageActions, busyProps, unlessBusy } from "./triage-actions";
 import type { WorklistDecisions } from "./use-worklist-undo";
 
 /** The record page's own date-input shape (inventory/[id]/(record)/layout.tsx). */
@@ -50,14 +50,19 @@ const TONE: Record<NonNullable<WorkFact["tone"]>, string> = {
  * then the queue's actions pinned at the bottom with the record link and Hide until tomorrow. The facts scroll
  * inside the panel as a last resort; the actions never move. A viewer sees the facts and links, no buttons.
  */
-export function DetailsPanel({ item, section, canAct, decisions, headingId }: {
+export function DetailsPanel({ item, section, canAct, decisions, headingId, filtered = false }: {
   item: WorkItem | null;
   section: WorkSectionId;
   canAct: boolean;
+  /** the queue has rows, but the filters hide every one (fix round 1, M2): the panel says so, not "All clear" */
+  filtered?: boolean;
   decisions: Pick<WorklistDecisions, "busy" | "triage" | "check" | "hide">;
   /** the panel's heading id (the aside is labelled by it) */
   headingId?: string;
 }) {
+  if (!item && filtered) {
+    return <p className="m-auto text-[13px] text-fg-muted">No row selected</p>;
+  }
   if (!item) {
     const e = emptyQueue(section);
     return (
@@ -117,7 +122,10 @@ export function DetailsPanel({ item, section, canAct, decisions, headingId }: {
         <div className="flex items-center justify-between gap-2">
           <Link href={href} className="inline-flex h-11 items-center text-[13px] font-medium text-accent hover:underline">Open the full record →</Link>
           {canAct && (
-            <Button variant="ghost" className="h-11 text-[12.5px]" disabled={decisions.busy} onClick={() => decisions.hide(item)}>
+            <Button
+              variant="ghost" className="h-11 text-[12.5px] aria-disabled:cursor-default aria-disabled:opacity-55"
+              {...busyProps(decisions.busy)} onClick={unlessBusy(decisions.busy, () => decisions.hide(item))}
+            >
               Hide until tomorrow
             </Button>
           )}
@@ -136,7 +144,7 @@ function PanelActions({ item, decisions }: { item: WorkItem; decisions: Pick<Wor
   }
   if (c?.kind === "it-check") {
     return (
-      <Button variant="primary" className={PANEL_BUTTON} loading={decisions.busy} onClick={() => decisions.check(item)}>
+      <Button variant="primary" className={PANEL_BUTTON} {...busyProps(decisions.busy)} onClick={unlessBusy(decisions.busy, () => decisions.check(item))}>
         Mark checked
       </Button>
     );

@@ -9,7 +9,8 @@ export function QueueSummary({ id, title, blurb, stats }: { id: string; title: s
   return (
     <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-4 pb-2.5 pt-3">
       <div className="min-w-0 flex-1">
-        <h2 id={id} className="text-[15px] font-semibold leading-tight text-fg">{title}</h2>
+        {/* tabIndex -1: focus's last resort after a decision (fix round 1, I1) */}
+        <h2 id={id} tabIndex={-1} className="text-[15px] font-semibold leading-tight text-fg outline-offset-2">{title}</h2>
         <p className="mt-0.5 truncate text-[12.5px] text-fg-muted" title={blurb}>{blurb}</p>
       </div>
       <dl className="flex gap-5 text-right">
