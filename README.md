@@ -194,6 +194,9 @@ fine and is what the test suite expects.
 | `finance@thebackroomop.com`     | `finance_staff`     |
 | `viewer@thebackroomop.com`      | `viewer`            |
 
+One more seeded account, `pending@thebackroomop.com` (`viewer`), is a sign-up still waiting for approval: it
+can't sign in until an admin approves it in **Users & access** (`/admin/users?status=PENDING`).
+
 That password is `admin123` — **8 characters**, deliberately shorter than the 10-character minimum
 `src/server/auth/actions.ts` enforces on signup (sign-in has no length rule; only signup does). It is
 a fixture for a loopback-only dev database in a public repo, not a real credential. **Change every
