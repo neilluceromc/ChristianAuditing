@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalItem, checkItem, groupWork, hireItem, historyByAsset, lastReturnByAsset, leaverItem, loanItem, loanStatus,
-  missingItem, purchaseReviewItem, repairItem, sectionStats, triageItem, warrantyFact,
+  RETURN_NOTE_LABEL, approvalItem, checkItem, groupWork, hireItem, historyByAsset, lastReturnByAsset, leaverItem, loanItem,
+  loanStatus, missingItem, noteText, purchaseReviewItem, repairItem, sectionStats, triageItem, warrantyFact,
   type ColumnsOf, type WorkAssetLike, type WorkGroup, type WorkItem, type WorkSectionId,
 } from "./worklist";
 
@@ -81,6 +81,30 @@ describe("historyByAsset", () => {
   });
 });
 
+describe("historyByAsset ties (fix round 1, M3)", () => {
+  it("entries with the same timestamp keep the read's order (the SQL's id DESC tie-break)", () => {
+    const at = day("2026-01-01");
+    const m = historyByAsset([
+      { entityId: "a1", createdAt: at, action: "lifecycle.assign", diff: { assignee: { from: null, to: "EMP-0042" } }, actorLabel: "Neil Lucero" },
+      { entityId: "a1", createdAt: at, action: "register", diff: null, actorLabel: "Neil Lucero" },
+    ], new Map([["a1", "BR-LT-1025"]]));
+    expect(m.get("a1")?.map((h) => h.text)).toEqual(["Neil Lucero assigned to EMP-0042", "Neil Lucero registered"]);
+  });
+});
+
+describe("noteText (fix round 1, M2): the app's own default reasons are not notes", () => {
+  it.each([
+    "offboarding · returned", "assigned", "bulk assigned", "triage", "reserved — day-one setup",
+    "replaced by BR-LT-0148", "replaces BR-LT-0148", "  triage  ", "", "   ",
+  ])("%j is no note", (reason) => expect(noteText(reason)).toBeNull());
+  it("a typed reason is kept, trimmed — even one that starts like a default", () => {
+    expect(noteText("  Battery drains fast. ")).toBe("Battery drains fast.");
+    expect(noteText("assigned to the wrong person")).toBe("assigned to the wrong person");
+    expect(noteText("replaced by BR-LT-0148 because the screen cracked")).toBe("replaced by BR-LT-0148 because the screen cracked");
+    expect(noteText(42)).toBeNull();
+  });
+});
+
 describe("triageItem", () => {
   const lastReturn = {
     holder: { name: "Maria Reyes", group: { name: "Finance", kind: "INTERNAL" as const } },
@@ -114,12 +138,16 @@ describe("triageItem", () => {
       { label: "Bought", value: "10 Aug 2023 · ₱78,500" },
       { label: "Warranty", value: "ended 10 Aug 2026", tone: "muted" },
     ]);
-    expect(i.detail.note).toEqual({ label: "Hand-back note", text: "Battery drains fast.", by: "Neil Lucero" });
+    expect(i.detail.note).toEqual({ label: "Note when returned", text: "Battery drains fast.", by: "Neil Lucero" });
     expect(i.detail.history).toEqual([{ at: day("2026-06-03"), text: "Neil Lucero returned for triage" }]);
   });
   it("a client holder reads Client: name", () => {
     const i = item({ lastReturn: { ...lastReturn, holder: { name: "Ana Lim", group: { name: "Northwind", kind: "CLIENT" } } } });
     expect(factsOf(i)["Last holder"]).toBe("Ana Lim · Client: Northwind");
+  });
+  it("the note is labelled by the ruling, and its by is the recorder", () => {
+    expect(RETURN_NOTE_LABEL).toBe("Note when returned");
+    expect(item().detail.note?.by).toBe("Neil Lucero");
   });
   it("the hand-back note is omitted when blank", () => {
     expect("note" in item({ lastReturn: { ...lastReturn, reason: "   " } }).detail).toBe(false);
@@ -188,7 +216,7 @@ describe("purchaseReviewItem", () => {
   const base = {
     id: "pr1", refNo: "PO-0198", submittedAt: day("2026-10-19"), updatedAt: day("2026-10-01"),
     requestedBy: "Pia Santos", department: "HR", firstLine: "27-inch monitors", lines: 2,
-    vendor: "PC Express", siNumber: "SI-4471", total: 23800,
+    vendor: "PC Express", siNumber: "SI-4471", total: 23800, amountDue: null,
   };
   it("keeps the row and adds PO, vendor, SI number, total, waiting", () => {
     const i = purchaseReviewItem(base, NOW);
@@ -207,6 +235,15 @@ describe("purchaseReviewItem", () => {
       { label: "With IT since", value: "19 Oct 2026 · 4 days ago" },
     ]);
     expect(i.detail.history).toEqual([]);
+  });
+  it("the typed amount due is its own fact, after Total, only when present", () => {
+    const i = purchaseReviewItem({ ...base, amountDue: 23520.5 }, NOW);
+    const labels = i.detail.facts.map((f) => f.label);
+    expect(labels.slice(labels.indexOf("Total"), labels.indexOf("Total") + 2)).toEqual(["Total", "Amount due"]);
+    expect(i.detail.facts).toContainEqual({ label: "Amount due", value: "₱23,521" });
+    expect(cols(i, "purchases").total).toBe(23800);
+    expect(purchaseReviewItem(base, NOW).detail.facts.map((f) => f.label)).not.toContain("Amount due");
+    expect(purchaseReviewItem({ ...base, amountDue: 0 }, NOW).detail.facts).toContainEqual({ label: "Amount due", value: "₱0" });
   });
   it("no vendor or SI yet reads Not recorded", () => {
     const i = purchaseReviewItem({ ...base, vendor: null, siNumber: null, department: null, firstLine: null, lines: 0 }, NOW);
@@ -293,7 +330,7 @@ describe("missingItem", () => {
       problem: "Missing", lastHolder: lastReturn.holder, since: day("2026-10-13"), sinceDays: 10,
     });
     expect(factsOf(i)).toMatchObject({ Problem: "Missing", "Last holder": "Maria Reyes · Finance", Since: "13 Oct 2026 · 10 days" });
-    expect(i.detail.note).toEqual({ label: "Hand-back note", text: "Left it in a taxi.", by: "Neil Lucero" });
+    expect(i.detail.note).toEqual({ label: "Note when returned", text: "Left it in a taxi.", by: "Neil Lucero" });
   });
   it("orphaned: Deployed with no holder, no hand-back note", () => {
     const i = missingItem({ ...asset(), problem: "orphaned", updatedAt: day("2026-10-20"), holder: null, lastReturn }, NOW);
@@ -335,13 +372,24 @@ describe("approvalItem", () => {
     expect(factsOf(i).Error).toBe("Asset is not SPARE");
     expect("note" in i.detail).toBe(false);
   });
+  it("a failed approval whose slaAt has passed is never overdue and never red (fix round 1, I1)", () => {
+    const i = approvalItem({ ...base, workerError: "Asset is not SPARE" }, "failed", NOW);
+    expect(base.slaAt.getTime()).toBeLessThan(NOW.getTime());
+    expect(cols(i, "queue").sla).toEqual({ text: "3 d overdue", overdue: false });
+    expect(i.detail.facts).toContainEqual({ label: "SLA", value: "3 d overdue" });
+    expect(i.detail.facts.some((f) => f.tone === "fault")).toBe(false);
+    expect(i.overdue).toBeUndefined();
+  });
+  it("a default request reason is no note", () => {
+    expect("note" in approvalItem({ ...base, payload: { reason: "bulk assigned" } }, "breached", NOW).detail).toBe(false);
+  });
 });
 
 describe("leaverItem", () => {
   const base = {
     id: "e9", name: "Carlo Dizon", employeeNo: "EMP-0007", itemsOut: 2, employment: "OFFBOARDING",
     dueAt: day("2026-10-21"), undecided: 2, failed: null, m365Status: "active", itAccess: 1,
-    department: "Sales", started: day("2026-10-14"),
+    department: { name: "Sales", kind: "INTERNAL" as const }, started: day("2026-10-14"),
   };
   it("keeps leaverRow's row and adds what, who, waiting, SLA", () => {
     const i = leaverItem(base, NOW);
@@ -352,6 +400,11 @@ describe("leaverItem", () => {
     });
     expect(i.detail.facts).toContainEqual({ label: "Completion due", value: "21 Oct 2026 · 2 d overdue", tone: "fault" });
     expect(factsOf(i)).toMatchObject({ "Employee no.": "EMP-0007", Department: "Sales", "Items still out": "2", "Next step": i.action });
+  });
+  it("a client's staffer reads Client, like hires (fix round 1, M1)", () => {
+    const i = leaverItem({ ...base, department: { name: "Acme", kind: "CLIENT" } }, NOW);
+    expect(i.detail.facts).toContainEqual({ label: "Client", value: "Acme" });
+    expect(i.detail.facts.map((f) => f.label)).not.toContain("Department");
   });
   it("no completion date and nothing out", () => {
     const i = leaverItem({ ...base, dueAt: null, itemsOut: 0, started: null }, NOW);
@@ -374,16 +427,20 @@ describe("sectionStats", () => {
       { label: "Items", value: "3" },
       { label: "Oldest", value: "142 d" },
       { label: "Over 90 days", value: "2", tone: "strong" },
-      { label: "Value at cost", value: "₱80,390" },
+      { label: "Value at cost", value: "₱80,390 · 1 without cost" },
     ]);
   });
-  it("a capped section's Items reads 50+; none over 90 days is plain", () => {
+  it("Value at cost is plain when every item has a cost (fix round 1, M6)", () => {
+    const g = group([tri("a1", "2026-06-03", 78500), tri("a2", "2026-07-15", 1890)]);
+    expect(sectionStats(g)[3]).toEqual({ label: "Value at cost", value: "₱80,390" });
+  });
+  it("a capped section's Items reads {total}+ (1+ here); none over 90 days is plain", () => {
     const g = group([tri("a3", "2026-10-19", null)], true);
     expect(sectionStats(g)).toEqual([
       { label: "Items", value: "1+" },
       { label: "Oldest", value: "4 d" },
       { label: "Over 90 days", value: "0" },
-      { label: "Value at cost", value: "₱0" },
+      { label: "Value at cost", value: "₱0 · 1 without cost" },
     ]);
   });
   it("Repairs: Items, Longest down, With a vendor", () => {
@@ -405,19 +462,38 @@ describe("sectionStats", () => {
       { label: "Due this week", value: "2" },
     ]);
   });
-  it("Approvals: Items, Past SLA (fault when any)", () => {
-    const a = approvalItem({
-      id: "ap1", refNo: "APR-1", type: "lifecycle_assign", payload: {}, priority: "NORMAL", slaAt: day("2026-10-20"),
-      createdAt: day("2026-10-18"), updatedAt: day("2026-10-18"), workerError: null, requestedBy: "Pia", asset: null, employee: null, history: [],
-    }, "breached", NOW);
+  it("Approvals: Items, Past SLA = every row that reads red — breaches and overdue leavers, never failures (fix round 1, I1)", () => {
+    const appr = (id: string, slaAt: string, kind: "breached" | "failed") => approvalItem({
+      id, refNo: `APR-${id}`, type: "lifecycle_assign", payload: {}, priority: "NORMAL", slaAt: day(slaAt),
+      createdAt: day("2026-10-18"), updatedAt: day("2026-10-21"), workerError: kind === "failed" ? "x" : null,
+      requestedBy: "Pia", asset: null, employee: null, history: [],
+    }, kind, NOW);
+    const leaver = (id: string, due: string | null) => leaverItem({
+      id, name: `L ${id}`, employeeNo: `EMP-${id}`, itemsOut: 1, employment: "OFFBOARDING", dueAt: due ? day(due) : null,
+      undecided: 1, failed: null, m365Status: null, itAccess: 0, department: { name: "Sales", kind: "INTERNAL" }, started: day("2026-10-14"),
+    }, NOW);
+    const rows = [
+      appr("1", "2026-10-20", "breached"),
+      appr("2", "2026-10-20", "failed"), // past its slaAt, but a failure is not a breach
+      leaver("e1", "2026-10-21"), // past the completion date: red
+      leaver("e2", "2026-10-28"),
+      leaver("e3", null),
+    ];
+    const g = group(rows);
+    const red = g.rows.filter((r) => (r.columns as ColumnsOf<"queue">).sla?.overdue).map((r) => r.key);
+    expect(red).toEqual(["queue:1", "queue:e1"]);
+    expect(sectionStats(g)).toEqual([
+      { label: "Items", value: "5" },
+      { label: "Past SLA", value: "2", tone: "fault" },
+    ]);
+    expect(g.pastSla).toBe(1); // Home's own rank-0 count is unchanged
+  });
+  it("Approvals: no red rows, Past SLA 0 is plain", () => {
     const f = approvalItem({
-      id: "ap2", refNo: "APR-2", type: "lifecycle_assign", payload: {}, priority: "NORMAL", slaAt: day("2026-10-30"),
+      id: "ap2", refNo: "APR-2", type: "lifecycle_assign", payload: {}, priority: "NORMAL", slaAt: day("2026-10-20"),
       createdAt: day("2026-10-18"), updatedAt: day("2026-10-21"), workerError: "x", requestedBy: "Pia", asset: null, employee: null, history: [],
     }, "failed", NOW);
-    expect(sectionStats(group([a, f]))).toEqual([
-      { label: "Items", value: "2" },
-      { label: "Past SLA", value: "1", tone: "fault" },
-    ]);
+    expect(sectionStats(group([f]))).toEqual([{ label: "Items", value: "1" }, { label: "Past SLA", value: "0" }]);
   });
   it("Others: Items, Oldest", () => {
     const c = checkItem({ ...asset(), createdAt: day("2026-10-16"), registeredBy: null, fromPo: null }, NOW);

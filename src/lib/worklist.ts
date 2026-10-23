@@ -259,8 +259,15 @@ export interface WorkParty { name: string; group: WorkGroupRef | null }
 export interface WorkItemCell { model: string; category: string | null; tag: string }
 /** `good` = still in force (a running warranty); `muted` = absent or over; `fault` = only an overdue loan or a breached SLA. */
 export interface WorkFact { label: string; value: string; tone?: "good" | "muted" | "fault"; mono?: true }
-/** The hand-back note (a return's reason) or a request's note; `by` = who recorded it. Absent when blank. */
+/**
+ * The note typed when an item came back (a return's reason, label "Note when returned") or a request's note;
+ * `by` = who RECORDED it (the IT user), never the holder — the panel reads "recorded by {by}". Absent when blank
+ * or when the text is one of the app's own default reasons (SYSTEM_REASONS).
+ */
 export interface WorkNote { label: string; text: string; by: string | null }
+
+/** The ruling's label for a return's reason; the UI follows it with "recorded by {name}", never "{holder} said". */
+export const RETURN_NOTE_LABEL = "Note when returned";
 export interface WorkHistoryEntry { at: Date; text: string }
 export interface WorkDetail { facts: WorkFact[]; note?: WorkNote; history: WorkHistoryEntry[] }
 export interface WorkSla { text: string; overdue: boolean }
@@ -342,10 +349,24 @@ function detailOf(facts: WorkFact[], history: WorkHistoryEntry[], note?: { label
 
 const assetEntity = (a: { id: string; tag: string }) => ({ kind: "asset" as const, id: a.id, label: a.tag });
 
-const reasonOf = (payload: unknown): string | null => {
-  const r = payload && typeof payload === "object" ? (payload as { reason?: unknown }).reason : undefined;
-  return typeof r === "string" && r.trim() ? r.trim() : null;
-};
+/**
+ * The reasons the app writes itself when nobody typed one (lifecycle/direct.ts, lifecycle/actions.ts,
+ * offboarding/actions.ts, employees/actions.ts, cris/pending-core.ts). They are not notes, so they never show as one.
+ */
+const SYSTEM_REASONS: readonly RegExp[] = [
+  /^offboarding · returned$/, /^assigned$/, /^bulk assigned$/, /^triage$/, /^reserved — day-one setup$/,
+  /^replaced by \S+$/, /^replaces \S+$/,
+];
+
+/** A typed reason, or null when blank or one of SYSTEM_REASONS. */
+export function noteText(reason: unknown): string | null {
+  if (typeof reason !== "string") return null;
+  const t = reason.trim();
+  return t && !SYSTEM_REASONS.some((re) => re.test(t)) ? t : null;
+}
+
+const reasonOf = (payload: unknown): string | null =>
+  noteText(payload && typeof payload === "object" ? (payload as { reason?: unknown }).reason : undefined);
 
 export interface WorkReturnRow {
   assetId: string | null;
@@ -385,6 +406,7 @@ export function historyByAsset(rows: WorkAuditRow[], tags: ReadonlyMap<string, s
   for (const r of rows) grouped.set(r.entityId, [...(grouped.get(r.entityId) ?? []), r]);
   const out = new Map<string, WorkHistoryEntry[]>();
   for (const [id, list] of grouped) {
+    // newest first; equal timestamps keep the read's order (the SQL's createdAt DESC, id DESC) — sort is stable
     out.set(id, list
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, per)
@@ -419,7 +441,7 @@ export function triageItem(a: WorkAssetLike & { returnedAt: Date; lastReturn: Wo
       fact("Returned", `${fmtDate(a.returnedAt)} · ${daysAgoText(n)}`),
       boughtFact(a),
       warrantyFact(a.warrantyUntil, now),
-    ], a.history, { label: "Hand-back note", text: a.lastReturn?.reason, by: a.lastReturn?.recordedBy ?? null }),
+    ], a.history, { label: RETURN_NOTE_LABEL, text: a.lastReturn?.reason, by: a.lastReturn?.recordedBy ?? null }),
   };
 }
 
@@ -491,7 +513,14 @@ export function checkItem(
   };
 }
 
-export interface PurchaseReviewItemLike extends PurchaseReviewLike { vendor: string | null; siNumber: string | null; total: number }
+export interface PurchaseReviewItemLike extends PurchaseReviewLike {
+  vendor: string | null;
+  siNumber: string | null;
+  /** Σ qty × unit price over the lines (the /purchases list's value) */
+  total: number;
+  /** the "Total amount due" Purchasing typed off the sales invoice; null when not typed */
+  amountDue: number | null;
+}
 
 export function purchaseReviewItem(r: PurchaseReviewItemLike, now: Date): WorkItem {
   const row = purchaseReviewRow(r, now);
@@ -506,6 +535,7 @@ export function purchaseReviewItem(r: PurchaseReviewItemLike, now: Date): WorkIt
       fact("Vendor", r.vendor),
       fact("SI number", r.siNumber, { mono: true }),
       fact("Total", fmtMoney(r.total)),
+      ...(r.amountDue === null ? [] : [fact("Amount due", fmtMoney(r.amountDue))]),
       fact("Lines", plural(r.lines, "line")),
       fact("With IT since", `${fmtDate(r.submittedAt ?? r.updatedAt)} · ${daysAgoText(waiting)}`),
     ], []),
@@ -616,7 +646,7 @@ export function missingItem(a: WorkMissingLike, now: Date): WorkItem {
       warrantyFact(a.warrantyUntil, now),
     ], a.history,
     // a Missing return's reason is the investigation's first lead; an orphaned record's last return says nothing about now
-    a.problem === "missing" ? { label: "Hand-back note", text: a.lastReturn?.reason, by: a.lastReturn?.recordedBy ?? null } : undefined),
+    a.problem === "missing" ? { label: RETURN_NOTE_LABEL, text: a.lastReturn?.reason, by: a.lastReturn?.recordedBy ?? null } : undefined),
   };
 }
 
@@ -639,7 +669,8 @@ export interface WorkApprovalLike {
 /** A queue row: an SLA breach (rank 0) or an execution failure (rank 1), as the worklist always ranked them. */
 export function approvalItem(a: WorkApprovalLike, kind: "breached" | "failed", now: Date): WorkItem {
   const s = summarizeApproval(a.type, a.payload, { assetTag: a.asset?.tag, employeeName: a.employee?.name, cls: a.asset?.cls });
-  const sla = slaLabel(a.slaAt, now);
+  // a failed approval was decided — its SLA is over, not breached: never overdue, never red (Global Constraints)
+  const sla: WorkSla = kind === "breached" ? slaLabel(a.slaAt, now) : { text: slaLabel(a.slaAt, now).text, overdue: false };
   const title = `${a.refNo} · ${s.line1}`;
   const row = kind === "breached"
     ? { meta: `${sla.text} · ${a.priority.toLowerCase()}`, rank: 0, age: daysSince(a.slaAt, now) }
@@ -669,7 +700,7 @@ export function approvalItem(a: WorkApprovalLike, kind: "breached" | "failed", n
   };
 }
 
-export interface LeaverItemLike extends LeaverLike { department: string; started: Date | null }
+export interface LeaverItemLike extends LeaverLike { department: WorkGroupRef; started: Date | null }
 
 export function leaverItem(e: LeaverItemLike, now: Date): WorkItem {
   const todayISO = localDateISO(now);
@@ -686,7 +717,7 @@ export function leaverItem(e: LeaverItemLike, now: Date): WorkItem {
     },
     detail: detailOf([
       fact("Employee no.", e.employeeNo, { mono: true }),
-      fact("Department", e.department),
+      fact(e.department.kind === "CLIENT" ? "Client" : "Department", e.department.name),
       fact("Items still out", String(e.itemsOut)),
       e.dueAt && due
         ? fact("Completion due", `${fmtDate(e.dueAt)} · ${due.text}`, due.overdue ? { tone: "fault" } : {})
@@ -707,6 +738,13 @@ const OVER_DAYS = 90;
 const colsOf = <S extends WorkSectionId>(rows: WorkItem[], s: S): Array<ColumnsOf<S>> =>
   rows.map((r) => r.columns).filter((c): c is ColumnsOf<S> => c.section === s);
 
+/** Σ cost, saying how many have no cost recorded rather than counting them as ₱0 silently. */
+function valueAtCost(costs: Array<number | null>): WorkStat {
+  const missing = costs.filter((c) => c === null).length;
+  const sum = fmtMoney(costs.reduce<number>((s, c) => s + (c ?? 0), 0));
+  return { label: "Value at cost", value: missing ? `${sum} · ${missing} without cost` : sum };
+}
+
 const countStat = (label: string, n: number, tone?: WorkStat["tone"]): WorkStat =>
   ({ label, value: String(n), ...(tone && n > 0 ? { tone } : {}) });
 
@@ -723,7 +761,7 @@ export function sectionStats(g: WorkGroup<WorkItem>): WorkStat[] {
       return [
         items, oldest,
         countStat("Over 90 days", c.filter((x) => x.waitingDays > OVER_DAYS).length, "strong"),
-        { label: "Value at cost", value: fmtMoney(c.reduce((sum, x) => sum + (x.cost ?? 0), 0)) },
+        valueAtCost(c.map((x) => x.cost)),
       ];
     }
     case "repairs": {
@@ -743,7 +781,9 @@ export function sectionStats(g: WorkGroup<WorkItem>): WorkStat[] {
       ];
     }
     case "queue":
-      return [items, countStat("Past SLA", g.pastSla, "fault")];
+      // every live row that reads red — breached approvals and leavers past their completion date — so the stat
+      // and the table agree (g.pastSla stays Home's rank-0 count)
+      return [items, countStat("Past SLA", colsOf(g.rows, "queue").filter((x) => x.sla?.overdue).length, "fault")];
     default:
       return [items, oldest];
   }

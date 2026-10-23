@@ -141,6 +141,14 @@ export interface Loadout<A extends HeldAssetLike> {
 }
 
 /**
+ * The required slots still empty — no asset, and not covered by a loan. `missingRequired` is this list's length;
+ * the worklist's New hires panel names them.
+ */
+export function missingRequiredSlots<E extends { slot: { required: boolean }; asset: unknown; coveredByLoan: boolean }>(slots: E[]): E[] {
+  return slots.filter((s) => !s.asset && s.slot.required && !s.coveredByLoan);
+}
+
+/**
  * Greedy fill in slot order. A standard slot takes the first remaining
  * non-loan asset of its type; a loaner slot the first remaining TEMPORARY
  * one.
@@ -183,7 +191,7 @@ export function computeLoadout<A extends HeldAssetLike>(slots: SlotLike[], held:
     onLoan: remaining.filter((a) => a.status === "TEMPORARY"),
     filled: filledSlots.filter((s) => s.asset).length,
     totalSlots: slots.length,
-    missingRequired: filledSlots.filter((s) => !s.asset && s.slot.required && !s.coveredByLoan).length,
+    missingRequired: missingRequiredSlots(filledSlots).length,
     coveredByLoan: filledSlots.filter((s) => s.coveredByLoan).length,
   };
 }

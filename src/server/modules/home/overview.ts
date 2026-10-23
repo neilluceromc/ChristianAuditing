@@ -216,7 +216,8 @@ export async function itOverview(user: Viewer, now: Date = new Date()): Promise<
     inventoryTileCounts(parseListState(new URLSearchParams(), INVENTORY_LIST_CONFIG), null, "IT", now),
     approvalsOpenCounts(user, now),
     metricHistory<SnapshotKey>([...IT_TILES.map((t) => t.key), ...openKeys], now),
-    worklist(user.id, user.role, { limit: 6, excludeOwnClaims: !viewer }, now),
+    // H4: Home renders plain rows, so it skips the Worklist page's panel reads
+    worklist(user.id, user.role, { limit: 6, excludeOwnClaims: !viewer, details: false }, now),
     isApprover(user.role) ? claimedByYou(user.id, user.role, now) : Promise.resolve([]),
     fleet(now),
     itTrend(now),
