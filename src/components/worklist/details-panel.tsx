@@ -119,11 +119,11 @@ export function DetailsPanel({ item, section, canAct, decisions, headingId, filt
 
       <div data-panel-actions="" className="flex shrink-0 flex-col gap-2">
         {canAct && <PanelActions item={item} decisions={decisions} />}
-        <div className="flex items-center justify-between gap-2">
-          <Link href={href} className="inline-flex h-11 items-center text-[13px] font-medium text-accent hover:underline">Open the full record →</Link>
+        <div data-action-row="" className="flex flex-wrap items-center justify-between gap-x-2">
+          <Link href={href} className="inline-flex h-11 items-center whitespace-nowrap text-[13px] font-medium text-accent hover:underline">Open the full record →</Link>
           {canAct && (
             <Button
-              variant="ghost" className="h-11 text-[12.5px] aria-disabled:cursor-default aria-disabled:opacity-55"
+              variant="ghost" className="h-11 whitespace-nowrap text-[12.5px] aria-disabled:cursor-default aria-disabled:opacity-55"
               {...busyProps(decisions.busy)} onClick={unlessBusy(decisions.busy, () => decisions.hide(item))}
             >
               Hide until tomorrow

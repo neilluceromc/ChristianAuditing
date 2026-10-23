@@ -26,7 +26,10 @@ export function QueueSummary({ id, title, blurb, stats, link }: {
             </Link>
           )}
         </div>
-        <p className="mt-0.5 truncate text-[12.5px] text-fg-muted" title={blurb}>{blurb}</p>
+        {/* polish: up to two lines, never cut short on one. Its height follows the summary's width only, never the
+            rows below, so the rows-per-page measurement settles once. No room is reserved, and the lines are 16 px:
+            two of them cost 11 px more than the old single line, which still leaves six rows fitting at 1280×720 */}
+        <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-4 text-fg-muted" title={blurb}>{blurb}</p>
       </div>
       <dl className="flex gap-5 text-right">
         {stats.map((s) => (

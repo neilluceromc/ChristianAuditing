@@ -347,18 +347,26 @@ test.describe("worklist — filters, sort and paging", () => {
     await pager(page).getByRole("button", { name: "← Previous" }).click();
     await expect(pager(page)).toContainText(pageOne);
 
-    // filters: Over 90 days, a category chip, the search box; each narrows the rows
+    // filters: Over 90 days, the category menu, the search box; each narrows the rows
     await page.getByRole("checkbox", { name: "Over 90 days" }).check();
     await expect(pager(page)).toContainText("1–4 of 4");
     await page.getByRole("checkbox", { name: "Over 90 days" }).uncheck();
     await expect(pager(page)).toContainText(pageOne);
-    const monitorChip = page.getByRole("group", { name: "Category" }).getByRole("button", { name: new RegExp(`^${monitorName} `) });
-    await expect(monitorChip).toHaveText(/2/);
-    await monitorChip.click();
-    await expect(monitorChip).toHaveAttribute("aria-pressed", "true");
+    // polish: one menu in place of the chips — "Category: All", each option with its count, All first
+    const category = page.getByRole("button", { name: /^Category: / });
+    await expect(category).toHaveText(/^Category: All/);
+    await category.click();
+    const options = page.getByRole("menu", { name: "Category" }).getByRole("menuitemradio");
+    await expect(options.first()).toHaveAccessibleName(/^All \(\d+\)$/);
+    await expect(options.first()).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("menuitemradio", { name: `${monitorName} (2)` }).click();
+    await expect(category).toHaveText(new RegExp(`^Category: ${monitorName} \\(2\\)`));
     await expect(pager(page)).toContainText("1–2 of 2");
     await expect(rowOf(page, 11)).toBeVisible();
-    await page.getByRole("group", { name: "Category" }).getByRole("button", { name: /^All\b/ }).click();
+    await category.click();
+    await expect(page.getByRole("menuitemradio", { name: `${monitorName} (2)` })).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("menuitemradio", { name: /^All \(/ }).click();
+    await expect(category).toHaveText(/^Category: All/);
     const search = page.getByRole("searchbox", { name: "Search Triage" });
     await search.fill(tagOf(7));
     await expect(bodyRows(page)).toHaveCount(1);

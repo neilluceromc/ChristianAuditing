@@ -2,8 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Menu } from "@/components/ui/menu";
 import { cn } from "@/lib/cn";
-import type { WorkFilters } from "@/lib/worklist-view";
+import { categoryOption, categoryTrigger, type CategoryChip, type WorkFilters } from "@/lib/worklist-view";
 import { busyProps, unlessBusy } from "./triage-actions";
 
 /** A 32 px control with a 44 px hit area (Global Constraints): the ::after reaches 6 px above and below. */
@@ -12,7 +13,7 @@ const HIT_44 = "relative after:absolute after:inset-x-0 after:-inset-y-1.5 after
 export interface BulkButton { id: "SPARE" | "DEFECTIVE" | "CHECK"; label: string }
 
 /**
- * The row under the summary (plan calls 7 and 9): the queue's filters — category chips, Over 90 days, search — or,
+ * The row under the summary (plan calls 7 and 9): the queue's filters — the category menu, Over 90 days, search — or,
  * while rows are ticked, the bulk bar in their place: "{n} selected", the queue's bulk buttons, Clear. A visually
  * hidden live region stays mounted so the first tick is announced too.
  */
@@ -21,7 +22,8 @@ export function QueueFilters({
 }: {
   /** the queue's name, for the search box's label */
   queue: string;
-  chips: Array<{ label: string; value: string | null; count: number }>;
+  /** the category menu's options: All first, then each category with its count (`categoryChips`) */
+  chips: CategoryChip[];
   offers: { category: boolean; over90: boolean };
   filters: WorkFilters;
   onFilters: (f: WorkFilters) => void;
@@ -40,38 +42,45 @@ export function QueueFilters({
           <span className="flex-1 text-[13.5px] font-medium text-fg">{label}</span>
           {bulk.map((b, i) => (
             <Button
-              key={b.id} size="md" variant={i === 0 ? "primary" : "secondary"} className={cn("h-9 aria-disabled:cursor-default aria-disabled:opacity-55", HIT_44)}
+              key={b.id} size="md" variant={i === 0 ? "primary" : "secondary"} className={cn("h-9 whitespace-nowrap aria-disabled:cursor-default aria-disabled:opacity-55", HIT_44)}
               {...busyProps(busy)} onClick={unlessBusy(busy, () => onBulk(b.id))}
             >
               {b.label}
             </Button>
           ))}
-          <Button size="md" variant="ghost" className={cn("h-9", HIT_44)} onClick={onClearChecks}>Clear</Button>
+          <Button size="md" variant="ghost" className={cn("h-9 whitespace-nowrap", HIT_44)} onClick={onClearChecks}>Clear</Button>
         </div>
       ) : (
         <>
+          {/* polish: one menu in place of the chips, which ran off the row's right edge ("Work…") */}
           {offers.category && (
-            <div role="group" aria-label="Category" className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-1.5">
-              {chips.map((c) => {
-                const on = filters.category === c.value;
-                return (
-                  <button
-                    key={c.label}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => onFilters({ ...filters, category: c.value })}
-                    className={cn(
-                      "h-8 shrink-0 whitespace-nowrap rounded-full border px-3 text-[12.5px] transition-colors duration-(--dur-1)", HIT_44,
-                      on ? "border-accent bg-accent text-accent-fg" : "border-border-strong bg-surface text-fg-secondary hover:bg-surface-subtle",
-                    )}
-                  >
-                    {c.label} <span className={on ? "opacity-80" : "text-fg-muted"}>{c.count}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <Menu
+              align="start"
+              label="Category"
+              items={chips.map((c) => ({
+                label: categoryOption(c),
+                checked: filters.category === c.value,
+                onSelect: () => onFilters({ ...filters, category: c.value }),
+              }))}
+              trigger={(t) => (
+                <button
+                  type="button"
+                  {...t}
+                  className={cn(
+                    "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-(--radius-ctl) border px-2.5 text-[12.5px]",
+                    "transition-colors duration-(--dur-1)", HIT_44,
+                    filters.category === null
+                      ? "border-border-strong bg-surface text-fg-secondary hover:bg-surface-subtle"
+                      : "border-accent-soft-border bg-accent-soft text-accent-soft-text",
+                  )}
+                >
+                  {categoryTrigger(chips, filters.category)}
+                  <span aria-hidden className="text-fg-faint">▾</span>
+                </button>
+              )}
+            />
           )}
-          {!offers.category && <span className="flex-1" />}
+          <span className="flex-1" />
           {offers.over90 && (
             <label className="flex h-9 shrink-0 cursor-pointer items-center gap-2 px-1 text-[12.5px] text-fg-secondary">
               <Checkbox checked={filters.over90} onChange={(e) => onFilters({ ...filters, over90: e.target.checked })} />

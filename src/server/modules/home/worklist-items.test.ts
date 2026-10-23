@@ -28,6 +28,9 @@ const h = vi.hoisted(() => ({
   poArgs: [] as Prisma.PurchaseOrderFindManyArgs[],
   approvalArgs: [] as Prisma.ApprovalFindManyArgs[],
   pos: [] as unknown[],
+  /** the people a return's history line names (polish), and the reads that asked for them */
+  holders: [] as unknown[],
+  holderReads: [] as Prisma.EmployeeFindManyArgs[],
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -58,7 +61,13 @@ vi.mock("@/server/db/client", () => ({
         return h.pos;
       },
     },
-    employee: { findMany: async () => [] },
+    employee: {
+      findMany: async (args: Prisma.EmployeeFindManyArgs) => {
+        if (!args.where?.OR) return [];
+        h.holderReads.push(args);
+        return h.holders;
+      },
+    },
     $queryRaw: (...args: unknown[]) => h.queryRaw(...args),
   },
 }));
@@ -81,6 +90,8 @@ beforeEach(() => {
   h.poArgs = [];
   h.approvalArgs = [];
   h.pos = [];
+  h.holders = [];
+  h.holderReads = [];
   h.queryRaw.mockReset().mockImplementation(async () => h.audit);
 });
 
@@ -114,15 +125,19 @@ describe("worklist() details reads", () => {
         employee: { name: "Ana Lim", department: { name: "Northwind", kind: "CLIENT" } } },
     ];
     h.audit = [
-      { entityId: "t1", action: "lifecycle.return", diff: { returnedAt: { from: null, to: "2026-06-03" } }, actorLabel: "Neil Lucero", createdAt: day("2026-06-03") },
+      { entityId: "t1", action: "lifecycle.return", diff: { returnedAt: { from: null, to: "2026-06-03" }, assignee: { from: "EMP-0077", to: null } }, actorLabel: "Neil Lucero", createdAt: day("2026-06-03") },
     ];
+    h.holders = [{ id: "e77", employeeNo: "EMP-0077", name: "Ana Lim" }];
 
     const [t] = items(await worklist("u1", "admin", {}, NOW), "triage");
     const c = t.columns as ColumnsOf<"triage">;
     expect(c.lastHolder).toEqual({ name: "Ana Lim", group: { name: "Northwind", kind: "CLIENT" } });
     expect(c.cost).toBe(78500);
     expect(t.detail.note).toEqual({ label: "Note when returned", text: "Battery drains fast.", by: "Neil Lucero" });
-    expect(t.detail.history).toEqual([{ at: day("2026-06-03"), text: "Neil Lucero returned for triage" }]);
+    // polish: the history names who handed it back (the diff's employee number, read in one more query) and who recorded it
+    expect(t.detail.history).toEqual([{ at: day("2026-06-03"), text: "Ana Lim returned it · recorded by Neil Lucero" }]);
+    expect(h.holderReads).toHaveLength(1);
+    expect(h.holderReads[0].where).toEqual({ OR: [{ employeeNo: { in: ["EMP-0077"] } }, { id: { in: ["EMP-0077"] } }] });
     expect(t.detail.facts).toContainEqual({ label: "Warranty", value: "until 10 Aug 2027", tone: "good" });
     // Home's fields are unchanged
     expect(t).toMatchObject({ key: "triage:t1", meta: "back 142 d · triage it", control: { kind: "triage" } });

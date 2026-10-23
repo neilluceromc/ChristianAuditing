@@ -140,6 +140,20 @@ export function categoryChips(rows: WorkItem[]): Array<{ label: string; value: s
   return [{ label: "All", value: null, count: rows.length }, ...each];
 }
 
+export type CategoryChip = ReturnType<typeof categoryChips>[number];
+
+/** One category menu option (polish): its name and count — "All (12)", "Laptop (6)". */
+export const categoryOption = (c: CategoryChip): string => `${c.label} (${c.count})`;
+
+/**
+ * The category menu's trigger (polish: one menu in place of the chips, which ran off the row): "Category: All", or
+ * the chosen category with its count — 0 once the queue no longer holds one (its last row decided).
+ */
+export function categoryTrigger(chips: CategoryChip[], value: string | null): string {
+  if (value === null) return "Category: All";
+  return `Category: ${value} (${chips.find((c) => c.value === value)?.count ?? 0})`;
+}
+
 /** Every word a row shows — tag, model, people, groups, vendors, references — lower-cased, for the search box. */
 export function searchText(item: WorkItem): string {
   const words: string[] = [item.title];

@@ -102,6 +102,27 @@ describe("summary per queue", () => {
   });
 });
 
+describe("polish: the queue description and the panel's footer row", () => {
+  it("the description wraps to at most two lines, the full text in its title — never an ellipsis on one line", () => {
+    const html = page(allRows());
+    const blurb = "Back from a person, not yet checked — decide before it is a spare again.";
+    const p = html.match(/<p class="([^"]*)" title="([^"]*)">([^<]*)<\/p>/);
+    expect(p?.[2]).toBe(blurb);
+    expect(p?.[3]).toBe(blurb);
+    expect(p?.[1]).toContain("line-clamp-2");
+    expect(p?.[1]).not.toContain("truncate");
+    // 16 px lines: two of them still leave six rows fitting at 1280×720 with Cris tucked away (e2e 1b)
+    expect(p?.[1]).toContain("leading-4");
+  });
+  it("Open the full record and Hide until tomorrow wrap as whole controls", () => {
+    const html = panel(triage("t1", 142));
+    const row = html.match(/<div data-action-row="" class="([^"]*)">[\s\S]*?Open the full record/)?.[1] ?? "";
+    expect(row).toContain("flex-wrap");
+    expect(html).toMatch(/<a [^>]*class="[^"]*whitespace-nowrap[^"]*"[^>]*>Open the full record →<\/a>/);
+    expect(html).toMatch(/<button[^>]*class="[^"]*whitespace-nowrap[^"]*"[^>]*><span[^>]*>Hide until tomorrow<\/span>/);
+  });
+});
+
 describe("filters and the bulk bar", () => {
   const props = {
     queue: "Triage", chips: [{ label: "All", value: null, count: 3 }, { label: "Laptop", value: "Laptop", count: 2 }],
@@ -109,17 +130,19 @@ describe("filters and the bulk bar", () => {
     checked: 0, bulk: [{ id: "SPARE" as const, label: "Keep as spares" }, { id: "DEFECTIVE" as const, label: "Send to repair" }],
     onBulk: vi.fn(), onClearChecks: vi.fn(), busy: false,
   };
-  it("category chips (pressed), Over 90 days and the search box", () => {
+  it("one category menu (no chips), Over 90 days and the search box", () => {
     const html = renderToStaticMarkup(<QueueFilters {...props} filters={{ ...NO_FILTERS, category: "Laptop" }} />);
-    expect(html).toMatch(/aria-pressed="false"[^>]*>All <span[^>]*>3<\/span>/);
-    expect(html).toMatch(/aria-pressed="true"[^>]*>Laptop <span[^>]*>2<\/span>/);
+    expect(html).not.toContain("aria-pressed");
+    expect(html).toMatch(/<button[^>]*aria-haspopup="menu"[^>]*>[\s\S]*?Category: Laptop \(2\)[\s\S]*?<\/button>/);
+    expect(text(renderToStaticMarkup(<QueueFilters {...props} />))).toContain("Category: All");
     expect(text(html)).toContain("Over 90 days");
     expect(html).toContain('aria-label="Search Triage"');
     expect(html).toContain('placeholder="Search tag, model, person"');
   });
   it("a queue without categories or ages offers only the search", () => {
     const html = renderToStaticMarkup(<QueueFilters {...props} offers={{ category: false, over90: false }} />);
-    expect(html).not.toContain('aria-label="Category"');
+    expect(html).not.toContain("Category:");
+    expect(html).not.toContain('aria-haspopup="menu"');
     expect(text(html)).not.toContain("Over 90 days");
     expect(html).toContain('type="search"');
   });
@@ -309,6 +332,22 @@ describe("triage inline reason", () => {
     const html = renderToStaticMarkup(<TriageButtons {...props} choice={null} />);
     expect(html).not.toContain("<textarea");
     expect(buttons(html)).toEqual(["Keep as spare", "Send to repair", "Dispose", "Donate"]);
+  });
+  it("polish: the secondary row wraps whole buttons, sized to their labels; no label breaks inside its button", () => {
+    for (const html of [renderToStaticMarkup(<TriageButtons {...props} choice={null} />), renderToStaticMarkup(<TriageButtons {...props} choice="DISPOSE" />)]) {
+      expect(html).not.toMatch(/grid-cols-[23]/);
+      const rows = [...html.matchAll(/<div data-action-row="" class="([^"]*)"/g)].map((m) => m[1]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatch(/\bflex\b/);
+      expect(rows[0]).toContain("flex-wrap");
+    }
+    const html = renderToStaticMarkup(<TriageButtons {...props} choice={null} />);
+    for (const label of ["Send to repair", "Dispose", "Donate"]) {
+      const cls = html.match(new RegExp(`<button[^>]*class="([^"]*)"[^>]*><span[^>]*>${label}</span>`))?.[1] ?? "";
+      expect(cls, label).toContain("whitespace-nowrap");
+      expect(cls, label).toContain("h-11");
+      expect(cls, label).not.toContain("w-full");
+    }
   });
 });
 
