@@ -5,9 +5,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma, User } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { unstable_update } from "@/server/auth";
 import { actionRole } from "@/server/auth/guards";
-import { bumpSessionVersion, signedSessionUpdate } from "@/server/auth/session-version";
+import { refreshOwnSession } from "@/server/auth/own-session";
+import { bumpSessionVersion } from "@/server/auth/session-version";
 import { currentPasswordKey, signInKey } from "@/server/auth/sign-in-limit";
 import { generateTempPassword } from "@/server/auth/temp-password";
 import { checkRate } from "@/server/rate-limit";
@@ -109,9 +109,8 @@ async function inTransaction<T>(run: (tx: Tx) => Promise<ActionResult<T>>): Prom
 
 /** After an admin's change to their OWN account committed with a bump: keep THIS session (the other devices sign out). */
 async function keepOwnSession(actor: User, version: number): Promise<void> {
-  // Auth.js types the update as a Partial<Session>; the jwt callback (config.edge.ts) reads this signed shape instead.
-  const update = await signedSessionUpdate(actor.id, version, actor.mustChangePassword);
-  await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
+  // The page rendered after this action reads the refreshed session too (own-session.ts, Task 5).
+  await refreshOwnSession(actor.id, version, actor.mustChangePassword);
 }
 
 const auditBase = (actor: User, target: { id: string }) => ({

@@ -5,6 +5,7 @@ import { auth } from "./index";
 import { prisma } from "../db/client";
 import { PASSWORD_PAGE, ROLE_LANDING } from "@/lib/workspaces";
 import { markRefusal } from "./refusal";
+import { refreshedOwnSession } from "./own-session";
 
 /** Phase 41: the signed-in person a server action acts as — what `actionUser()` returns once it is not null. */
 export type SessionUser = User;
@@ -59,8 +60,10 @@ const readRequestUser = cache(async (): Promise<User> => {
   const user = await prisma.user.findUnique({ where: { id: session.user.id } });
   if (!user || user.disabled) redirect("/logout");
   // The JWT freezes role and sessionVersion at sign-in; if either has since moved, force re-auth so
-  // middleware's (token-based) gating can't drift from the DB.
-  if (staleToken(user, session.user)) redirect("/logout");
+  // middleware's (token-based) gating can't drift from the DB. The page rendered after the person's own password
+  // change in this same request reads the session it just refreshed (own-session.ts, Task 5).
+  const refreshed = refreshedOwnSession(user.id);
+  if (staleToken(user, refreshed ? { ...session.user, ...refreshed } : session.user)) redirect("/logout");
   return user;
 });
 

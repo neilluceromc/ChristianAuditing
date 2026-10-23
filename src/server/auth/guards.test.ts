@@ -35,7 +35,7 @@ vi.mock("next/navigation", () => ({
     throw new Error(`REDIRECT ${to}`);
   },
 }));
-vi.mock("./index", () => ({ auth: h.auth }));
+vi.mock("./index", () => ({ auth: h.auth, unstable_update: vi.fn() }));
 // Users & access: the request store a server action runs in (Next's work-unit storage), as a real AsyncLocalStorage.
 vi.mock("next/dist/server/app-render/work-unit-async-storage.external", async () => {
   const { AsyncLocalStorage } = await import("node:async_hooks");
@@ -46,6 +46,7 @@ vi.mock("@/server/db/client", () => ({ prisma: { user: { findUnique: h.findUniqu
 import { workUnitAsyncStorage } from "next/dist/server/app-render/work-unit-async-storage.external";
 import { forbidden, PASSWORD_OWED_COPY } from "@/server/action-result";
 import { actionRole, actionUser, passwordOwedUser, requirePasswordOwedUser, requireRole, requireUser } from "./guards";
+import { markOwnSessionRefreshed } from "./own-session";
 
 const newRequest = () => h.stores.forEach((s) => s.clear());
 const ACTIVE = { id: "u1", role: "it_staff", disabled: false, sessionVersion: 0, approvalState: "APPROVED" };
@@ -248,5 +249,56 @@ describe("a password still owed (Users & access spec §4.3, Review Focus #2)", (
     h.user = { ...ACTIVE, mustChangePassword: false };
     expect(await actionUser()).toEqual(h.user);
     expect(await requireUser()).toEqual(h.user);
+  });
+});
+
+/*
+ * Task 5 (found by e2e): a server action that sets cookies is followed, in the same request, by a render of the page.
+ * Auth.js's auth() reads the request's Cookie header, which Next does not update after the action (only cookies() is
+ * synchronised), so that render saw the token from before the person's own password change and signed them out.
+ */
+describe("a session this request refreshed (your own password change)", () => {
+  const inRequest = <T>(fn: () => Promise<T>) =>
+    (workUnitAsyncStorage.run as unknown as (store: object, f: () => Promise<T>) => Promise<T>)({}, fn);
+
+  it("keeps the person signed in on the page rendered after the action, in that request only", async () => {
+    h.user = { ...ACTIVE, sessionVersion: 2 };
+    h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 1 } };
+    await inRequest(async () => {
+      markOwnSessionRefreshed("u1", { sessionVersion: 2, mustChangePassword: false });
+      expect(await requireUser()).toEqual(h.user);
+    });
+    newRequest();
+    await inRequest(async () => {
+      await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    });
+  });
+
+  it("doesn't help another account, a version that moved again, or a role that changed", async () => {
+    h.user = { ...ACTIVE, sessionVersion: 2 };
+    h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 1 } };
+    await inRequest(async () => {
+      markOwnSessionRefreshed("u2", { sessionVersion: 2, mustChangePassword: false });
+      await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    });
+    newRequest();
+    h.user = { ...ACTIVE, sessionVersion: 3 };
+    await inRequest(async () => {
+      markOwnSessionRefreshed("u1", { sessionVersion: 2, mustChangePassword: false });
+      await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    });
+    newRequest();
+    h.user = { ...ACTIVE, sessionVersion: 2, role: "finance_staff" };
+    await inRequest(async () => {
+      markOwnSessionRefreshed("u1", { sessionVersion: 2, mustChangePassword: false });
+      await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
+    });
+  });
+
+  it("outside a request nothing is marked", async () => {
+    h.user = { ...ACTIVE, sessionVersion: 2 };
+    h.session = { user: { id: "u1", role: "it_staff", sessionVersion: 1 } };
+    markOwnSessionRefreshed("u1", { sessionVersion: 2, mustChangePassword: false });
+    await expect(requireUser()).rejects.toThrow("REDIRECT /logout");
   });
 });

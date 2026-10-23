@@ -4,10 +4,10 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import type { User } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { unstable_update } from "@/server/auth";
 import { actionUser, passwordOwedUser } from "@/server/auth/guards";
 import { passwordMatches } from "@/server/auth/password-check";
-import { bumpSessionVersion, signedSessionUpdate } from "@/server/auth/session-version";
+import { refreshOwnSession } from "@/server/auth/own-session";
+import { bumpSessionVersion } from "@/server/auth/session-version";
 import {
   CURRENT_PASSWORD_LIMIT, clearCurrentPasswordFailures, releaseSignInAttempt, reserveCurrentPasswordAttempt,
 } from "@/server/auth/sign-in-limit";
@@ -70,9 +70,8 @@ async function saveOwnPassword(
     return next;
   });
   if (version === null) return conflict(CHANGED_MEANWHILE);
-  // Auth.js types the update as a Partial<Session>; the jwt callback (config.edge.ts) reads this signed shape instead.
-  const update = await signedSessionUpdate(user.id, version, false);
-  await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
+  // This device keeps its session, and the page rendered after this action reads it (own-session.ts, Task 5).
+  await refreshOwnSession(user.id, version, false);
   // No revalidatePath: the page re-rendering in this response gains nothing (the Account card shows the returned
   // date; the first-sign-in page moves on to Home), so the action returns its result alone.
   return ok({ sessionVersion: version, passwordChangedAt: now.toISOString() });
