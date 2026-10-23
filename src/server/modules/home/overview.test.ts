@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   counts: [] as unknown[],
   nav: {} as Record<string, number>,
   navKeys: [] as Array<{ keys: string[]; role: string }>,
+  worklistOpts: [] as unknown[],
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -52,7 +53,7 @@ vi.mock("./nav-counts", async (orig) => ({
   },
 }));
 vi.mock("./queries", () => ({
-  worklist: async () => [],
+  worklist: async (_userId: string, _role: string, opts: unknown) => { h.worklistOpts.push(opts); return []; },
   claimedByYou: async () => [{ id: "c1", refNo: "APR-1", line1: "Assign", sla: { text: "1 d overdue", overdue: true } }],
   fleet: async () => ({ total: 1, coverage: "", slices: [{ status: "SPARE", count: 1, share: 100, href: "/inventory?status=SPARE" }] }),
 }));
@@ -68,6 +69,7 @@ beforeEach(() => {
   h.counts = [];
   h.nav = {};
   h.navKeys = [];
+  h.worklistOpts = [];
 });
 
 describe("itOverview", () => {
@@ -121,6 +123,11 @@ describe("itOverview", () => {
     expect(o.needsYouHref).toBe("/inventory/work");
     expect(o.makeUp.rows).toEqual([{ label: "Spare", value: 1, tone: "chart-3", href: "/inventory?status=SPARE" }]);
     expect(o.breakdown.rows).toEqual([{ label: "Acme", value: 4, href: "/employees?department=d1&gaps=1" }]);
+  });
+
+  it("Needs you reads the worklist's narrow rows: no panel facts (details: false)", async () => {
+    await itOverview(user("it_staff"), NOW);
+    expect(h.worklistOpts).toEqual([expect.objectContaining({ limit: 6, details: false })]);
   });
 
   it("a viewer holds no claims", async () => {

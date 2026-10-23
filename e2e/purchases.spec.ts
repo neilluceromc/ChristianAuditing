@@ -119,7 +119,7 @@ test.describe("purchase orders — a PO sent back by IT (PO-0202)", () => {
     await expect(header(page)).toContainText("Sent back to Purchasing");
 
     // a status, not an alert: it is part of the page every time it opens
-    const banner = page.getByRole("status").filter({ hasText: "Sent back by IT" });
+    const banner = page.getByRole("main").getByRole("status").filter({ hasText: "Sent back by IT" });
     await expect(banner).toContainText("Sent back by IT — J. Sarmiento");
     await expect(banner).toContainText("Price is per box, not per unit");
     await expect(banner).toContainText("Flagged: Unit price");
@@ -135,7 +135,7 @@ test.describe("purchase orders — a PO sent back by IT (PO-0202)", () => {
   test("a pre-PO draft (PO-0201) says it was never sent", async ({ page }) => {
     await login(page, "purchasing@thebackroomop.com");
     await page.goto(`/purchases/${await poId("PO-0201")}`);
-    await expect(page.getByRole("status").filter({ hasText: "Not sent yet" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("status").filter({ hasText: "Not sent yet" })).toBeVisible();
   });
 });
 

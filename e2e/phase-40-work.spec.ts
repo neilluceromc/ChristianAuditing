@@ -5,9 +5,8 @@ import { login } from "./fixtures/login";
 
 /**
  * Phase 40 (spec §6, Work and approvals):
- *   1. requests waiting for IT's review (SUBMITTED) are a "Purchase reviews" group on the worklist, whose heading opens
- *      /purchases?state=SUBMITTED, and the IT nav's "Purchase reviews" item (a view under Approvals since Phase 42)
- *      carries their count;
+ *   1. requests waiting for IT's review are the worklist's "Purchase reviews" queue (Worklist H4: a tab, each row's
+ *      panel Reviews it), /purchases?state=WITH_IT lists them, and the IT nav's item carries their count;
  *   2. each approval check says "Passed" or "Failed" in words beside its dot;
  *   3. the A key in the queue runs the row's primary action, so a PENDING row approves in one step.
  *
@@ -37,26 +36,28 @@ async function waitForHydration(target: Locator) {
 }
 
 test.describe.serial("phase 40 — work and approvals", () => {
-  test("1. a PO with IT is a Purchase review on the worklist; the group opens the list; the nav item counts them", async ({ page }) => {
+  test("1. a PO with IT is a Purchase review on the worklist; its panel Reviews it; the list and the nav item count them", async ({ page }) => {
     test.setTimeout(90_000);
     const pr = await db.purchaseOrder.findUniqueOrThrow({ where: { refNo: "PO-0198" } });
     expect(pr.state).toBe("WITH_IT");
     const waiting = await db.purchaseOrder.count({ where: { state: "WITH_IT" } });
 
     await login(page, IT);
-    await page.goto("/inventory/work");
-    const group = page.locator("section#purchases");
-    await expect(group.getByRole("heading", { name: /^Purchase reviews/ })).toBeVisible({ timeout: 20_000 });
-    const row = group.locator("ol > li").filter({ hasText: "PO-0198" });
-    await expect(row).toContainText("PO-0198 · 27-inch monitors +1 more");
-    await expect(row).toContainText("from ");
-    await expect(row.getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", `/purchases/${pr.id}`);
+    // Worklist H4: Purchase reviews is a queue tab carrying the count; a row's details panel holds its Review link.
+    await page.goto("/inventory/work?q=purchases");
+    const tab = page.getByRole("navigation", { name: "Queues" }).getByRole("link", { name: /^Purchase reviews/ });
+    await expect(tab).toHaveAttribute("aria-current", "page", { timeout: 20_000 });
+    await expect(tab).toHaveText(new RegExp(`^Purchase reviews\\s*${waiting}$`));
+    const row = page.getByRole("table", { name: "Purchase reviews", exact: true }).getByRole("row", { name: /PO-0198/ });
+    await expect(row).toContainText("27-inch monitors +1 more");
+    await waitForHydration(row);
+    await row.click();
+    await expect(row).toHaveAttribute("aria-selected", "true");
+    const panel = page.locator("aside[data-worklist-panel]");
+    await expect(panel.getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", `/purchases/${pr.id}`);
 
-    // The group's heading is the link to the whole list.
-    const open = group.getByRole("link", { name: "Purchase reviews", exact: true });
-    await expect(open).toHaveAttribute("href", "/purchases?state=WITH_IT");
-    await open.click();
-    await expect(page).toHaveURL(/\/purchases\?state=WITH_IT$/, { timeout: 20_000 });
+    // The whole list of POs with IT (the old group heading's link; the queue tab replaced the heading).
+    await page.goto("/purchases?state=WITH_IT");
     await expect(page.getByRole("navigation", { name: "Purchase order states" }).getByRole("link", { name: /With IT/ }))
       .toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("link", { name: "PO-0198" }).first()).toBeVisible();
@@ -72,12 +73,6 @@ test.describe.serial("phase 40 — work and approvals", () => {
     const badge = navItem.locator('[aria-label$="with IT"]');
     await expect(badge).toHaveText(String(waiting));
     await expect(badge).toHaveAttribute("aria-label", `${waiting} with IT`);
-
-    // The worklist carries the same group. (Phase 46: Home's worklist sections became the Overview's Needs you; the
-    // full worklist is where the group's heading link lives.)
-    await page.goto("/inventory/work");
-    await expect(page.locator("section#purchases").getByRole("link", { name: "Purchase reviews", exact: true }))
-      .toHaveAttribute("href", "/purchases?state=WITH_IT");
   });
 
   test("2. each approval check says Passed or Failed in words, not only by its dot", async ({ page }) => {

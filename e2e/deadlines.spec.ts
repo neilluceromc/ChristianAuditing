@@ -212,14 +212,17 @@ test.describe.serial("deadlines", () => {
 
     try {
       await login(page, IT);
-      // P-5: the uncapped worklist page, not Home — Home shows two rows per
-      // section, so a leaver can legitimately be cut off there.
-      await page.goto("/inventory/work");
-      const queue = page.locator("section#queue");
+      // P-5: the Worklist's Approvals & leavers queue, not Home — Home shows
+      // two rows per section, so a leaver can legitimately be cut off there.
+      await page.goto("/inventory/work?q=queue");
+      const queue = page.getByRole("table", { name: "Approvals & leavers", exact: true });
       await expect(queue).toBeVisible({ timeout: 20_000 });
-      const dennisRow = queue.getByRole("listitem").filter({ hasText: "Dennis Ong is leaving" });
+      const dennisRow = queue.getByRole("row").filter({ hasText: "Leaving" }).filter({ hasText: "Dennis Ong" });
       await expect(dennisRow).toContainText("2 d overdue");
-      await expect(dennisRow).toContainText(d.employeeNo);
+      // H4: the employee number is a fact in the selected row's details panel
+      await waitForHydration(dennisRow);
+      await dennisRow.click();
+      await expect(page.locator("aside[data-worklist-panel]")).toContainText(d.employeeNo);
 
       // Phase 40 (spec 2.2): an ACTIVE person's Employment is read-only on Edit; the way in is the Start offboarding
       // dialog, which prefills the default date, visibly, and lands in the wizard.
@@ -233,11 +236,12 @@ test.describe.serial("deadlines", () => {
       await startDialog.getByRole("button", { name: "Start", exact: true }).click();
       await page.waitForURL(/\/offboarding\//, { timeout: 30_000 });
 
-      await page.goto("/inventory/work");
+      await page.goto("/inventory/work?q=queue");
       await expect(queue).toBeVisible({ timeout: 20_000 });
-      const titles = await queue.getByRole("listitem").allTextContents();
-      const dennisAt = titles.findIndex((t) => t.includes("Dennis Ong is leaving"));
-      const leoAt = titles.findIndex((t) => t.includes("Leo Tan is leaving"));
+      // H4: the queue opens in the worklist's rank order (no column sorted), ten rows a page — this one holds four
+      const titles = await queue.locator("tbody tr[data-row-key]").allTextContents();
+      const dennisAt = titles.findIndex((t) => t.includes("Leaving") && t.includes("Dennis Ong"));
+      const leoAt = titles.findIndex((t) => t.includes("Leaving") && t.includes("Leo Tan"));
       expect(dennisAt, "Dennis's leaver row is on the worklist").toBeGreaterThanOrEqual(0);
       expect(leoAt, "Leo's leaver row is on the worklist").toBeGreaterThanOrEqual(0);
       expect(dennisAt, "the overdue leaver sorts above the fresh one").toBeLessThan(leoAt);

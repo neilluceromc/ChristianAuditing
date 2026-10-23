@@ -25,6 +25,12 @@ export function reasonRequiredFor(outcome: ReturnOutcome): boolean {
   return outcome === "MISSING";
 }
 
+/**
+ * Two transactions met head-on on the same asset and Postgres rolled this one back whole (a deadlock): nothing was
+ * written, and the same press can be tried again (Worklist H4 Task 2, fix round 2).
+ */
+export const CHANGED_TRY_AGAIN = "Changed by someone else since — try again";
+
 export const TRIAGE_OUTCOMES = ["SPARE", "DEFECTIVE", "DISPOSE", "DONATED"] as const;
 export type TriageOutcome = (typeof TRIAGE_OUTCOMES)[number];
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, numberSlotLabels, orderTiles, profilePrimary, profileTiles, profileTileMenuItems, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
+import { computeLoadout, effectiveSlots, groupExceptionsByEmployee, headcountByPolicy, missingRequiredSlots, numberSlotLabels, orderTiles, profilePrimary, profileTiles, profileTileMenuItems, resolvePolicy, tileChip, slotLabel, tileMenuItems, type ExceptionLike } from "./loadout";
 
 const policies = [
   { id: "p-dept", name: "Finance standard", appliesToTitle: null, appliesToDepartmentId: "dept-fin", slots: [] },
@@ -111,6 +111,14 @@ describe("computeLoadout — loan-covered slot (Phase 20 spec §6.3, gap 3)", ()
     expect(l.coveredByLoan).toBe(0);
     expect(l.slots.find((s) => s.slot.id === "sa")).toMatchObject({ asset: null, coveredByLoan: false });
     expect(l.missingRequired).toBe(1);
+  });
+
+  it("missingRequiredSlots names exactly the slots missingRequired counts (empty, required, not covered by a loan)", () => {
+    const optional = { ...laptopSlot, id: "sc", name: "spare", required: false };
+    const second = { ...laptopSlot, id: "sb", name: "second laptop" };
+    const l = computeLoadout([laptopSlot, second, optional], [asset("a1", "t-laptop", "TEMPORARY")]);
+    expect(missingRequiredSlots(l.slots).map((s) => s.slot.id)).toEqual(["sb"]);
+    expect(missingRequiredSlots(l.slots)).toHaveLength(l.missingRequired);
   });
 
   it("ordinary cases are unchanged: a slot filled outright is never marked covered by loan", () => {

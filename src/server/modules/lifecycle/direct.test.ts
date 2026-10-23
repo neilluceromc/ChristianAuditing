@@ -12,7 +12,7 @@ vi.mock("@/server/audit", () => ({
 }));
 vi.mock("@/server/webhooks/emit", () => ({ emitWebhook: async (_tx: unknown, ...a: unknown[]) => { writes.hooks.push(a); } }));
 
-import { assignCore, replaceCore } from "./direct";
+import { assignCore, loadDirect, lockAssets, replaceCore } from "./direct";
 
 type Row = { id: string; tag: string; cls: "IT" | "PURCHASING"; status: string; assigneeId: string | null; defectiveSince: null; repairEndedAt: null; returnedAt: Date | null; loanDueAt: null; model: string };
 const asset = (id: string, tag: string, status: string, assigneeId: string | null = null, extra: Partial<Row> = {}): Row => ({
@@ -22,9 +22,15 @@ const asset = (id: string, tag: string, status: string, assigneeId: string | nul
 /** A transaction that reads from fixtures and records every row it would write. */
 function fakeTx(assets: Row[], opts: { openApproval?: boolean; hold?: { employeeId: string; employeeNo: string } } = {}) {
   const rowWrites: string[] = [];
+  /** Task 2 fix round 1: the row lock and the asset reads, in order. */
+  const ops: string[] = [];
   const tx = {
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      ops.push(`lock:${strings.join("$").replace(/\s+/g, " ").trim()}:${values.join(",")}`);
+      return [];
+    },
     asset: {
-      findUnique: async ({ where }: { where: { id: string } }) => assets.find((a) => a.id === where.id) ?? null,
+      findUnique: async ({ where }: { where: { id: string } }) => { ops.push(`read:${where.id}`); return assets.find((a) => a.id === where.id) ?? null; },
       update: async ({ where }: { where: { id: string } }) => { rowWrites.push(`asset:${where.id}`); },
     },
     employee: {
@@ -37,7 +43,7 @@ function fakeTx(assets: Row[], opts: { openApproval?: boolean; hold?: { employee
       updateMany: async () => { rowWrites.push("reservation"); return { count: 0 }; },
     },
   };
-  return { tx: tx as unknown as Prisma.TransactionClient, rowWrites };
+  return { tx: tx as unknown as Prisma.TransactionClient, rowWrites, ops };
 }
 
 const user = { id: "u1", name: "Neil Lucero", role: "it_staff" } as User;
@@ -45,6 +51,29 @@ const spare = asset("a1", "BR-LT-0230", "SPARE");
 const held = asset("a0", "BR-LT-0100", "DEPLOYED", "emp1");
 
 beforeEach(() => { writes.approvals.length = 0; writes.audits.length = 0; writes.hooks.length = 0; });
+
+describe("loadDirect (Task 2 fix round 1)", () => {
+  it("takes the row lock before it reads the asset", async () => {
+    const { tx, ops } = fakeTx([spare]);
+    expect(await loadDirect(tx, user, "a1")).toEqual({ asset: spare });
+    expect(ops).toEqual(['lock:SELECT "id" FROM "Asset" WHERE "id" = $ FOR UPDATE:a1', "read:a1"]);
+  });
+  it("a replace takes both locks up front, in id order, before either read (fix round 2)", async () => {
+    // the old item's id sorts AFTER the new one's: the locks still go a1, then b9
+    const { tx, ops } = fakeTx([asset("b9", "BR-LT-0100", "DEPLOYED", "emp1"), spare]);
+    await replaceCore(tx, user, { employeeId: "emp1", oldAssetId: "b9", newAssetId: "a1", outcome: "DEFECTIVE" }, { dryRun: true });
+    const seq = ops.map((o) => o.replace(/^lock:.*:/, "lock:"));
+    expect(seq.slice(0, 2)).toEqual(["lock:a1", "lock:b9"]);
+    // loadDirect's own locks are re-takes of rows already held (a no-op in Postgres): each still before its read
+    expect(seq.filter((o) => o.startsWith("read:"))).toEqual(["read:b9", "read:a1"]);
+    expect(seq.indexOf("read:b9")).toBeGreaterThan(1);
+  });
+  it("lockAssets: sorted, each id once", async () => {
+    const { tx, ops } = fakeTx([]);
+    await lockAssets(tx, ["c3", "a1", "c3", "b2"]);
+    expect(ops.map((o) => o.replace(/^lock:.*:/, ""))).toEqual(["a1", "b2", "c3"]);
+  });
+});
 
 describe("assignCore", () => {
   it("writes the asset, an approval, an audit entry and a webhook", async () => {

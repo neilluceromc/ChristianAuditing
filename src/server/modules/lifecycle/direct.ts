@@ -11,7 +11,8 @@ import { ASSET_STATUSES } from "@/lib/inventory-list";
 import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, statusLabel,
 } from "@/lib/asset-class";
-import { RETURN_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan } from "@/lib/lifecycle";
+import { CHANGED_TRY_AGAIN, RETURN_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan } from "@/lib/lifecycle";
+import { isDeadlock, warnDeadlock } from "@/server/prisma-errors";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange, type Prepared } from "./apply";
 
 /*
@@ -29,8 +30,47 @@ export const assetSelect = {
   id: true, tag: true, cls: true, status: true, assigneeId: true, defectiveSince: true, repairEndedAt: true, returnedAt: true, loanDueAt: true, model: true,
 } as const;
 
-/** Load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
+/**
+ * `SELECT … FOR UPDATE` on the asset's row, held until the transaction ends (no row: nothing locked, the read refuses).
+ * Worklist H4 (Task 2 fix round 1): every reader that goes on to write the asset takes it first, so an undo running at
+ * the same moment either finishes before the read or waits behind the write — never reads stale between the two.
+ * Re-entrant: a row this transaction already holds is a no-op in Postgres, so `loadDirect` may re-take a lock that
+ * `lockAssets` took up front.
+ */
+export async function lockAsset(tx: Tx, id: string): Promise<void> {
+  await tx.$queryRaw`SELECT "id" FROM "Asset" WHERE "id" = ${id} FOR UPDATE`;
+}
+
+/**
+ * Fix round 2: an action that writes more than one asset takes every lock up front, in id order, before any read —
+ * two such actions over the same pair then queue instead of deadlocking.
+ */
+export async function lockAssets(tx: Tx, ids: readonly string[]): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) await lockAsset(tx, id);
+}
+
+/**
+ * Fix round 2: a single action whose transaction lost a deadlock (P2034, or 40P01 from the row lock) reads as
+ * "Changed by someone else since — try again" rather than a 500. The rollback was whole, so nothing was written.
+ */
+export async function deadlockAsChanged<T>(
+  run: () => Promise<T>,
+  ctx: { op: string; assetId?: string | null } = { op: "direct change" },
+): Promise<T | ActionResult<never>> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isDeadlock(err)) {
+      warnDeadlock(ctx.op, ctx.assetId);
+      return conflict(CHANGED_TRY_AGAIN);
+    }
+    throw err;
+  }
+}
+
+/** Lock, load + the three refusals every direct action shares: exists, direct for this role, no open approval. */
 export async function loadDirect(tx: Tx, actor: { role: Role }, assetId: string) {
+  await lockAsset(tx, assetId);
   const asset = await tx.asset.findUnique({ where: { id: assetId }, select: assetSelect });
   if (!asset) return { failure: conflict("That asset no longer exists.") } as const;
   if (!isDirectLifecycle(actor.role, asset.cls)) return { failure: forbidden() } as const;
@@ -44,6 +84,8 @@ export interface DirectRecord {
   actor: Actor; asset: LifecycleAsset; change: LifecycleChange;
   type: "lifecycle_assign" | "lifecycle_return" | "lifecycle_change_status";
   payload: Prisma.InputJsonObject; employeeId?: string; action: string; extraDiff?: AuditDiff; now: Date;
+  /** Worklist H4: more columns for the same asset write (triage's note and its stamped updatedAt). */
+  extraUpdates?: Prisma.AssetUpdateInput;
 }
 
 /** The guards half of recordDirect: reads only, writes nothing. */
@@ -56,23 +98,24 @@ async function prepareDirect(tx: Tx, rec: DirectRecord): Promise<{ ok: true; pre
   return prepared;
 }
 
-/** The writes half of recordDirect: nothing here refuses. */
-async function commitDirect(tx: Tx, rec: DirectRecord, prepared: Prepared): Promise<AuditDiff> {
-  await commitLifecycle(tx, rec.asset.id, prepared, rec.now);
+/** The writes half of recordDirect: nothing here refuses. Returns the audit entry's diff and id. */
+async function commitDirect(tx: Tx, rec: DirectRecord, prepared: Prepared): Promise<{ diff: AuditDiff; auditId: string }> {
+  const write = rec.extraUpdates ? { ...prepared, updates: { ...prepared.updates, ...rec.extraUpdates } } : prepared;
+  await commitLifecycle(tx, rec.asset.id, write, rec.now);
   const approval = await createApproval(tx, {
     type: rec.type, payload: rec.payload, requestedById: rec.actor.id,
     assetId: rec.asset.id, employeeId: rec.employeeId,
     executed: { by: rec.actor.id, at: rec.now },
   });
   const diff: AuditDiff = { ...prepared.diff, ...(rec.extraDiff ?? {}) };
-  await writeAudit(tx, {
+  const auditId = await writeAudit(tx, {
     actorId: rec.actor.id, actorLabel: rec.actor.name,
     entityType: "asset", entityId: rec.asset.id, action: rec.action, diff,
   });
   await emitWebhook(tx, "approval.executed", {
     approvalId: approval.id, refNo: approval.refNo, type: approval.type, assetId: rec.asset.id, assetTag: rec.asset.tag,
   });
-  return diff;
+  return { diff, auditId };
 }
 
 /**
@@ -80,10 +123,12 @@ async function commitDirect(tx: Tx, rec: DirectRecord, prepared: Prepared): Prom
  * record of the decision) + the asset audit entry + the same webhook the worker
  * emits. All in the caller's transaction.
  */
-export async function recordDirect(tx: Tx, rec: DirectRecord): Promise<{ ok: true; diff: AuditDiff } | { ok: false; error: string }> {
+export async function recordDirect(
+  tx: Tx, rec: DirectRecord,
+): Promise<{ ok: true; diff: AuditDiff; auditId: string } | { ok: false; error: string }> {
   const p = await prepareDirect(tx, rec);
   if (!p.ok) return p;
-  return { ok: true, diff: await commitDirect(tx, rec, p.prepared) };
+  return { ok: true, ...(await commitDirect(tx, rec, p.prepared)) };
 }
 
 // ── the cores (Phase 41, spec §6) ───────────────────────────────────────────
@@ -166,6 +211,8 @@ async function planReplace(tx: Tx, user: SessionUser, d: ReplaceInput, opts: Lif
   if (reasonRequiredFor(d.outcome) && cleanReason(d.reason).length < 3) {
     return { failure: validationError({ reason: "Missing needs a reason (at least 3 characters) — it opens an investigation." }) };
   }
+  // both rows, in id order, before either read (loadDirect's own locks are then no-ops)
+  await lockAssets(tx, [d.oldAssetId, d.newAssetId]);
   const oldL = await loadDirect(tx, user, d.oldAssetId);
   if (oldL.failure) return { failure: oldL.failure };
   const newL = await loadDirect(tx, user, d.newAssetId);

@@ -193,13 +193,13 @@ afterEach(() => {
 
 const EXPECTED = [
   {
-    id: "e5", name: "Ana Cruz", employeeNo: "E-000", title: "Title e5", department: "IT Operations", departmentId: "d1",
+    id: "e5", name: "Ana Cruz", employeeNo: "E-000", title: "Title e5", department: "IT Operations", departmentKind: "INTERNAL", departmentId: "d1",
     m365: null, itAccess: 0, itemsOut: 0, decided: 0, total: 0, undecided: 0,
     started: DAY("2026-10-12"), joined: "04 Mar 2022", dueAt: DAY("2026-11-30"), employment: "OFFBOARDING",
     failed: null, attention: { kind: "ready", label: "ready to complete", severity: 1000 },
   },
   {
-    id: "e1", name: "Ana Cruz", employeeNo: "E-001", title: "Title e1", department: "IT Operations", departmentId: "d1",
+    id: "e1", name: "Ana Cruz", employeeNo: "E-001", title: "Title e1", department: "IT Operations", departmentKind: "INTERNAL", departmentId: "d1",
     // held a1 (p1) and a3 (p3, failed) decided, a2 not; gone a9 (p4) and a10 (p16, filed in e1's name) decided
     m365: "active", itAccess: 2, itemsOut: 3, decided: 4, total: 5, undecided: 1,
     started: DAY("2026-10-01"), joined: "04 Mar 2022", dueAt: DAY("2026-10-30"), employment: "OFFBOARDING",
@@ -207,19 +207,19 @@ const EXPECTED = [
     attention: { kind: "failed", label: "return failed · APR-p3", severity: 6000 },
   },
   {
-    id: "e2", name: "Ben Dela", employeeNo: "E-002", title: "Title e2", department: "IT Operations", departmentId: "d1",
+    id: "e2", name: "Ben Dela", employeeNo: "E-002", title: "Title e2", department: "IT Operations", departmentKind: "INTERNAL", departmentId: "d1",
     m365: null, itAccess: 0, itemsOut: 1, decided: 0, total: 1, undecided: 1,
     started: null, joined: "04 Mar 2022", dueAt: null, employment: "OFFBOARDING",
     failed: null, attention: { kind: "no-date", label: "no completion date", severity: 4000 },
   },
   {
-    id: "e3", name: "Carla Reyes", employeeNo: "E-003", title: "Title e3", department: "IT Operations", departmentId: "d1",
+    id: "e3", name: "Carla Reyes", employeeNo: "E-003", title: "Title e3", department: "IT Operations", departmentKind: "INTERNAL", departmentId: "d1",
     m365: "blocked", itAccess: 0, itemsOut: 1, decided: 2, total: 2, undecided: 0,
     started: DAY("2026-09-15"), joined: "04 Mar 2022", dueAt: DAY("2026-10-10"), employment: "OFFBOARDING",
     failed: null, attention: { kind: "overdue", label: "overdue by 9 d", severity: 5009 },
   },
   {
-    id: "e6", name: "Eli Santos", employeeNo: "E-006", title: "Title e6", department: "IT Operations", departmentId: "d1",
+    id: "e6", name: "Eli Santos", employeeNo: "E-006", title: "Title e6", department: "IT Operations", departmentKind: "INTERNAL", departmentId: "d1",
     m365: null, itAccess: 0, itemsOut: 1, decided: 0, total: 1, undecided: 1,
     started: DAY("2026-10-02"), joined: "04 Mar 2022", dueAt: DAY("2026-11-02"), employment: "OFFBOARDING",
     failed: null, attention: { kind: "undecided", label: "1 to decide", severity: 3001 },
@@ -244,7 +244,8 @@ describe("leaverStates (Phase 43: the same rows from a narrower read)", () => {
       "argusStatus", "assets", "autopilotStatus", "department", "departmentId", "employeeNo", "employment", "entraStatus",
       "id", "joinedAt", "m365Status", "name", "offboardingAt", "offboardingDueAt", "title", "vpn",
     ]);
-    expect(args.select.department).toEqual({ select: { name: true } });
+    // H4 worklist: the leaver's department or client kind
+    expect(args.select.department).toEqual({ select: { name: true, kind: true } });
     expect(args.select.assets).toEqual({ select: { id: true } });
   });
 

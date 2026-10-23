@@ -38,6 +38,9 @@ export function LoanLine({ loanDueAt, today }: { loanDueAt: string | null; today
   );
 }
 
+/** The dialog's title, matching the Worklist panel's "Set due date" (Worklist H4 fix round 1, M5). */
+export const loanDueTitle = (tag: string): string => `Set the due date for ${tag}`;
+
 export function LoanDueDialog({ open, onClose, asset, loanDueAt }: {
   open: boolean;
   onClose: () => void;
@@ -78,7 +81,7 @@ export function LoanDueDialog({ open, onClose, asset, loanDueAt }: {
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Set the loan date for ${asset.tag}`}
+      title={loanDueTitle(asset.tag)}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

@@ -107,10 +107,15 @@ test.describe("home — Needs you: what breaks first", () => {
     await expect(missing.getByRole("link", { name: /^Investigate/ })).toHaveAttribute("href", /^\/inventory\/[a-z0-9]+$/i);
 
     await page.locator("main").getByRole("link", { name: /^See all/ }).click();
-    await expect(page).toHaveURL(/\/inventory\/work$/);
-    const fullQueue = page.locator("section#queue");
-    await expect(fullQueue).toContainText("APR-2040");
-    await expect(fullQueue).toContainText("Dennis Ong is leaving");
+    // Worklist H4: the page keeps its place in the URL (?q=…&sel=…); approvals and leavers are one queue's tab.
+    await expect(page).toHaveURL(/\/inventory\/work(\?|$)/);
+    const tab = page.getByRole("navigation", { name: "Queues" }).getByRole("link", { name: /^Approvals & leavers/ });
+    await waitForHydration(tab);
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-current", "page");
+    const fullQueue = page.getByRole("table", { name: "Approvals & leavers", exact: true });
+    await expect(fullQueue.getByRole("row", { name: /APR-2040/ })).toBeVisible();
+    await expect(fullQueue.getByRole("row").filter({ hasText: "Leaving" }).filter({ hasText: "Dennis Ong" })).toBeVisible();
   });
 });
 
@@ -339,21 +344,25 @@ test.describe("home — dismissal and focus mode (mutating, serial)", () => {
   test("hiding a worklist row until tomorrow removes it, it stays gone after a reload, and Home's Needs you drops it too", async ({ page }) => {
     await login(page, "it@thebackroomop.com");
     // Phase 46: Home's Needs you has no row menus (one action link per item); the row menu lives on the worklist.
-    await page.goto("/inventory/work");
+    await page.goto("/inventory/work?q=hires");
 
-    // Nina Robles' row lives in the "New hires" section — any section's row
-    // hides the same way (the row menu's Hide until tomorrow,
-    // home/work-row-menu.tsx), this one is simply the one the seed already
-    // pins a stable assertion to.
-    const ninaRow = page.locator("li").filter({ hasText: "Nina Robles" });
+    // Nina Robles' row lives in the "New hires" queue — any queue's row hides
+    // the same way (Worklist H4: the selected row's details panel, Hide until
+    // tomorrow), this one is simply the one the seed already pins a stable
+    // assertion to.
+    const hires = page.getByRole("table", { name: "New hires", exact: true });
+    const ninaRow = hires.getByRole("row", { name: /Nina Robles/ });
     await expect(ninaRow).toHaveCount(1);
-    await ninaRow.getByRole("button", { name: /^Actions for Nina Robles/ }).click();
-    await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
-    await expect(page.locator("li").filter({ hasText: "Nina Robles" })).toHaveCount(0, { timeout: 15_000 });
+    await waitForHydration(ninaRow);
+    await ninaRow.click();
+    await expect(ninaRow).toHaveAttribute("aria-selected", "true");
+    await page.locator("aside[data-worklist-panel]").getByRole("button", { name: "Hide until tomorrow", exact: true }).click();
+    await expect(hires.getByRole("row", { name: /Nina Robles/ })).toHaveCount(0, { timeout: 15_000 });
 
     // Per-user, per-day preference, not component state — must survive a reload.
     await page.reload();
-    await expect(page.locator("li").filter({ hasText: "Nina Robles" })).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByRole("navigation", { name: "Queues" }).getByRole("link", { name: /^New hires/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("main").getByText("Nina Robles")).toHaveCount(0, { timeout: 15_000 });
 
     // Needs you reads the same worklist, so a hidden row is not there either.
     await page.goto("/");

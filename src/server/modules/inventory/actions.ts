@@ -34,6 +34,8 @@ import { TAG_RULE, TAG_SHAPE, tagKey } from "@/lib/tag-key";
 import { humanizeGuard, loanDueFor } from "@/lib/lifecycle";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset } from "@/server/modules/lifecycle/apply";
 import { rememberPicks } from "@/server/recent-picks";
+import { eachAlone, type BulkResult } from "@/server/modules/lifecycle/triage";
+import { TRIAGE_BULK_MAX } from "@/lib/triage-undo";
 import { nextToReview } from "@/server/modules/finance/queries";
 import { toReviewCount } from "@/server/modules/finance/review-queue";
 import { serialRequired } from "@/lib/serial-rules";
@@ -989,43 +991,70 @@ const verifySchema = z.object({ id: z.string().min(1) });
 /**
  * Phase 14 (spec §5.2): IT marks a Purchasing-registered IT asset checked.
  * Finance's register and confirm wait for this. Same shape as confirmAssetDetails:
- * refuse-not-silence, null check IN the where.
+ * refuse-not-silence, null check IN the where. Worklist H4: the result adds the
+ * audit id ("Cleared today" counts it), and the check is verifyCore, shared with verifyMany.
  */
-export async function verifyAssetDetails(input: unknown): Promise<ActionResult<{ tag: string }>> {
+export async function verifyAssetDetails(input: unknown): Promise<ActionResult<{ tag: string; auditId: string }>> {
   const user = await actionRole("admin", "it_staff");
   if (!user) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = verifySchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const r = await verifyCore(user, parsed.data.id);
+  if (r.ok) revalidateVerified([parsed.data.id]);
+  return r;
+}
 
+/** One IT check, its own transaction. No auth, rate check or revalidation: the actions do those. */
+async function verifyCore(user: { id: string; name: string }, id: string): Promise<ActionResult<{ tag: string; auditId: string }>> {
   const asset = await prisma.asset.findUnique({
-    where: { id: parsed.data.id },
+    where: { id },
     select: { id: true, tag: true, cls: true, itVerifiedAt: true },
   });
   if (!asset) return conflict("That asset no longer exists.");
   if (asset.cls !== "IT") return conflict(`${asset.tag} is ${CLASS_PHRASE[asset.cls]} asset — Purchasing assets are not IT-checked.`);
   if (asset.itVerifiedAt) return conflict(`${asset.tag} was already checked.`);
 
-  const hit = await prisma.$transaction(async (tx) => {
+  const auditId = await prisma.$transaction(async (tx) => {
     const r = await tx.asset.updateMany({
       where: { id: asset.id, itVerifiedAt: null },
       data: { itVerifiedAt: new Date(), itVerifiedById: user.id },
     });
-    if (r.count === 0) return false;
-    await writeAudit(tx, {
+    if (r.count === 0) return null;
+    return writeAudit(tx, {
       actorId: user.id, actorLabel: user.name,
       entityType: "asset", entityId: asset.id,
       action: "it.verify",
       diff: { itVerified: { from: null, to: user.name } },
     });
-    return true;
   });
-  if (!hit) return conflict(`${asset.tag} was checked by someone else just now.`);
-  revalidatePath(`/inventory/${asset.id}`);
+  if (auditId === null) return conflict(`${asset.tag} was checked by someone else just now.`);
+  return ok({ tag: asset.tag, auditId });
+}
+
+function revalidateVerified(ids: string[]) {
+  for (const id of ids) revalidatePath(`/inventory/${id}`);
   revalidatePath("/inventory");
+  revalidatePath("/inventory/work");
   revalidatePath("/finance/assets");
-  return ok({ tag: asset.tag });
+}
+
+const verifyManySchema = z.object({
+  assetIds: z.array(z.string().min(1)).min(1, "Nothing is selected").max(TRIAGE_BULK_MAX, `Select ${TRIAGE_BULK_MAX} or fewer`),
+});
+
+/** Worklist H4: Mark checked for several items — verifyCore per item, each on its own, so one refusal fails alone. */
+export async function verifyMany(input: unknown): Promise<ActionResult<BulkResult>> {
+  const user = await actionRole("admin", "it_staff");
+  if (!user) return forbidden();
+  const rate = await checkRate(user.id);
+  if (!rate.allowed) return rateLimited(rate.retryAfterSec);
+  const parsed = verifyManySchema.safeParse(input);
+  if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
+  const { done, failed, results } = await eachAlone(parsed.data.assetIds, (id) => verifyCore(user, id));
+  if (done.length) revalidateVerified(done);
+  return ok({ done, failed, auditIds: results.map((r) => r.auditId) });
 }
 
 const identifiersSchema = z.object({

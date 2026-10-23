@@ -179,10 +179,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={push}>
       {children}
-      {/* Live region stays mounted so insertions announce; it must never block clicks. */}
+      {/* Live region stays mounted so insertions announce; it must never block clicks. A status (Worklist H4), not
+          atomic: a new toast is read on its own, not with the ones already showing. */}
       <div
         ref={region}
+        role="status"
+        aria-label="Notifications"
         aria-live="polite"
+        aria-atomic="false"
         className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col gap-2"
         onFocus={(e) => {
           // focus coming in from outside the toasts: remember where from. Coming from nowhere (the window, the

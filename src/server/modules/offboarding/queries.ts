@@ -1,4 +1,4 @@
-import type { ApprovalType, AssetClass, Prisma } from "@prisma/client";
+import type { ApprovalType, AssetClass, GroupKind, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { liveAccessFields, type SetupRecord } from "@/lib/it-setup";
 import { pagedSnapshot } from "@/server/paged";
@@ -25,6 +25,8 @@ export interface OffboardingRow {
   employeeNo: string;
   title: string;
   department: string;
+  /** H4 worklist: whether `department` is a department (INTERNAL) or a client (CLIENT). */
+  departmentKind: GroupKind;
   /** Phase 20 (spec §4.2): the Department facet's own filter value. */
   departmentId: string;
   m365: string | null;
@@ -142,7 +144,7 @@ const ROW_EMPLOYEE_SELECT = {
   id: true, name: true, employeeNo: true, title: true, departmentId: true, employment: true, m365Status: true,
   offboardingAt: true, offboardingDueAt: true, joinedAt: true,
   entraStatus: true, autopilotStatus: true, argusStatus: true, vpn: true,
-  department: { select: { name: true } },
+  department: { select: { name: true, kind: true } },
   assets: { select: { id: true } },
 } satisfies Prisma.EmployeeSelect;
 
@@ -181,6 +183,7 @@ function toOffboardingRow(e: OffboardingCandidate, todayISO: string): Offboardin
     employeeNo: e.employeeNo,
     title: e.title,
     department: e.department.name,
+    departmentKind: e.department.kind,
     departmentId: e.departmentId,
     m365: e.m365Status,
     itAccess: state.itAccess,

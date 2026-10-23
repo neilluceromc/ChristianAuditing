@@ -159,7 +159,7 @@ test.describe("holds", () => {
       await expect(page.getByText(`BR-HS-0502 reserved for ${nina.name}`)).toBeVisible({ timeout: 15_000 });
 
       // The record: the banner, its expiry pill, and no Reserve left in More.
-      const banner = page.getByRole("status").filter({ hasText: "Held for" });
+      const banner = page.getByRole("main").getByRole("status").filter({ hasText: "Held for" });
       await expect(banner).toContainText(`Held for ${nina.name}`);
       await expect(banner).toContainText("expires in 7 d");
       await expect((await openMore(page)).getByRole("menuitem", { name: "Reserve…", exact: true })).toHaveCount(0);
@@ -253,7 +253,7 @@ test.describe("holds", () => {
 
     await login(page, IT);
     await page.goto(`/inventory/${monitor.id}`);
-    const banner = page.getByRole("status").filter({ hasText: "Held for" });
+    const banner = page.getByRole("main").getByRole("status").filter({ hasText: "Held for" });
     await expect(banner).toContainText(`Held for ${nina.name}`);
     await expect(banner).toContainText("EMP-0097");
     // Phase 30: Reserve would live in More — a held record's More leaves it out.
@@ -352,7 +352,7 @@ test.describe("holds", () => {
       expect(row.resolvedAt).not.toBeNull();
       // Released, not deleted: the spare is free again but the asset did not move.
       expect((await db.asset.findUniqueOrThrow({ where: { id: headset.id } })).status).toBe("SPARE");
-      await expect(page.getByRole("status").filter({ hasText: "Held for" })).toHaveCount(0);
+      await expect(page.getByRole("main").getByRole("status").filter({ hasText: "Held for" })).toHaveCount(0);
 
       await page.goto(`/inventory/${headset.id}/timeline`);
       await expect(page.getByText("released the hold").first()).toBeVisible();
@@ -445,7 +445,7 @@ test.describe("holds", () => {
       expect(after.assigneeId).toBe(nina.id);
       expect(after.status).toBe("DEPLOYED");
       // A fulfilled hold is history, not a live claim: the banner is gone.
-      await expect(page.getByRole("status").filter({ hasText: "Held for" })).toHaveCount(0);
+      await expect(page.getByRole("main").getByRole("status").filter({ hasText: "Held for" })).toHaveCount(0);
 
       await expectNoSeriousAxe(page);
     } finally {
