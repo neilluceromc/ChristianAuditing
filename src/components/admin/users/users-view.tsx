@@ -153,7 +153,7 @@ export function UsersView({
         <section
           aria-label="Users"
           aria-busy={listing || undefined}
-          className="flex min-w-0 flex-col overflow-hidden rounded-(--radius-card) border border-border bg-surface shadow-card"
+          className="@container flex min-w-0 flex-col overflow-hidden rounded-(--radius-card) border border-border bg-surface shadow-card"
         >
           <UsersToolbar filter={filter} roleCounts={roleCounts} />
           <div className={listing ? "opacity-60 transition-opacity" : undefined}>

@@ -9,6 +9,9 @@ import { OFFBOARDED_NOTE, ROLE_LABELS, lastSignInLabel } from "@/lib/admin-users
 import type { UserRow } from "@/server/modules/admin/queries";
 import { UserStatusLabel } from "./user-status";
 
+/** A column that gives way when the list itself (an `@container`, users-view.tsx) is under 900 px wide. */
+const NARROW_HIDE = "@max-[900px]:hidden";
+
 /** The amber "Employee offboarded" note (spec §4.4: the account is not changed; the admin decides). */
 export function OffboardedNote({ className }: { className?: string }) {
   return (
@@ -57,7 +60,9 @@ export function UsersTable({
           <Tr>
             <Th>Person</Th>
             <Th width={130}>Role</Th>
-            <Th width={190}>Employee record</Th>
+            {/* Beside the details panel (1180 px and up) the list is ~710 px, on a tablet ~790 px: this column gives
+                way below 900 px of list, so Person keeps its room; the panel shows the record (Task 5). */}
+            <Th width={190} className={NARROW_HIDE}>Employee record</Th>
             <Th width={170}>Status</Th>
             <Th width={120}>Last sign-in</Th>
           </Tr>
@@ -92,7 +97,7 @@ export function UsersTable({
                     {ROLE_LABELS[r.role]}
                   </span>
                 </Td>
-                <Td className="max-w-0">
+                <Td className={cn("max-w-0", NARROW_HIDE)}>
                   {r.employee ? (
                     <span className="flex min-w-0 flex-col leading-tight">
                       <span className="truncate font-mono text-[12px] text-fg-secondary">{r.employee.employeeNo}</span>

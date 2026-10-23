@@ -140,6 +140,14 @@ describe("the list and its filters", () => {
     expect(html).toContain("Viewer · No employee record");
   });
 
+  // Task 5 (found by e2e at 1440 px): beside the 420 px panel the list is ~710 px wide, and the fixed columns left the
+  // Person column ~100 px ("A. …", the Permanent pill over Role). Below 900 px of list (also a tablet's ~790 px) the Employee record column
+  // gives way (the panel shows the record); the employee column cells and header carry the container query.
+  it("hides the Employee record column when the list itself is narrow, so names keep their room", () => {
+    const html = render(<UsersTable rows={[userRow()]} selectedId={null} onSelect={noop} now={NOW} filtered={false} />);
+    expect(html.match(/@max-\[900px\]:hidden/g)).toHaveLength(2); // the header and the one row's cell
+  });
+
   it("an empty filtered list says so", () => {
     const html = render(<UsersTable rows={[]} selectedId={null} onSelect={noop} now={NOW} filtered />);
     expect(html).toContain("No one matches");
