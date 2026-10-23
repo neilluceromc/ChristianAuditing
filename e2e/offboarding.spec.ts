@@ -84,12 +84,16 @@ test.describe("offboarding queue", () => {
     // Phase 15: Home's Worklist caps "Approvals & leavers" at 2 rows, and the
     // seed's breached SLA (APR-2040) plus the EXECUTION_FAILED retry
     // (APR-2025) already fill it — Dennis's leaver row is the section's
-    // third, reached through the uncapped /inventory/work page instead.
-    await page.goto("/inventory/work");
-    const leave = page.locator("li").filter({ hasText: "Dennis Ong is leaving" });
+    // third, reached through the Worklist's Approvals & leavers queue instead.
+    await page.goto("/inventory/work?q=queue");
+    const leave = page.getByRole("table", { name: "Approvals & leavers", exact: true })
+      .getByRole("row").filter({ hasText: "Leaving" }).filter({ hasText: "Dennis Ong" });
     await expect(leave).toContainText("3 items still out");
-    // Phase 32: the leaver row's link reads offboardingNext's label and lands on that step.
-    await expect(leave.getByRole("link", { name: "Collect 3 items" })).toHaveAttribute(
+    await waitForHydration(leave);
+    await leave.click();
+    await expect(leave).toHaveAttribute("aria-selected", "true");
+    // Phase 32, H4: the selected leaver's panel action reads offboardingNext's label and lands on that step.
+    await expect(page.locator("aside[data-worklist-panel]").getByRole("link", { name: "Collect 3 items" })).toHaveAttribute(
       "href",
       /\/offboarding\/[a-z0-9]+\?step=collect/i,
     );

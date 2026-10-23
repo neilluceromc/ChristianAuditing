@@ -13,7 +13,7 @@ import { login } from "./fixtures/login";
  *        wizard opening where the work is, Mark the rest as Returned, the client
  *        reason check, Accounts reachable early with the clear-status dialog,
  *        the Finish readiness checklist and success ending, the farewell draft.
- *   8–11 the worklist: Triage… in place, Hide until tomorrow with Undo, the nav
+ *   8–11 the worklist (H4): Triage in the details panel, Hide until tomorrow with Undo, the nav
  *        badge agreeing with the page, a viewer's read-only Home card.
  *   12–14 the scan card: IT's Return…, the leaver line, a viewer's card.
  *   15   /reservations: Assign to {name}… opens Assign with the person preset.
@@ -321,7 +321,7 @@ test.describe("it-work-ux — offboarding", () => {
 });
 
 test.describe("it-work-ux — the worklist", () => {
-  test("8. a Triage row's Triage… opens the triage dialog in place; saving settles it and the row leaves", async ({ page }) => {
+  test("8. a Triage row is decided in the details panel: Keep as spare settles it and the row leaves", async ({ page }) => {
     test.setTimeout(90_000);
     // BR-PH-0301: a seeded IT spare with no open request (BR-LT-0181, the other obvious one, is held by APR-2041).
     const spare = await db.asset.findUniqueOrThrow({ where: { tag: "BR-PH-0301" } });
@@ -330,22 +330,21 @@ test.describe("it-work-ux — the worklist", () => {
     await db.asset.update({ where: { id: spare.id }, data: { returnedAt: new Date(Date.now() - 2 * 86_400_000) } });
     try {
       await login(page, IT);
-      await page.goto("/inventory/work");
-      const row = page.locator("#triage li").filter({ hasText: spare.tag });
+      // Worklist H4: the Triage queue's table, the row selected from the URL, its decisions in the details panel.
+      await page.goto(`/inventory/work?q=triage&sel=triage:${spare.id}`);
+      const row = page.locator(`tr[data-row-key="triage:${spare.id}"]`);
       await expect(row).toBeVisible({ timeout: 20_000 });
-      const triage = row.getByRole("button", { name: "Triage…" });
-      await waitForHydration(triage);
-      await triage.click();
-      const dialog = page.getByRole("dialog", { name: `Triage ${spare.tag} · ${spare.model}` });
-      await expect(dialog).toBeVisible();
+      await expect(row).toHaveAttribute("aria-selected", "true");
+      const panel = page.locator("aside[data-worklist-panel]");
+      // Phase 40 §8 still holds: no decision is preselected — four explicit buttons, Keep as spare the one primary.
+      const keep = panel.getByRole("button", { name: "Keep as spare", exact: true });
+      await waitForHydration(keep);
+      for (const name of ["Send to repair", "Dispose", "Donate"]) await expect(panel.getByRole("button", { name, exact: true })).toBeVisible();
       await expectNoSeriousAxe(page);
-      // Phase 40 §8: no default decision.
-      await dialog.getByLabel("Decision").selectOption("SPARE");
-      await dialog.getByRole("button", { name: "Save decision" }).click();
+      await keep.click();
 
-      await expect(page.getByText(`${spare.tag} triaged · Keep as spare`)).toBeVisible();
-      await expect(dialog).toBeHidden();
-      await expect(page.locator("li").filter({ hasText: spare.tag })).toHaveCount(0);
+      await expect(page.locator("[data-toast-id]").filter({ hasText: `${spare.model} · kept as a spare` })).toBeVisible({ timeout: 15_000 });
+      await expect(row).toHaveCount(0);
       expect((await db.asset.findUniqueOrThrow({ where: { id: spare.id } })).returnedAt).toBeNull();
     } finally {
       await db.asset.update({ where: { id: spare.id }, data: { returnedAt: null, status: "SPARE" } });
@@ -357,23 +356,31 @@ test.describe("it-work-ux — the worklist", () => {
     const it = await db.user.findUniqueOrThrow({ where: { email: IT } });
     try {
       await login(page, IT);
-      await page.goto("/inventory/work");
-      const loans = page.locator("#loans");
-      const row = loans.locator("ol > li").filter({ hasText: "BR-LT-0210" });
+      await page.goto("/inventory/work?q=loans");
+      const loans = page.getByRole("table", { name: "Loans", exact: true });
+      const pager = page.getByRole("navigation", { name: "Pages" });
+      const row = loans.getByRole("row", { name: /BR-LT-0210/ });
       await expect(row).toBeVisible({ timeout: 20_000 });
-      await expect(page.locator("#work-loans")).not.toContainText("hidden today");
+      await expect(pager).not.toContainText("hidden today");
 
-      const menu = row.getByRole("button", { name: "Actions for BR-LT-0210" });
-      await waitForHydration(menu);
-      await menu.click();
-      await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
+      // Worklist H4: the row menu became the details panel's Hide until tomorrow, for the selected row.
+      await waitForHydration(row);
+      await row.click();
+      await expect(row).toHaveAttribute("aria-selected", "true");
+      await page.locator("aside[data-worklist-panel]").getByRole("button", { name: "Hide until tomorrow", exact: true }).click();
       await expect(row).toHaveCount(0);
-      await expect(page.locator("#work-loans")).toContainText("· 1 hidden today");
-      await expect(loans.getByRole("button", { name: "Show", exact: true })).toBeVisible();
+      // The pager names today's hidden rows; its dialog lists them with Unhide.
+      const hidden = pager.getByRole("button", { name: "1 hidden today", exact: true });
+      await expect(hidden).toBeVisible({ timeout: 15_000 });
+      await hidden.click();
+      const dialog = page.getByRole("dialog", { name: "Hidden until tomorrow" });
+      await expect(dialog.getByRole("button", { name: /^Unhide BR-LT-0210/ })).toBeVisible();
+      await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
+      await expect(dialog).toBeHidden();
 
-      await page.getByRole("button", { name: "Undo" }).click();
-      await expect(loans.locator("ol > li").filter({ hasText: "BR-LT-0210" })).toBeVisible();
-      await expect(page.locator("#work-loans")).not.toContainText("hidden today");
+      await page.locator("[data-toast-id]").filter({ hasText: "Hidden until tomorrow" }).getByRole("button", { name: "Undo" }).click();
+      await expect(loans.getByRole("row", { name: /BR-LT-0210/ })).toBeVisible({ timeout: 15_000 });
+      await expect(pager).not.toContainText("hidden today");
       await expectNoSeriousAxe(page);
     } finally {
       // Undo already cleared it; if the case failed half-way, take the key back out of today's list.
@@ -388,18 +395,20 @@ test.describe("it-work-ux — the worklist", () => {
     }
   });
 
-  test("10. the Worklist nav badge counts exactly the rows the worklist lists", async ({ page }) => {
+  test("10. the Worklist nav badge counts exactly the rows the worklist's queues hold", async ({ page }) => {
     test.setTimeout(90_000);
     await login(page, IT);
     await page.goto("/inventory/work");
-    const rows = page.locator('section[aria-labelledby^="work-"] > ol > li');
-    await expect(rows.first()).toBeVisible({ timeout: 20_000 });
-    // An uncapped page: every section's heading count is exact, not "{n}+".
-    for (const heading of await page.locator('section[aria-labelledby^="work-"] h2').allInnerTexts()) {
-      expect(heading).not.toContain("+");
+    // Worklist H4: one tab per queue, each with its count; an uncapped page's counts are exact, not "{n}+".
+    const tabs = page.getByRole("navigation", { name: "Queues" }).getByRole("link");
+    await expect(tabs).toHaveCount(8, { timeout: 20_000 });
+    let listed = 0;
+    for (const text of await tabs.allInnerTexts()) {
+      expect(text).not.toContain("+");
+      listed += Number(/(\d+)\s*$/.exec(text)![1]);
     }
-    const listed = await rows.count();
     expect(listed).toBeGreaterThan(0);
+    await expect(page.getByText(`${listed} waiting on IT`)).toBeVisible();
 
     const link = page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: /^Worklist/ }).first();
     const badge = link.locator('[aria-label$="waiting on the worklist"]');
@@ -431,11 +440,19 @@ test.describe("it-work-ux — the worklist", () => {
     const dennis = await resetDennis();
     try {
       await db.employee.update({ where: { id: dennis.id }, data: { offboardingDueAt: null } });
-      await page.goto("/inventory/work");
-      const queue = page.locator("section#queue");
+      // Worklist H4: the leaver's row in Approvals & leavers; a viewer's panel has no action, and its record link
+      // goes to the leaver's wizard page.
+      await page.goto("/inventory/work?q=queue");
+      const queue = page.getByRole("table", { name: "Approvals & leavers", exact: true });
       await expect(queue).toBeVisible({ timeout: 20_000 });
-      const row = queue.getByRole("listitem").filter({ hasText: "Dennis Ong is leaving — no completion date" });
-      await expect(row.getByRole("link", { name: "Open" })).toHaveAttribute("href", `/offboarding/${dennis.id}`);
+      const row = queue.getByRole("row").filter({ hasText: "Leaving" }).filter({ hasText: "Dennis Ong" });
+      await expect(row).toContainText("no completion date");
+      await waitForHydration(row);
+      await row.click();
+      const panel = page.locator("aside[data-worklist-panel]");
+      await expect(panel.getByRole("heading", { name: /^Leaving/ })).toBeVisible();
+      await expect(panel.getByRole("link", { name: "Open the full record →" })).toHaveAttribute("href", `/offboarding/${dennis.id}`);
+      await expect(panel.getByRole("button")).toHaveCount(0);
     } finally {
       await resetDennis();
     }

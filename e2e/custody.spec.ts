@@ -269,15 +269,25 @@ test.describe.serial("custody", () => {
     await db.asset.update({ where: { tag: "BR-PH-0287" }, data: { loanDueAt: yesterday } });
 
     await login(page, IT);
-    await page.goto("/inventory/work");
-    const loansSection = page.locator("section#loans");
-    await expect(loansSection).toBeVisible();
-    const rows = loansSection.locator("li");
+    // Worklist H4: the Loans queue's table, in rank order (no column sorted until a header is clicked).
+    await page.goto("/inventory/work?q=loans");
+    const loans = page.getByRole("table", { name: "Loans", exact: true });
+    await expect(loans).toBeVisible();
+    const rows = loans.locator("tbody tr[data-row-key]");
     await expect(rows).toHaveCount(2);
-    await expect(rows.nth(0)).toContainText("BR-LT-0210 on loan with no due date");
-    // Phase 32 (spec §5.1): the loan row opens the record's own Set loan date dialog in place.
-    await expect(rows.nth(0).getByRole("button", { name: "Set loan date…" })).toBeVisible();
-    await expect(rows.nth(1)).toContainText("BR-PH-0287 overdue by 1 d");
+    await expect(rows.nth(0)).toContainText("BR-LT-0210");
+    await expect(rows.nth(0)).toContainText("no due date");
+    await expect(rows.nth(1)).toContainText("BR-PH-0287");
+    await expect(rows.nth(1)).toContainText("1 day late");
+    // Phase 32 (spec §5.1), H4: the selected loan's panel opens the record's own loan-date dialog in place.
+    await expect(rows.nth(0)).toHaveAttribute("aria-selected", "true");
+    const setDue = page.locator("aside[data-worklist-panel]").getByRole("button", { name: "Set due date", exact: true });
+    await waitForHydration(setDue);
+    await setDue.click();
+    const dueDialog = page.getByRole("dialog", { name: "Set the due date for BR-LT-0210" });
+    await expect(dueDialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dueDialog).toBeHidden();
 
     // Phase 37 (spec §4.3): loans are a status, not a card. Marites's Phone slot is covered by BR-PH-0287 (a
     // TEMPORARY iPhone), so the Phone tile shows that loan and its chip carries the due date — now red, overdue.

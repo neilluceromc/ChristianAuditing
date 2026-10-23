@@ -448,7 +448,7 @@ test.describe.serial("paging", () => {
     await expect(page.getByText(/page 1 of 3 · 120 entries/)).toBeVisible();
   });
 
-  test("9. Worklist cap: Home's Needs you stays at 6 with See all; /inventory/work shows 50 rows and the cap line to the rest", async ({ page }) => {
+  test("9. Worklist cap: Home's Needs you stays at 6 with See all; the Repairs queue reads 50+ over five pages and the cap note", async ({ page }) => {
     const defectiveCount = await db.asset.count({ where: { cls: "IT", status: "DEFECTIVE" } });
     expect(defectiveCount).toBeGreaterThan(50);
 
@@ -461,11 +461,20 @@ test.describe.serial("paging", () => {
     expect(await needs.count()).toBeLessThanOrEqual(6);
     await expect(page.getByRole("main").getByRole("link", { name: /^See all/ })).toHaveAttribute("href", "/inventory/work");
 
-    await page.goto("/inventory/work");
-    const workRepairsSection = page.locator("section", { has: page.getByRole("heading", { name: /Repairs to chase/ }) });
-    await expect(workRepairsSection.getByText(/Showing 50 of 50\+ ·/)).toBeVisible();
-    await expect(workRepairsSection.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/inventory?status=DEFECTIVE");
-    await expect(workRepairsSection.locator("ol > li")).toHaveCount(50);
+    // Worklist H4: the queue's tab says 50+ (the cap read), its table pages the 50 rows ten at a time, and the last
+    // page carries the cap note to the rest.
+    await page.goto("/inventory/work?q=repairs");
+    await expect(page.getByRole("navigation", { name: "Queues" }).getByRole("link", { name: /^Repairs/ })).toHaveText(/^Repairs\s*50\+$/);
+    const table = page.getByRole("table", { name: "Repairs", exact: true });
+    const pager = page.getByRole("navigation", { name: "Pages" });
+    await expect(table.locator("tbody tr[data-row-key]")).toHaveCount(10);
+    await expect(pager).toContainText("1–10 of 50");
+    await expect(pager).not.toContainText("Showing the first 50");
+    await page.goto("/inventory/work?q=repairs&page=5");
+    await expect(pager).toContainText("41–50 of 50");
+    await expect(table.locator("tbody tr[data-row-key]")).toHaveCount(10);
+    await expect(pager).toContainText("Showing the first 50 — clear some to see more");
+    await expect(pager.getByRole("button", { name: "Next →" })).toBeDisabled();
   });
 
   test("10. Policies head-count: the Finance row and its policy count non-OFFBOARDED Finance employees", async ({ page }) => {

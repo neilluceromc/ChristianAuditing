@@ -480,10 +480,11 @@ test.describe.serial("the register flow: Purchasing → IT → Finance", () => {
     await login(page, IT);
     // Phase 46: Home's Needs you shows the six most urgent items, and an IT check is "to do" (the least urgent
     // tone), so the full worklist is where the CHECK row is promised. No rows need hiding to make room there.
-    await page.goto("/inventory/work");
-    const check = page.locator("section#check");
+    // Worklist H4: the IT check queue, opened on this asset's row (the URL's sel shows its page).
+    await page.goto(`/inventory/work?q=check&sel=check:${id}`);
+    const check = page.getByRole("table", { name: "IT check", exact: true });
     await expect(check).toBeVisible({ timeout: 20_000 });
-    await expect(check.getByText(new RegExp(tag))).toBeVisible();
+    await expect(check.getByRole("row", { name: new RegExp(tag) })).toHaveAttribute("aria-selected", "true");
     await page.goto(`/inventory/${id}`);
     await expect(page.getByText("AWAITING IT CHECK", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Mark checked" }).click();

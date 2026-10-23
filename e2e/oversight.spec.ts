@@ -267,8 +267,9 @@ test.describe.serial("oversight", () => {
     // Past its SLA, so urgent.
     await expect(apr).toHaveAttribute("data-tone", "bad");
 
-    await page.goto("/inventory/work");
-    await expect(page.getByText("APR-2040")).toBeVisible();
+    // Worklist H4: approvals are the Approvals & leavers queue's rows.
+    await page.goto("/inventory/work?q=queue");
+    await expect(page.getByRole("table", { name: "Approvals & leavers", exact: true }).getByRole("row", { name: /APR-2040/ })).toBeVisible();
   });
 
   test("7. axe: the Closed/via=direct tab, a direct approval's detail, and the admin Home branch", async ({ page }) => {

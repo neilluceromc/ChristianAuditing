@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { login } from "./fixtures/login";
@@ -33,6 +33,15 @@ test.afterAll(async () => {
 const idOf = async (tag: string) => (await db.asset.findUniqueOrThrow({ where: { tag }, select: { id: true } })).id;
 
 /** Highest number in use under a prefix — never hardcode a literal; an earlier test may have registered more. */
+/** The element is attached and React has hydrated it, so a click lands on a live handler (copied from it-nav). */
+async function waitForHydration(target: Locator) {
+  const el = target.first();
+  await el.waitFor({ state: "attached", timeout: 20_000 });
+  await expect(async () => {
+    expect(await el.evaluate((node) => Object.keys(node).some((k) => k.startsWith("__reactFiber$")))).toBe(true);
+  }).toPass({ timeout: 20_000 });
+}
+
 async function highestNumber(prefix: string): Promise<number> {
   const rows = await db.asset.findMany({ where: { tag: { startsWith: `BR-${prefix}-` } }, select: { tag: true } });
   return rows.reduce((max, r) => Math.max(max, Number(r.tag.slice(6))), 0);
@@ -320,14 +329,11 @@ test.describe("worklist", () => {
   test("8. Home sections and /inventory/work; hiding a row until tomorrow removes it", async ({ page }) => {
     await login(page, IT);
 
-    // Worklist.tsx renders each section as `<h3>{title} <span>{total}</span></h3>`
-    // (src/components/home/worklist.tsx); the Triage section's total is every
-    // IT asset back for triage (src/server/modules/home/queries.ts's `triage`
-    // query: `{ cls: "IT", returnedAt: { not: null } }`), uncapped by either
-    // page's row limit. Computed once, before either page load below, since
-    // nothing in this test changes a `returnedAt` before both checks run.
+    // Worklist H4: each queue is a tab whose count is the section's total; the Triage section's total is every IT
+    // asset back for triage (src/server/modules/home/queries.ts's `triage` query: `{ cls: "IT", returnedAt: { not:
+    // null } }`), uncapped by either page's row limit. Computed once, before either page load below, since nothing in
+    // this test changes a `returnedAt` before both checks run.
     const expectedTriage = await db.asset.count({ where: { cls: "IT", returnedAt: { not: null } } });
-    const triageHeadingText = new RegExp(`^Triage\\s+${expectedTriage}$`);
 
     await page.goto("/");
 
@@ -338,26 +344,29 @@ test.describe("worklist", () => {
     expect(await needs.count()).toBeLessThanOrEqual(6);
     await expect(page.getByRole("main").getByRole("link", { name: /^See all/ })).toHaveAttribute("href", "/inventory/work");
 
-    await page.goto("/inventory/work");
+    await page.goto("/inventory/work?q=triage");
     await expect(page.getByRole("heading", { name: "Worklist", level: 1 })).toBeVisible();
-    for (const heading of ["Triage", "Repairs to chase", "New hires", "Loans", "Missing & records", "Approvals & leavers"]) {
-      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    const queues = page.getByRole("navigation", { name: "Queues" });
+    for (const tab of ["Triage", "Repairs", "New hires", "Loans", "Missing & records", "Approvals & leavers"]) {
+      await expect(queues.getByRole("link", { name: new RegExp(`^${tab} \\d+\\+?$`) })).toBeVisible();
     }
-    await expect(page.getByRole("heading", { name: /^Triage/ })).toHaveText(triageHeadingText);
+    await expect(queues.getByRole("link", { name: /^Triage/ })).toHaveText(new RegExp(`^Triage\\s*${expectedTriage}$`));
     // Case 4's replace sent BR-LT-0201 back for triage.
-    await expect(page.locator("section#triage")).toContainText("BR-LT-0201");
-    // BR-MN-0910 (case 1's fresh repair, 0 days down) sorts last among the
-    // section's 8 real DEFECTIVE rows and never makes Home's own 2-row cap —
-    // the uncapped Worklist page is where it has to show up.
-    await expect(page.getByText("BR-MN-0910")).toBeVisible();
+    await expect(page.getByRole("table", { name: "Triage", exact: true })).toContainText("BR-LT-0201");
 
-    const row = page.locator("li").filter({ hasText: "BR-MN-0910" });
+    // BR-MN-0910 (case 1's fresh repair, 0 days down) sorts last among the Repairs queue's 8 real DEFECTIVE rows
+    // and never makes Home's own cap — the Worklist's Repairs queue is where it has to show up.
+    await page.goto("/inventory/work?q=repairs");
+    const repairs = page.getByRole("table", { name: "Repairs", exact: true });
+    const row = repairs.getByRole("row", { name: /BR-MN-0910/ });
     await expect(row).toHaveCount(1);
-    // Phase 32 (spec §5.2): the ✓ became the row menu's Hide until tomorrow.
-    await row.getByRole("button", { name: /^Actions for / }).click();
-    await page.getByRole("menuitem", { name: "Hide until tomorrow" }).click();
-    await expect(page.locator("li").filter({ hasText: "BR-MN-0910" })).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: /^Repairs to chase/ })).toContainText("· 1 hidden today");
+    // Phase 32 (spec §5.2): Hide until tomorrow, now the selected row's details panel button.
+    await waitForHydration(row);
+    await row.click();
+    await expect(row).toHaveAttribute("aria-selected", "true");
+    await page.locator("aside[data-worklist-panel]").getByRole("button", { name: "Hide until tomorrow", exact: true }).click();
+    await expect(repairs.getByRole("row", { name: /BR-MN-0910/ })).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "1 hidden today", exact: true })).toBeVisible();
   });
 });
 
