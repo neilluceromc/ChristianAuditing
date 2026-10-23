@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ACTION_TOAST_MS, toastLifetime } from "@/lib/toast-timing";
-import { MAX_TOAST_ACTIONS, ToastCard, toastExtras } from "./toast";
+import { MAX_TOAST_ACTIONS, ToastCard, ToastProvider, toastExtras } from "./toast";
 
 /*
  * Finance follow-up, Task 3 (spec §4): a toast can carry a detail line and up to two buttons (Undo, Open <tag>); the
@@ -57,6 +57,13 @@ describe("ToastCard", () => {
   it("an error toast is an alert", () => {
     const html = renderToStaticMarkup(<ToastCard toast={{ id: 3, message: "Can't undo", tone: "fault", actions: [] }} onDismiss={() => {}} />);
     expect(html).toContain('role="alert"');
+  });
+});
+
+describe("ToastProvider", () => {
+  it("the toasts' live region is a status (Worklist H4): polite, each toast announced on its own", () => {
+    const html = renderToStaticMarkup(<ToastProvider><p>page</p></ToastProvider>);
+    expect(html).toMatch(/<div role="status" aria-live="polite" aria-atomic="false" class="pointer-events-none fixed/);
   });
 });
 
