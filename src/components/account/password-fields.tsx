@@ -21,6 +21,7 @@ export function PasswordInput({
   defaultShown = false,
   autoFocus,
   readOnly,
+  describedBy,
 }: {
   label: string;
   name: string;
@@ -32,6 +33,8 @@ export function PasswordInput({
   defaultShown?: boolean;
   autoFocus?: boolean;
   readOnly?: boolean;
+  /** Fix round 1 (I1): more description, e.g. the live checklist's id; joined with the error's. */
+  describedBy?: string;
 }) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -56,14 +59,15 @@ export function PasswordInput({
           autoFocus={autoFocus}
           onChange={(e) => onChange(e.target.value)}
           invalid={!!error}
-          aria-describedby={error ? errorId : undefined}
+          aria-describedby={[describedBy, error ? errorId : undefined].filter(Boolean).join(" ") || undefined}
           className="pr-[68px]"
         />
         <button
           type="button"
+          // Fix round 1 (M3): a toggle keeps one name; aria-pressed says whether it is on (ARIA APG).
           aria-pressed={shown}
           aria-controls={id}
-          aria-label={`${shown ? "Hide" : "Show"} ${label.toLowerCase()}`}
+          aria-label={`Show ${label.toLowerCase()}`}
           onClick={() => setShown((s) => !s)}
           className="absolute inset-y-0 right-1 my-1 rounded-(--radius-btn) px-2.5 text-[11.5px] font-medium text-fg-secondary hover:bg-surface-subtle"
         >
@@ -92,22 +96,39 @@ function Rule({ state, children }: { state: RuleState; children: string }) {
   );
 }
 
+/**
+ * "2 of 3 rules met" (only the rules the browser can check), for the polite live line: a screen reader hears the
+ * count change as the person types, not the whole list on every key.
+ */
+export function rulesMetSummary(checks: PasswordChecks, freshUnknown: boolean): string {
+  const known = freshUnknown ? [checks.long, checks.mixed] : [checks.long, checks.mixed, checks.fresh];
+  return `${known.filter(Boolean).length} of ${known.length} rules met`;
+}
+
 export function PasswordChecklist({
+  id,
   checks,
   freshLabel,
   freshUnknown = false,
 }: {
+  /** Fix round 1 (I1): the New password field points here with aria-describedby. */
+  id?: string;
   checks: PasswordChecks;
   freshLabel: string;
   /** The fresh rule can't be checked in the browser (first sign-in: the temporary password is never sent to it). */
   freshUnknown?: boolean;
 }) {
   return (
-    <ul aria-label="Password rules" className="flex flex-col gap-1">
-      <Rule state={String(checks.long) as RuleState}>{PASSWORD_RULE_LABELS.long}</Rule>
-      <Rule state={String(checks.mixed) as RuleState}>{PASSWORD_RULE_LABELS.mixed}</Rule>
-      <Rule state={freshUnknown ? "unknown" : (String(checks.fresh) as RuleState)}>{freshLabel}</Rule>
-    </ul>
+    <div>
+      <ul id={id} aria-label="Password rules" className="flex flex-col gap-1">
+        <Rule state={String(checks.long) as RuleState}>{PASSWORD_RULE_LABELS.long}</Rule>
+        <Rule state={String(checks.mixed) as RuleState}>{PASSWORD_RULE_LABELS.mixed}</Rule>
+        <Rule state={freshUnknown ? "unknown" : (String(checks.fresh) as RuleState)}>{freshLabel}</Rule>
+      </ul>
+      <p aria-live="polite" className="sr-only">
+        {rulesMetSummary(checks, freshUnknown)}
+      </p>
+    </div>
   );
 }
 
@@ -131,6 +152,7 @@ export function PasswordFields({
   errors: Partial<Record<PasswordField, string>>;
 }) {
   const checks = passwordChecks(values.password, mode === "change" ? { current: values.current } : {});
+  const checklistId = useId();
   return (
     <div className="flex flex-col gap-3.5">
       {mode === "change" && (
@@ -152,6 +174,7 @@ export function PasswordFields({
         onChange={(v) => onChange("password", v)}
         error={errors.password}
         autoFocus={mode === "first"}
+        describedBy={checklistId}
       />
       <PasswordInput
         label="Type it again"
@@ -162,6 +185,7 @@ export function PasswordFields({
         error={errors.confirm}
       />
       <PasswordChecklist
+        id={checklistId}
         checks={checks}
         freshLabel={mode === "change" ? "Not your current password" : "Not the temporary password"}
         freshUnknown={mode === "first"}

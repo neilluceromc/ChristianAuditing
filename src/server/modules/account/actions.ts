@@ -8,6 +8,9 @@ import { unstable_update } from "@/server/auth";
 import { actionUser, passwordOwedUser } from "@/server/auth/guards";
 import { passwordMatches } from "@/server/auth/password-check";
 import { bumpSessionVersion, signedSessionUpdate } from "@/server/auth/session-version";
+import {
+  CURRENT_PASSWORD_LIMIT, clearCurrentPasswordFailures, releaseSignInAttempt, reserveCurrentPasswordAttempt,
+} from "@/server/auth/sign-in-limit";
 import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { PASSWORD_COPY, passwordProblem } from "@/lib/password-rules";
@@ -104,7 +107,8 @@ export async function setOwnPassword(
 
 /**
  * Account settings (spec §4.5): change your own password. The current password is checked first, under the
- * mutation rate limit (every try counts, so guessing is capped), then the same rules as everywhere.
+ * mutation rate limit and (fix round 1, M5) a cap of five wrong current passwords per account in 15 minutes, then
+ * the same rules as everywhere.
  */
 export async function changeOwnPassword(
   input: unknown,
@@ -117,12 +121,19 @@ export async function changeOwnPassword(
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const { current, password, confirm } = parsed.data;
 
+  // Fix round 1 (M5): five wrong current passwords in 15 minutes pause this account's change for 15 minutes. The
+  // try is reserved under a per-account lock before the compare (as sign-in does), so a parallel burst can't slip by.
+  const attempt = await reserveCurrentPasswordAttempt(user.id);
+  if (attempt.paused) return rateLimited(CURRENT_PASSWORD_LIMIT.windowMs / 1000, PASSWORD_COPY.currentPaused);
   if (!(await passwordMatches(current, user.passwordHash))) {
     const copy = PASSWORD_COPY.wrongCurrent;
-    return { ok: false, kind: "validation", message: copy, fieldErrors: { current: copy } };
+    return { ok: false, kind: "validation", message: copy, fieldErrors: { current: copy } }; // the try stays counted
   }
+  await releaseSignInAttempt(attempt.attemptId); // the right current password is not a failure
   const errors = newPasswordErrors(password, confirm, current);
   if (errors) return validationError(errors);
 
-  return saveOwnPassword(user, password, false);
+  const saved = await saveOwnPassword(user, password, false);
+  if (saved.ok) await clearCurrentPasswordFailures(user.id);
+  return saved;
 }

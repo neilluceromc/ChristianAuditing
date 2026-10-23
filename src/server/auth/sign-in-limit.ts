@@ -10,6 +10,21 @@ import { normalizeEmail } from "@/lib/auth-shared";
  */
 export const SIGN_IN_LIMIT = { tries: 3, windowMs: 15 * 60_000 };
 
+/**
+ * Users & access fix round 1 (M5): wrong CURRENT passwords in Account settings, per account. Five within 15 minutes
+ * pause that account's password change for 15 minutes from the fifth. Same table, lock and arithmetic as sign-in.
+ */
+export const CURRENT_PASSWORD_LIMIT = { tries: 5, windowMs: 15 * 60_000 };
+
+type Limit = { tries: number; windowMs: number };
+
+/**
+ * The bucket key for an account's current-password tries. Upper-case on purpose: every sign-in key goes through
+ * normalizeEmail (lower-cased), so no sign-in attempt, whatever "email" is typed, can ever land in, fill or clear
+ * this bucket.
+ */
+export const currentPasswordKey = (userId: string) => `CURRENT:${userId}`;
+
 /** The first key of the two-key advisory lock: sign-in attempts' own namespace, apart from any other lock. */
 const LOCK_NAMESPACE = 410_024;
 
@@ -21,8 +36,8 @@ type Db = Pick<Prisma.TransactionClient, "signInAttempt">;
  * old. While paused no attempt is recorded (the password isn't checked), so the pause ends 15 minutes after the
  * third failure, not later.
  */
-async function pausedIn(db: Db, emailKey: string, now: Date): Promise<boolean> {
-  const { tries, windowMs } = SIGN_IN_LIMIT;
+async function pausedIn(db: Db, emailKey: string, now: Date, limit: Limit = SIGN_IN_LIMIT): Promise<boolean> {
+  const { tries, windowMs } = limit;
   // A pausing run ends inside the last window and starts at most a window before that: two windows back is enough.
   const rows = await db.signInAttempt.findMany({
     where: { emailKey, createdAt: { gt: new Date(now.getTime() - 2 * windowMs) } },
@@ -54,11 +69,27 @@ export type SignInReservation = { paused: true } | { paused: false; attemptId: s
  * for a waiting or declined account: not a failure) or clears the email (a successful sign-in).
  */
 export async function reserveSignInAttempt(emailKey: string): Promise<SignInReservation> {
-  const k = key(emailKey);
+  return reserveIn(key(emailKey), SIGN_IN_LIMIT);
+}
+
+/**
+ * Fix round 1 (M5): the same locked check-and-record for one account's current-password tries in Account settings.
+ * The caller keeps the row for a wrong current password, releases it for a right one, and clears the bucket after a
+ * successful change.
+ */
+export async function reserveCurrentPasswordAttempt(userId: string): Promise<SignInReservation> {
+  return reserveIn(currentPasswordKey(userId), CURRENT_PASSWORD_LIMIT);
+}
+
+export async function clearCurrentPasswordFailures(userId: string): Promise<void> {
+  await prisma.signInAttempt.deleteMany({ where: { emailKey: currentPasswordKey(userId) } });
+}
+
+async function reserveIn(k: string, limit: Limit): Promise<SignInReservation> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK_NAMESPACE}::int4, hashtext(${k}::text))`;
     const now = new Date();
-    if (await pausedIn(tx, k, now)) return { paused: true } as const;
+    if (await pausedIn(tx, k, now, limit)) return { paused: true } as const;
     const row = await tx.signInAttempt.create({ data: { emailKey: k, createdAt: now }, select: { id: true } });
     return { paused: false, attemptId: row.id } as const;
     // Prisma's 2 s default maxWait includes opening a connection, which a cold start can exceed (measured ~2.1 s on

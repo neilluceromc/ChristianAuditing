@@ -15,7 +15,6 @@ const h = vi.hoisted(() => {
     user: null as Record<string, unknown> | null,
     updateMany: vi.fn(),
     bump: vi.fn(),
-    transactions: 0,
     audits: [] as Array<Record<string, unknown>>,
     unstableUpdate: vi.fn(),
     checkRate: vi.fn(),
@@ -39,18 +38,24 @@ vi.mock("@/server/audit", () => ({
     return "a1";
   },
 }));
-vi.mock("@/server/db/client", () => ({
-  prisma: {
-    user: { findUnique: async () => h.user },
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-      h.transactions += 1;
-      return fn({ user: { updateMany: h.updateMany, update: h.bump } });
+// The SignInAttempt table and its advisory-locked transaction are Task 1's in-memory double (the current-password
+// cap, fix round 1 M5); the save's transaction adds the user writes to the same tx.
+vi.mock("@/server/db/client", async () => {
+  const fake = await import("@/server/auth/sign-in-attempts.fake");
+  return {
+    prisma: {
+      user: { findUnique: async () => h.user },
+      signInAttempt: fake.signInAttemptTable,
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+        fake.fakeTransaction((tx: object) => fn({ ...tx, user: { updateMany: h.updateMany, update: h.bump } })),
     },
-  },
-}));
+  };
+});
 
 import { workUnitAsyncStorage } from "next/dist/server/app-render/work-unit-async-storage.external";
 import { PASSWORD_COPY } from "@/lib/password-rules";
+import { attempts, resetAttempts } from "@/server/auth/sign-in-attempts.fake";
+import { currentPasswordKey } from "@/server/auth/sign-in-limit";
 import { changeOwnPassword, setOwnPassword } from "./actions";
 
 const TEMP = "Harbor-4207-cedar";
@@ -74,7 +79,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.transactions = 0;
+  resetAttempts();
   h.audits = [];
   h.updateMany.mockResolvedValue({ count: 1 });
   h.bump.mockResolvedValue({ sessionVersion: 1 });
@@ -86,7 +91,7 @@ describe("setOwnPassword (first sign-in)", () => {
     signIn({ mustChangePassword: false, passwordHash: currentHash });
     const r = await inRequest(() => setOwnPassword({ password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
     expect(r).toMatchObject({ ok: false, kind: "forbidden" });
-    expect(h.transactions).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
     expect(h.unstableUpdate).not.toHaveBeenCalled();
   });
 
@@ -94,6 +99,16 @@ describe("setOwnPassword (first sign-in)", () => {
     h.session = null;
     h.user = null;
     expect(await setOwnPassword({ password: "Brand-new-pass9", confirm: "Brand-new-pass9" })).toMatchObject({ kind: "forbidden" });
+  });
+
+  it("is refused once the mutation rate limit is reached, before any password work", async () => {
+    signIn({ mustChangePassword: true, passwordHash: tempHash });
+    h.checkRate.mockResolvedValue({ allowed: false, retryAfterSec: 17 });
+    const r = await inRequest(() => setOwnPassword({ password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
+    expect(r).toMatchObject({ ok: false, kind: "rate_limited", retryAfterSec: 17 });
+    expect(h.checkRate).toHaveBeenCalledWith("u1", "mutation");
+    expect(h.updateMany).not.toHaveBeenCalled();
+    expect(h.unstableUpdate).not.toHaveBeenCalled();
   });
 
   it("saves: clears the flag, stamps passwordChangedAt, bumps the version, audits password.change without the password", async () => {
@@ -140,7 +155,7 @@ describe("setOwnPassword (first sign-in)", () => {
       expect(r).toMatchObject({ ok: false, kind: "validation", fieldErrors: { [field]: copy } });
     }
     expect(await inRequest(() => setOwnPassword({ password: 42 }))).toMatchObject({ ok: false, kind: "validation" });
-    expect(h.transactions).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
     expect(h.unstableUpdate).not.toHaveBeenCalled();
   });
 
@@ -166,7 +181,7 @@ describe("changeOwnPassword (Account settings)", () => {
       fieldErrors: { current: "That isn't your current password" },
     });
     expect(h.checkRate).toHaveBeenCalledWith("u1", "mutation");
-    expect(h.transactions).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
   });
 
   it("is refused once the rate limit is reached, before any password check", async () => {
@@ -174,7 +189,7 @@ describe("changeOwnPassword (Account settings)", () => {
     h.checkRate.mockResolvedValue({ allowed: false, retryAfterSec: 42 });
     const r = await inRequest(() => changeOwnPassword({ current: CURRENT, password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
     expect(r).toMatchObject({ ok: false, kind: "rate_limited", retryAfterSec: 42 });
-    expect(h.transactions).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
   });
 
   it("enforces the rules on the server, including not reusing the current password", async () => {
@@ -189,7 +204,7 @@ describe("changeOwnPassword (Account settings)", () => {
       const r = await inRequest(() => changeOwnPassword(input));
       expect(r).toMatchObject({ ok: false, kind: "validation", fieldErrors: { [field]: copy } });
     }
-    expect(h.transactions).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
   });
 
   it("saves: new hash at cost 10, passwordChangedAt, version bump, audit without the password, this device kept", async () => {
@@ -213,6 +228,37 @@ describe("changeOwnPassword (Account settings)", () => {
     const r = await inRequest(() => changeOwnPassword({ current: TEMP, password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
     expect(r).toMatchObject({ ok: false, kind: "forbidden", reason: "password_owed", message: "Choose your own password first" });
     expect(h.checkRate).not.toHaveBeenCalled();
-    expect(h.transactions).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe("five wrong current passwords in 15 minutes pause the change (fix round 1, M5)", () => {
+    const wrong = () => inRequest(() => changeOwnPassword({ current: "not-it-at-all-1", password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
+    const right = () => inRequest(() => changeOwnPassword({ current: CURRENT, password: "Brand-new-pass9", confirm: "Brand-new-pass9" }));
+
+    it("the sixth try is refused with \"Too many tries — wait 15 minutes.\", even with the right password", async () => {
+      signIn({ mustChangePassword: false, passwordHash: currentHash });
+      for (let i = 0; i < 5; i++) expect(await wrong()).toMatchObject({ fieldErrors: { current: PASSWORD_COPY.wrongCurrent } });
+      const r = await right();
+      expect(r).toMatchObject({ ok: false, kind: "rate_limited", message: "Too many tries — wait 15 minutes.", retryAfterSec: 900 });
+      expect(h.updateMany).not.toHaveBeenCalled();
+      expect(attempts.rows.filter((row) => row.emailKey === currentPasswordKey("u1"))).toHaveLength(5);
+    });
+
+    it("a right current password isn't counted, and a successful change clears the count", async () => {
+      signIn({ mustChangePassword: false, passwordHash: currentHash });
+      for (let i = 0; i < 4; i++) await wrong();
+      // Right current password, new one breaks a rule: released, not counted.
+      await inRequest(() => changeOwnPassword({ current: CURRENT, password: "abcdefghij", confirm: "abcdefghij" }));
+      expect(attempts.rows).toHaveLength(4);
+      expect(await right()).toMatchObject({ ok: true });
+      expect(attempts.rows).toHaveLength(0);
+    });
+
+    it("a parallel burst of wrong passwords gets five compares' worth of tries, no more", async () => {
+      signIn({ mustChangePassword: false, passwordHash: currentHash });
+      const results = await Promise.all(Array.from({ length: 8 }, () => wrong()));
+      expect(results.filter((r) => !r.ok && r.kind === "validation")).toHaveLength(5);
+      expect(results.filter((r) => !r.ok && r.kind === "rate_limited")).toHaveLength(3);
+    });
   });
 });

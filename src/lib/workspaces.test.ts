@@ -5,6 +5,7 @@ import { REPAIR_STAGES } from "./repairs";
 import {
   filterSectionsForRole,
   PAGE_DEFAULTS,
+  PASSWORD_PAGE,
   pathAllowedForRole,
   resolveWorkspace,
   ROLE_LANDING,
@@ -656,6 +657,10 @@ describe("Users & access: Account settings and the first-sign-in page (spec §4.
   });
   it("every signed-in role reaches /welcome/password", () => {
     for (const r of ROLES) expect(pathAllowedForRole("/welcome/password", r)).toBe(true);
+  });
+  it("the shared PASSWORD_PAGE constant is the ungated path (fix round 1, M6)", () => {
+    expect(PASSWORD_PAGE).toBe("/welcome/password");
+    expect(pathAllowedForRole(PASSWORD_PAGE, "viewer")).toBe(true);
   });
   it("matches the paths exactly, not a lookalike or a wider prefix", () => {
     expect(pathAllowedForRole("/settings/accounts", "viewer")).toBe(false);

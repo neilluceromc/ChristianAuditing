@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -24,6 +24,17 @@ export function AccountPasswordCard({ passwordChangedAt }: { passwordChangedAt: 
   const [saved, setSaved] = useState(false);
   const [changedAt, setChangedAt] = useState(passwordChangedAt);
   const [pending, startTransition] = useTransition();
+  const changeButton = useRef<HTMLButtonElement>(null);
+  const [focusChange, setFocusChange] = useState(false);
+
+  // Fix round 1 (M4): Save unmounts with the form, so after a successful change focus goes to Change password
+  // (rendered again once the form closes) instead of dropping to <body>.
+  useEffect(() => {
+    if (focusChange && !open) {
+      changeButton.current?.focus();
+      setFocusChange(false);
+    }
+  }, [focusChange, open]);
 
   function onChange(field: PasswordField, value: string) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -49,6 +60,7 @@ export function AccountPasswordCard({ passwordChangedAt }: { passwordChangedAt: 
       if (result.ok) {
         setChangedAt(result.data.passwordChangedAt);
         setSaved(true);
+        setFocusChange(true);
         close();
         return;
       }
@@ -61,13 +73,21 @@ export function AccountPasswordCard({ passwordChangedAt }: { passwordChangedAt: 
     <Card>
       <CardHeader title="Password" />
       <CardBody className="flex flex-col gap-3">
-        {saved && <Banner tone="settled">{PASSWORD_CHANGED_COPY}</Banner>}
+        {/* Fix round 1 (M4): the status region is always rendered, so the message is announced when it appears. */}
+        <div role="status" data-testid="password-status">
+          {saved && (
+            <Banner tone="settled" live="off">
+              {PASSWORD_CHANGED_COPY}
+            </Banner>
+          )}
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[13px] text-fg-secondary">
             {changedAt ? `Last changed ${fmtDayMonthYear(changedAt)}` : "Not changed since the account was created"}
           </p>
           {!open && (
             <Button
+              ref={changeButton}
               type="button"
               onClick={() => {
                 setSaved(false);

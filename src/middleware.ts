@@ -1,14 +1,11 @@
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfigEdge } from "@/server/auth/config.edge";
-import { pathAllowedForRole, ROLE_LANDING } from "@/lib/workspaces";
+import { PASSWORD_PAGE, pathAllowedForRole, ROLE_LANDING } from "@/lib/workspaces";
 
 const { auth } = NextAuth(authConfigEdge);
 
 const AUTH_PATHS = /^\/(login|signup|bootstrap)(\/|$)/;
-
-/** Users & access (spec §4.3): the only page open while the token says a new password is owed. */
-const PASSWORD_PAGE = "/welcome/password";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;

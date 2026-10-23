@@ -13,7 +13,8 @@ vi.mock("../db/client", async () => {
 
 import { attempts, resetAttempts } from "./sign-in-attempts.fake";
 import {
-  SIGN_IN_LIMIT, clearSignInFailures, recordSignInFailure, releaseSignInAttempt, reserveSignInAttempt, signInPaused,
+  CURRENT_PASSWORD_LIMIT, SIGN_IN_LIMIT, clearCurrentPasswordFailures, clearSignInFailures, currentPasswordKey,
+  recordSignInFailure, releaseSignInAttempt, reserveCurrentPasswordAttempt, reserveSignInAttempt, signInPaused,
 } from "./sign-in-limit";
 
 const T0 = new Date("2026-10-24T02:00:00Z");
@@ -137,5 +138,58 @@ describe("reserveSignInAttempt (fix round 1, I-1)", () => {
     await releaseSignInAttempt(first.attemptId);
     expect(attempts.rows).toHaveLength(2);
     expect(await reserveSignInAttempt("a@b.co")).toMatchObject({ paused: false });
+  });
+});
+
+describe("wrong current passwords in Account settings (fix round 1, M5)", () => {
+  it("five within 15 minutes pause that account; the sixth is refused and records nothing", async () => {
+    expect(CURRENT_PASSWORD_LIMIT).toEqual({ tries: 5, windowMs: 15 * MIN });
+    for (let i = 0; i < 5; i++) {
+      vi.setSystemTime(at(i * MIN));
+      expect((await reserveCurrentPasswordAttempt("u1")).paused).toBe(false);
+    }
+    vi.setSystemTime(at(6 * MIN));
+    expect(await reserveCurrentPasswordAttempt("u1")).toEqual({ paused: true });
+    expect(attempts.rows.filter((r) => r.emailKey === currentPasswordKey("u1"))).toHaveLength(5);
+  });
+
+  it("the pause lifts 15 minutes after the fifth", async () => {
+    for (let i = 0; i < 5; i++) {
+      vi.setSystemTime(at(i * MIN));
+      await reserveCurrentPasswordAttempt("u1");
+    }
+    vi.setSystemTime(at(4 * MIN + 15 * MIN - 1));
+    expect((await reserveCurrentPasswordAttempt("u1")).paused).toBe(true);
+    vi.setSystemTime(at(4 * MIN + 15 * MIN + 1));
+    expect((await reserveCurrentPasswordAttempt("u1")).paused).toBe(false);
+  });
+
+  it("a burst of 8 parallel tries gets exactly 5; the rest are paused", async () => {
+    vi.setSystemTime(T0);
+    const results = await Promise.all(Array.from({ length: 8 }, () => reserveCurrentPasswordAttempt("u1")));
+    expect(results.filter((r) => !r.paused)).toHaveLength(5);
+    expect(results.filter((r) => r.paused)).toHaveLength(3);
+  });
+
+  it("a released try doesn't count, and clearing empties only that account's bucket", async () => {
+    vi.setSystemTime(T0);
+    for (let i = 0; i < 4; i++) await reserveCurrentPasswordAttempt("u1");
+    const right = await reserveCurrentPasswordAttempt("u1");
+    if (right.paused) throw new Error("unexpected pause");
+    await releaseSignInAttempt(right.attemptId);
+    expect((await reserveCurrentPasswordAttempt("u1")).paused).toBe(false); // 5th counted try
+    await reserveCurrentPasswordAttempt("u2");
+    await clearCurrentPasswordFailures("u1");
+    expect(attempts.rows.map((r) => r.emailKey)).toEqual([currentPasswordKey("u2")]);
+  });
+
+  it("is a bucket no sign-in can touch: sign-in keys are lower-cased emails, this one is upper-case", async () => {
+    vi.setSystemTime(T0);
+    for (let i = 0; i < 5; i++) await reserveCurrentPasswordAttempt("u1");
+    // Someone types the bucket's own name as an email: it is normalised to lower case, a different key.
+    for (let i = 0; i < 3; i++) await reserveSignInAttempt(currentPasswordKey("u1"));
+    await clearSignInFailures(currentPasswordKey("u1"));
+    expect(attempts.rows.filter((r) => r.emailKey === "CURRENT:u1")).toHaveLength(5);
+    expect(SIGN_IN_LIMIT.tries).toBe(3); // sign-in's own limit unchanged
   });
 });

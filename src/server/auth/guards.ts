@@ -3,11 +3,8 @@ import { redirect } from "next/navigation";
 import type { Role, User } from "@prisma/client";
 import { auth } from "./index";
 import { prisma } from "../db/client";
-import { ROLE_LANDING } from "@/lib/workspaces";
+import { PASSWORD_PAGE, ROLE_LANDING } from "@/lib/workspaces";
 import { markRefusal } from "./refusal";
-
-/** Users & access (spec §4.3): the "Choose your own password" page, the one page open while a password is owed. */
-export const PASSWORD_PAGE = "/welcome/password";
 
 /** Phase 41: the signed-in person a server action acts as — what `actionUser()` returns once it is not null. */
 export type SessionUser = User;

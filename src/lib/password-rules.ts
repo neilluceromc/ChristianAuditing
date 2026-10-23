@@ -31,6 +31,8 @@ export const PASSWORD_COPY = {
   mismatch: "The two passwords don't match.",
   /** Account settings (spec §4.5), verbatim */
   wrongCurrent: "That isn't your current password",
+  /** Five wrong current passwords in 15 minutes (fix round 1, M5) */
+  currentPaused: "Too many tries — wait 15 minutes.",
 } as const;
 
 /** Account settings, after saving (spec §4.5), verbatim. */

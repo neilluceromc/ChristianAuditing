@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/server/modules/account/actions", () => ({ setOwnPassword: vi.fn(), changeOwnPassword: vi.fn() }));
 
-import { PasswordChecklist, PasswordFields, PasswordInput } from "./password-fields";
+import { PasswordChecklist, PasswordFields, PasswordInput, rulesMetSummary } from "./password-fields";
 import { FirstPasswordForm } from "./first-password-form";
 import { AccountPasswordCard } from "./account-password-card";
 import { YourAccountCard } from "./your-account-card";
@@ -49,13 +49,22 @@ describe("PasswordInput", () => {
     expect(html).toMatch(/>Show</);
   });
 
-  it("Show turns the field into plain text and the button into Hide", () => {
-    const html = renderToStaticMarkup(
+  // The node test setup has no DOM to click in (no jsdom), so the shown state is set through the prop; the click
+  // itself is Task 5's e2e (fix round 1, M6).
+  it("Show turns the field into plain text; the toggle keeps its one name and reports pressed (fix round 1, M3)", () => {
+    const hidden = renderToStaticMarkup(
+      <PasswordInput label="New password" name="password" value="" onChange={noop} autoComplete="new-password" />,
+    );
+    const shown = renderToStaticMarkup(
       <PasswordInput label="New password" name="password" value="" onChange={noop} autoComplete="new-password" defaultShown />,
     );
-    expect(html).toContain('type="text"');
-    expect(html).toContain('aria-pressed="true"');
-    expect(html).toMatch(/>Hide</);
+    expect(shown).toContain('type="text"');
+    expect(shown).toContain('aria-pressed="true"');
+    expect(shown).toMatch(/>Hide</);
+    for (const html of [hidden, shown]) {
+      expect(html).toContain('aria-label="Show new password"');
+      expect(html).not.toContain('aria-label="Hide');
+    }
   });
 
   it("shows its error under the field", () => {
@@ -64,6 +73,43 @@ describe("PasswordInput", () => {
     );
     expect(html).toContain("That isn&#x27;t your current password");
     expect(html).toContain('aria-invalid="true"');
+  });
+});
+
+/** The input named `name`, and the ids its aria-describedby lists. */
+function describedBy(html: string, name: string): string[] {
+  const input = html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? "";
+  return input.match(/aria-describedby="([^"]*)"/)?.[1].split(" ") ?? [];
+}
+
+describe("the checklist is announced (fix round 1, I1)", () => {
+  it.each(["first", "change"] as const)("%s: New password is described by the checklist; a polite line counts the rules met", (mode) => {
+    const html = renderToStaticMarkup(
+      <PasswordFields mode={mode} values={{ current: "", password: "abcdefghij", confirm: "" }} onChange={noop} errors={{}} />,
+    );
+    const listId = html.match(/<ul id="([^"]+)" aria-label="Password rules"/)?.[1];
+    expect(listId).toBeTruthy();
+    expect(describedBy(html, "password")).toContain(listId);
+    expect(html).toMatch(/<p aria-live="polite" class="sr-only">\d of \d rules met<\/p>/);
+  });
+
+  it("the error joins the checklist in New password's description", () => {
+    const html = renderToStaticMarkup(
+      <PasswordFields mode="first" values={{ current: "", password: "x", confirm: "" }} onChange={noop} errors={{ password: "Password must be at least 10 characters." }} />,
+    );
+    const ids = describedBy(html, "password");
+    expect(ids).toHaveLength(2);
+    expect(html).toContain(`id="${ids[1]}"`); // the error paragraph
+  });
+
+  it("FirstPasswordForm wires it (Account settings' form renders the same PasswordFields, mode \"change\" above)", () => {
+    const html = renderToStaticMarkup(<FirstPasswordForm />);
+    expect(describedBy(html, "password").length).toBe(1);
+  });
+
+  it("counts only the rules the browser can check", () => {
+    expect(rulesMetSummary({ long: true, mixed: false, fresh: true }, false)).toBe("2 of 3 rules met");
+    expect(rulesMetSummary({ long: true, mixed: true, fresh: true }, true)).toBe("2 of 2 rules met");
   });
 });
 
@@ -145,6 +191,11 @@ describe("AccountPasswordCard", () => {
     expect(html).toContain("Last changed 20 Oct 2026");
     expect(html).toContain("Change password");
     expect(html).not.toContain("Current password");
+  });
+
+  it("keeps an empty status region rendered, so the saved message is announced when it appears (fix round 1, M4)", () => {
+    const html = renderToStaticMarkup(<AccountPasswordCard passwordChangedAt={null} />);
+    expect(html).toContain('<div role="status" data-testid="password-status"></div>');
   });
 
   it("a password never changed says so", () => {

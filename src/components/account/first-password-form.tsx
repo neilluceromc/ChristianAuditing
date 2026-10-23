@@ -37,6 +37,9 @@ export function FirstPasswordForm() {
         return;
       }
       if (result.kind === "validation" && result.fieldErrors) setErrors(result.fieldErrors);
+      // Fix round 1 (M6): a plain refusal means no new password is owed any more (another tab already chose one, or
+      // the account changed): move on rather than show "You don't have permission to do that."
+      else if (result.kind === "forbidden" && !result.reason) router.replace("/");
       else setFormError(result.message);
     });
   }

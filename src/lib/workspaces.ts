@@ -13,6 +13,12 @@ export const ROLE_WORKSPACES: Record<Role, WorkspaceId[]> = {
   viewer: ["it"],
 };
 
+/**
+ * Users & access (spec §4.3): the "Choose your own password" page, the one page open while a new password is owed.
+ * Here (edge-safe) so middleware and the guards share one literal.
+ */
+export const PASSWORD_PAGE = "/welcome/password";
+
 export const ROLE_LANDING: Record<Role, string> = {
   admin: "/",
   it_staff: "/inventory",
