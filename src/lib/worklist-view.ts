@@ -11,6 +11,19 @@ import { WORK_SECTIONS, type WorkGroup, type WorkItem, type WorkSectionId } from
 
 /** Plan call 9: ten rows a page, so the table fits one screen. */
 export const PER_PAGE = 10;
+/** Final review ruling: the fewest rows a page shows, however short the window (it then scrolls inside). */
+export const MIN_PER_PAGE = 6;
+/** Final review ruling: every row is 52 px from 640 px up; the count per page flexes instead. */
+export const ROW_PX = 52;
+
+/**
+ * How many rows fit the table's box (its height less the head), 6 to 10 (final review ruling: "as many as fit").
+ * A box too short for six still gets six and scrolls inside; a measurement of 0 (not laid out yet) reads as ten.
+ */
+export function rowsThatFit(height: number, rowPx = ROW_PX, min = MIN_PER_PAGE, max = PER_PAGE): number {
+  if (!(height > 0) || !(rowPx > 0)) return max;
+  return Math.min(max, Math.max(min, Math.floor(height / rowPx)));
+}
 /** "Over 90 days": bold, never red (Global Constraints). */
 export const OVER_DAYS = 90;
 
@@ -269,11 +282,11 @@ export const NUMERIC_KEYS = new Set(["returned", "waiting", "down", "total", "st
 export interface PageSlice { rows: WorkItem[]; page: number; pageCount: number; start: number; end: number; total: number }
 
 /** One page of the filtered rows; a page past the end shows the last one. */
-export function paginate(rows: WorkItem[], page: number): PageSlice {
-  const pageCount = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+export function paginate(rows: WorkItem[], page: number, perPage: number = PER_PAGE): PageSlice {
+  const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
   const p = Math.min(Math.max(1, page), pageCount);
-  const start = (p - 1) * PER_PAGE;
-  const slice = rows.slice(start, start + PER_PAGE);
+  const start = (p - 1) * perPage;
+  const slice = rows.slice(start, start + perPage);
   return { rows: slice, page: p, pageCount, start: slice.length ? start + 1 : 0, end: start + slice.length, total: rows.length };
 }
 
@@ -289,10 +302,10 @@ export function capNote(g: WorkGroup | undefined, s: Pick<PageSlice, "page" | "p
 }
 
 /** The page a row sits on in the list, or null when the filters hide it. */
-export function pageOfKey(rows: WorkItem[], key: string | null): number | null {
+export function pageOfKey(rows: WorkItem[], key: string | null, perPage: number = PER_PAGE): number | null {
   if (!key) return null;
   const i = rows.findIndex((r) => r.key === key);
-  return i < 0 ? null : Math.floor(i / PER_PAGE) + 1;
+  return i < 0 ? null : Math.floor(i / perPage) + 1;
 }
 
 /**
@@ -397,6 +410,15 @@ export const drawerStays = (open: boolean, selected: string | null): boolean => 
  * next row or the empty state (Task 4, carried 1). True when `key` was being watched and the list no longer holds it.
  */
 export const refusedRowLeft = (key: string | null, present: ReadonlySet<string>): boolean => key !== null && !present.has(key);
+
+/**
+ * Final review I1: the refresh dropped a refused row — move focus again only when there is work to do: the refused
+ * row was still the selected one (it was the last row, so the selection had nowhere to go) or focus has fallen to
+ * the page body. Otherwise focus already moved on with the selection, and arming again would steal the next ↑/↓.
+ */
+export function shouldRefocusAfterRefresh(refusedKey: string | null, selKey: string | null, activeIsBody: boolean): boolean {
+  return refusedKey !== null && (refusedKey === selKey || activeIsBody);
+}
 
 /**
  * A bulk decision's toast: one item reads like a single decision; several read "{n} items · …"; any that failed add

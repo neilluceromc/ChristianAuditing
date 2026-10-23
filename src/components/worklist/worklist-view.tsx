@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
-import { sectionStats, WORK_SECTIONS, type WorkGroup, type WorkItem, type WorkSectionId } from "@/lib/worklist";
+import { SEE_ALL_HREF, sectionStats, WORK_SECTIONS, type WorkGroup, type WorkItem, type WorkSectionId } from "@/lib/worklist";
 import {
   BULK, COLUMNS, DEFAULT_SORT, FILTERED_EMPTY, NO_FILTERS, TAB_LABEL, capNote, categoryChips, emptyQueue, filterRows, filtersActive,
-  drawerStays, focusAfterDecision, focusIsFree, refusedRowLeft,
+  PER_PAGE, ROW_PX, drawerStays, focusAfterDecision, focusIsFree, refusedRowLeft, rowsThatFit, shouldRefocusAfterRefresh,
   filtersFor, headerCounts, nextSort, pageLabel, pageOfKey, paginate, queueTabs, selectAfter, sortRows, workHref,
   type WorkFilters, type WorkSort,
 } from "@/lib/worklist-view";
@@ -35,17 +35,19 @@ function useWide(): boolean {
 }
 
 /**
- * Row height: ten rows fill what the header, tabs, summary, filters, table head and pager leave of the viewport
- * (about 404 px of chrome under the app's 52 px top bar and the main region's padding; 400 left the table 2 px short at
- * 1440×900 in Task 4's browser check) — 49.6 px at 900 px tall. Below 640 px the rows stack at their own height and the page may scroll.
- *
- * While Cris shows in the corner, #main ends with Cris's clearance (`--cris-clear`, 88 px, cris-widget.css) so no
- * page's last row sits under Cris. The screen gives that room up too, or the document would scroll by exactly that
- * much (found by Task 4's browser check at 1440×900).
+ * Row height (final review ruling): a constant 52 px from 640 px up; how many rows a page shows flexes instead —
+ * 6 to 10, as many as the table's box holds (`rowsThatFit`, measured with a ResizeObserver). Below 640 px the rows
+ * stack at their own height, a page is ten rows, and the page may scroll.
  */
-export const ROW_HEIGHT = "[--wl-row:auto] sm:[--wl-row:clamp(32px,calc((100dvh-404px-var(--cris-clear,0px))/10),52px)]";
-/** The one screen: the viewport less the top bar, main's padding and Cris's clearance (see ROW_HEIGHT). */
+export const ROW_HEIGHT = `[--wl-row:auto] sm:[--wl-row:${ROW_PX}px]`;
+/**
+ * The one screen: the viewport less the top bar and main's padding — and, while Cris shows in the corner, less
+ * Cris's clearance too (`--cris-clear`, 88 px, cris-widget.css: #main ends with that room so no page's last row sits
+ * under Cris), or the document would scroll by exactly that much (Task 4's browser check at 1440×900).
+ */
 export const SCREEN_HEIGHT = "sm:h-[calc(100dvh-100px-var(--cris-clear,0px))]";
+/** From 640 px the screen is fixed and rows per page are measured; below it the list stacks. */
+const SCREEN = "(min-width: 640px)";
 
 export interface WorklistInitial { q: WorkSectionId; page: number; sel: string | null }
 
@@ -73,6 +75,8 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   /** rows a decision took off the list, hidden until the refreshed list drops them (or an Undo puts them back) */
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [drawer, setDrawer] = useState(false);
+  /** rows per page: ten until measured, then as many as fit (6–10) */
+  const [perPage, setPerPage] = useState(PER_PAGE);
   const focusRow = useRef(false);
   /**
    * A row to bring into view once the list holds it: the URL's `sel` on arrival (dropped at once when the list does
@@ -80,11 +84,17 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
    * that brings it is still on its way).
    */
   const reveal = useRef<{ key: string; wait: boolean } | null>(initial.sel ? { key: initial.sel, wait: false } : null);
-  /** a decision took a row off: once the answer is in, focus goes where focusAfterDecision says (fix round 1, I1) */
-  const focusNext = useRef(false);
+  /**
+   * A decision took a row off: once the answer is in, focus goes where focusAfterDecision says (fix round 1, I1).
+   * A counter, not a flag (final review I1): every request runs the focus move exactly once, and nothing stays armed
+   * for a later ↑/↓ to set off.
+   */
+  const [focusTick, requestFocus] = useReducer((n: number) => n + 1, 0);
+  const focusDone = useRef(0);
   /** a row refused as changed elsewhere: when the refresh drops it, focus (on its panel) must move on too */
   const refused = useRef<string | null>(null);
   const tableBox = useRef<HTMLElement>(null);
+  const scrollBox = useRef<HTMLDivElement>(null);
   const panelBox = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const panelTitleId = useId();
@@ -92,7 +102,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   const group = groups.find((g) => g.section.id === queue);
   const live = useMemo(() => (group?.rows ?? []).filter((r) => !gone.has(r.key)), [group, gone]);
   const list = useMemo(() => sortRows(filterRows(live, filters), sort), [live, filters, sort]);
-  const slice = paginate(list, page);
+  const slice = paginate(list, page, perPage);
   const selected = slice.rows.find((r) => r.key === sel) ?? slice.rows[0] ?? null;
   const selKey = selected?.key ?? null;
   // no row left to show: the drawer closes for good, so an Undo that brings one back doesn't reopen it unasked
@@ -102,8 +112,11 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   useEffect(() => {
     const present = new Set(groups.flatMap((g) => g.rows.map((r) => r.key)));
     if (refusedRowLeft(refused.current, present)) {
+      const key = refused.current;
       refused.current = null;
-      focusNext.current = true;
+      // only when there is work to do (final review I1): `latest` still holds the selection from before this refresh
+      const active = document.activeElement;
+      if (shouldRefocusAfterRefresh(key, latest.current.selKey, !active || active === document.body)) requestFocus();
     }
     setGone((g) => (g.size && [...g].some((k) => !present.has(k)) ? new Set([...g].filter((k) => present.has(k))) : g));
   }, [groups]);
@@ -117,7 +130,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   useEffect(() => {
     const r = reveal.current;
     if (!r) return;
-    const p = pageOfKey(list, r.key);
+    const p = pageOfKey(list, r.key, perPage);
     if (!p) {
       if (!r.wait) reveal.current = null;
       return;
@@ -125,7 +138,22 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
     reveal.current = null;
     setSel(r.key);
     setPage(p);
-  }, [list]);
+  }, [list, perPage]);
+
+  // rows per page: measured on the table's box before the first paint, and again whenever it changes size
+  useLayoutEffect(() => {
+    const box = scrollBox.current;
+    if (!box) return;
+    const measure = () => {
+      const head = box.querySelector("thead");
+      const n = window.matchMedia(SCREEN).matches ? rowsThatFit(box.clientHeight - (head?.offsetHeight ?? 0)) : PER_PAGE;
+      setPerPage((p) => (p === n ? p : n));
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(box);
+    return () => watch.disconnect();
+  }, []);
 
   // ↑/↓ moved the selection: the row it landed on takes focus (it may be on the next page)
   useEffect(() => {
@@ -135,21 +163,33 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   }, [selKey, slice.page]);
 
   // a decision's answer arrives after the person may have moved on: it reads the list and selection as they are then
-  const latest = useRef({ list, selKey });
-  useEffect(() => { latest.current = { list, selKey }; }, [list, selKey]);
+  const latest = useRef({ list, selKey, sel, page });
+  useEffect(() => { latest.current = { list, selKey, sel, page }; }, [list, selKey, sel, page]);
+
+  // a new rows-per-page (another window size, or the first measurement): the selected row keeps its place — the URL's
+  // `sel` wins over its `page` on arrival — and the page index is recomputed (the URL effect rewrites ?page=)
+  const lastPerPage = useRef(perPage);
+  useEffect(() => {
+    if (lastPerPage.current === perPage) return;
+    lastPerPage.current = perPage;
+    const { list: now, sel: want, selKey: at, page: was } = latest.current;
+    const key = want && now.some((r) => r.key === want) ? want : at;
+    setPage(pageOfKey(now, key, perPage) ?? Math.min(was, Math.max(1, Math.ceil(now.length / perPage))));
+    if (key) setSel(key);
+  }, [perPage]);
 
   /** Select a row and show its page. */
   const select = useCallback((key: string | null, rows: WorkItem[] = list) => {
     reveal.current = null;
     setSel(key);
-    const p = pageOfKey(rows, key);
+    const p = pageOfKey(rows, key, perPage);
     if (p) setPage(p);
-  }, [list]);
+  }, [list, perPage]);
 
   const decisions = useWorklistUndo({
     clear: (keys) => {
       const { list: now, selKey: at } = latest.current;
-      focusNext.current = true;
+      requestFocus();
       refused.current = null;
       const drop = new Set(keys);
       setGone((g) => new Set([...g, ...keys]));
@@ -162,7 +202,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
     },
     moveOn: (key) => {
       const { list: now, selKey: at } = latest.current;
-      focusNext.current = true;
+      requestFocus();
       refused.current = key;
       select(selectAfter(now, new Set([key]), at), now.filter((r) => r.key !== key));
     },
@@ -172,8 +212,8 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   // so focus moves on with the selection — never to the page body — once the answer is in
   const busy = decisions.busy;
   useEffect(() => {
-    if (!focusNext.current || busy) return;
-    focusNext.current = false;
+    if (focusTick === focusDone.current || busy) return;
+    focusDone.current = focusTick;
     const target = focusAfterDecision(selKey, wide);
     // a frame later: the drawer (and its own focus handling) has settled, and the next row's panel is mounted
     requestAnimationFrame(() => {
@@ -182,7 +222,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
       const el = document.querySelector<HTMLElement>(target.selector) ?? document.getElementById(titleId);
       el?.focus();
     });
-  }, [selKey, busy, wide, titleId]);
+  }, [focusTick, selKey, busy, wide, titleId]);
 
   function pick(q: WorkSectionId) {
     reveal.current = null;
@@ -197,7 +237,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
   function changeFilters(f: WorkFilters) {
     setFilters(f);
     const rows = sortRows(filterRows(live, f), sort);
-    const p = pageOfKey(rows, selKey);
+    const p = pageOfKey(rows, selKey, perPage);
     reveal.current = null;
     if (p) setPage(p);
     else { setPage(1); setSel(rows[0]?.key ?? null); }
@@ -252,9 +292,13 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
         <section
           ref={tableBox}
           aria-labelledby={titleId}
+          data-per-page={perPage}
           className="flex min-h-0 flex-col overflow-hidden rounded-(--radius-card) border border-border bg-surface shadow-card"
         >
-          <QueueSummary id={titleId} title={label} blurb={section.blurb} stats={stats} />
+          <QueueSummary
+            id={titleId} title={label} blurb={section.blurb} stats={stats}
+            link={queue === "purchases" ? { href: SEE_ALL_HREF.purchases, label: "Open in Purchase orders →" } : undefined}
+          />
           <QueueFilters
             queue={label}
             chips={categoryChips(live)}
@@ -269,6 +313,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
           />
           <QueueTable
             label={label}
+            boxRef={scrollBox}
             columns={COLUMNS[queue]}
             rows={slice.rows}
             sort={sort}
@@ -276,7 +321,7 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
               // the selected row keeps its place: the page follows it into the new order
               const next = nextSort(sort, key, numeric);
               setSort(next);
-              setPage(pageOfKey(sortRows(filterRows(live, filters), next), selKey) ?? 1);
+              setPage(pageOfKey(sortRows(filterRows(live, filters), next), selKey, perPage) ?? 1);
             }}
             selected={selKey}
             onSelect={(key) => { select(key); if (!wide) setDrawer(true); }}
@@ -297,9 +342,10 @@ export function WorklistView({ groups, initial, canAct, cleared }: {
           <QueuePager
             label={pageLabel(slice)}
             note={active ? null : capNote(group, slice)}
+            seeAll={SEE_ALL_HREF[queue]}
             page={slice.page}
             pageCount={slice.pageCount}
-            onPage={(p) => { const s = paginate(list, p); reveal.current = null; setPage(s.page); setSel(s.rows[0]?.key ?? null); }}
+            onPage={(p) => { const s = paginate(list, p, perPage); reveal.current = null; setPage(s.page); setSel(s.rows[0]?.key ?? null); }}
             extra={canAct && group && group.hidden.length > 0 ? <HiddenToday rows={group.hidden} /> : null}
           />
         </section>

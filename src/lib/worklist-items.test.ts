@@ -431,6 +431,14 @@ describe("sectionStats", () => {
       { label: "Value at cost", value: "₱80,390 · 1 without cost" },
     ]);
   });
+  it("Oldest comes from the rows passed, so a decided oldest row stops counting at once (final review M5)", () => {
+    const g = group([tri("a1", "2026-06-03", 78500), tri("a2", "2026-07-15", 1890), tri("a3", "2026-10-19", null)]);
+    const live = g.rows.filter((r) => r.key !== "triage:a1");
+    expect(sectionStats({ ...g, rows: live, total: 2 }).slice(0, 2)).toEqual([
+      { label: "Items", value: "2" },
+      { label: "Oldest", value: "100 d" },
+    ]);
+  });
   it("Value at cost is plain when every item has a cost (fix round 1, M6)", () => {
     const g = group([tri("a1", "2026-06-03", 78500), tri("a2", "2026-07-15", 1890)]);
     expect(sectionStats(g)[3]).toEqual({ label: "Value at cost", value: "₱80,390" });

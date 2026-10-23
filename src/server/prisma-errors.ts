@@ -74,6 +74,14 @@ export function isDeadlock(err: unknown): err is Prisma.PrismaClientKnownRequest
 }
 
 /**
+ * Final review M7: a deadlock the caller reads as "changed since" leaves a trace in the server log, so a real
+ * lock-order bug shows up there rather than only as people seeing "try again".
+ */
+export function warnDeadlock(action: string, assetId?: string | null): void {
+  console.warn("[lifecycle] deadlock read as changed-since", { action, assetId: assetId ?? null });
+}
+
+/**
  * P2002 meta.target is a column array (["serial"]) for a Prisma-declared index or the index NAME
  * string ("StockCategory_prefix_lower_key") for a raw one — callers match with `.includes()`, which
  * reads both shapes; keep every caller on includes().

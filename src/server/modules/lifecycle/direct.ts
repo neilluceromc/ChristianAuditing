@@ -12,7 +12,7 @@ import {
   ASSIGN_TARGETS, CLASS_PHRASE, DEFAULT_ASSIGN_STATUS, isAssignable, isDirectLifecycle, statusLabel,
 } from "@/lib/asset-class";
 import { CHANGED_TRY_AGAIN, RETURN_OUTCOMES, humanizeGuard, loanDueFor, reasonRequiredFor, replacePlan } from "@/lib/lifecycle";
-import { isDeadlock } from "@/server/prisma-errors";
+import { isDeadlock, warnDeadlock } from "@/server/prisma-errors";
 import { commitLifecycle, prepareLifecycle, type LifecycleAsset, type LifecycleChange, type Prepared } from "./apply";
 
 /*
@@ -53,11 +53,17 @@ export async function lockAssets(tx: Tx, ids: readonly string[]): Promise<void> 
  * Fix round 2: a single action whose transaction lost a deadlock (P2034, or 40P01 from the row lock) reads as
  * "Changed by someone else since — try again" rather than a 500. The rollback was whole, so nothing was written.
  */
-export async function deadlockAsChanged<T>(run: () => Promise<T>): Promise<T | ActionResult<never>> {
+export async function deadlockAsChanged<T>(
+  run: () => Promise<T>,
+  ctx: { op: string; assetId?: string | null } = { op: "direct change" },
+): Promise<T | ActionResult<never>> {
   try {
     return await run();
   } catch (err) {
-    if (isDeadlock(err)) return conflict(CHANGED_TRY_AGAIN);
+    if (isDeadlock(err)) {
+      warnDeadlock(ctx.op, ctx.assetId);
+      return conflict(CHANGED_TRY_AGAIN);
+    }
     throw err;
   }
 }

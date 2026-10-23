@@ -59,7 +59,7 @@ export async function changeStatus(input: unknown): Promise<ActionResult<{ tag: 
     if (!r.ok) return conflict(r.error);
     out = { tag: asset.tag, status: d.to };
     return null;
-  }));
+  }), { op: "lifecycle.change-status", assetId: d.assetId });
   if (failure) return failure;
   revalidateAsset(d.assetId, []);
   return ok(out!);
@@ -75,7 +75,7 @@ export async function assignAsset(input: unknown): Promise<ActionResult<{ tag: s
   const parsed = assignSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  const result = await deadlockAsChanged(() => prisma.$transaction((tx) => assignCore(tx, user, d)));
+  const result = await deadlockAsChanged(() => prisma.$transaction((tx) => assignCore(tx, user, d)), { op: "lifecycle.assign", assetId: d.assetId });
   if (!result.ok) return result;
   revalidateAsset(d.assetId, [d.employeeId]);
   await rememberPicks(user.id, { employee: d.employeeId });
@@ -110,7 +110,7 @@ export async function setLoanDue(input: unknown): Promise<ActionResult<{ tag: st
     });
     out = { tag: asset.tag, loanDueAt: d.loanDueAt };
     return null;
-  }));
+  }), { op: "lifecycle.loan-due", assetId: d.assetId });
   if (failure) return failure;
   revalidateAsset(d.assetId, []);
   revalidatePath("/inventory/work");
@@ -149,7 +149,7 @@ export async function returnAsset(input: unknown): Promise<ActionResult<{ tag: s
     if (!r.ok) return conflict(r.error);
     out = { tag: asset.tag, status };
     return null;
-  }));
+  }), { op: "lifecycle.return", assetId: d.assetId });
   if (failure) return failure;
   revalidateAsset(d.assetId, [holderId.v]);
   return ok(out!);
@@ -166,7 +166,7 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
   const parsed = replaceSchema.safeParse(input);
   if (!parsed.success) return validationError(zodFieldErrors(parsed.error));
   const d = parsed.data;
-  const result = await deadlockAsChanged(() => prisma.$transaction((tx) => replaceCore(tx, user, d)));
+  const result = await deadlockAsChanged(() => prisma.$transaction((tx) => replaceCore(tx, user, d)), { op: "lifecycle.replace", assetId: d.oldAssetId });
   if (!result.ok) return result;
   revalidateAsset(d.oldAssetId, [d.employeeId]);
   revalidatePath(`/inventory/${d.newAssetId}`);
@@ -183,6 +183,8 @@ export async function replaceAsset(input: unknown): Promise<ActionResult<{ oldTa
 export async function triageAsset(input: unknown): Promise<ActionResult<TriageDone>> {
   const user = await actionUser();
   if (!user) return forbidden();
+  // final review M1: a role that can never triage IT is refused before any row is locked (the per-item gate stays)
+  if (!isDirectLifecycle(user.role, "IT")) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = triageInputSchema.safeParse(input);
@@ -211,6 +213,8 @@ const triageManySchema = z.object({
 export async function triageMany(input: unknown): Promise<ActionResult<BulkResult>> {
   const user = await actionUser();
   if (!user) return forbidden();
+  // final review M1: a role that can never triage IT is refused before any row is locked (the per-item gate stays)
+  if (!isDirectLifecycle(user.role, "IT")) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = triageManySchema.safeParse(input);
@@ -227,6 +231,8 @@ const undoSchema = z.object({ auditId: z.string().min(1) });
 export async function undoTriage(input: unknown): Promise<ActionResult<TriageUndone>> {
   const user = await actionUser();
   if (!user) return forbidden();
+  // final review M1: a role that can never triage IT is refused before any row is locked (the per-item gate stays)
+  if (!isDirectLifecycle(user.role, "IT")) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = undoSchema.safeParse(input);
@@ -247,6 +253,8 @@ const undoManySchema = z.object({
 export async function undoTriageMany(input: unknown): Promise<ActionResult<{ done: string[]; failed: Array<{ id: string; reason: string }> }>> {
   const user = await actionUser();
   if (!user) return forbidden();
+  // final review M1: a role that can never triage IT is refused before any row is locked (the per-item gate stays)
+  if (!isDirectLifecycle(user.role, "IT")) return forbidden();
   const rate = await checkRate(user.id);
   if (!rate.allowed) return rateLimited(rate.retryAfterSec);
   const parsed = undoManySchema.safeParse(input);

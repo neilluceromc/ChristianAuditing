@@ -4,6 +4,7 @@ import {
   emptyQueue, filterRows, filtersActive, filtersFor, headerCounts, isRed, nextSort, pageFrom, pageLabel, pageOfKey, paginate,
   queueFrom, queueTabs, recordHref, selectAfter, sortRows, workHref,
   focusAfterDecision, isChangedElsewhere, refusalToast, undoReport, focusIsFree, drawerStays, refusedRowLeft,
+  MIN_PER_PAGE, ROW_PX, rowsThatFit, shouldRefocusAfterRefresh,
 } from "./worklist-view";
 import { allRows, approval, groupsOf, leaver, loan, triage, check, hire, purchase } from "./worklist-view.fixtures";
 import type { WorkItem } from "./worklist";
@@ -290,5 +291,48 @@ describe("Task 4 carried fixes", () => {
     expect(refusedRowLeft("triage:t1", new Set(["triage:t2"]))).toBe(true);
     expect(refusedRowLeft("triage:t1", new Set(["triage:t1"]))).toBe(false);
     expect(refusedRowLeft(null, new Set())).toBe(false);
+  });
+});
+
+describe("final review fix wave: rows per page", () => {
+  it("rowsThatFit: as many 52 px rows as the box holds, 6 to 10", () => {
+    expect(ROW_PX).toBe(52);
+    expect(MIN_PER_PAGE).toBe(6);
+    expect(rowsThatFit(8 * 52)).toBe(8);
+    expect(rowsThatFit(8 * 52 - 1)).toBe(7);
+    expect(rowsThatFit(7 * 52 + 51)).toBe(7);
+    expect(rowsThatFit(10 * 52)).toBe(10);
+    expect(rowsThatFit(2000)).toBe(10);
+    expect(rowsThatFit(231)).toBe(6);
+    expect(rowsThatFit(0)).toBe(10);
+    expect(rowsThatFit(-5)).toBe(10);
+  });
+  it("paginate and pageLabel with 6 and 10 rows a page", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => triage(`t${i + 1}`, 100 - i));
+    expect(pageLabel(paginate(rows, 1, 6))).toBe("1–6 of 12");
+    expect(pageLabel(paginate(rows, 2, 6))).toBe("7–12 of 12");
+    expect(paginate(rows, 3, 6)).toMatchObject({ page: 2, pageCount: 2 });
+    expect(pageLabel(paginate(rows, 2, 10))).toBe("11–12 of 12");
+    expect(paginate(rows, 1)).toMatchObject({ pageCount: 2, end: PER_PAGE });
+  });
+  it("pageOfKey follows a perPage change: the same row, its new page", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => triage(`t${i + 1}`, 100 - i));
+    expect(pageOfKey(rows, "triage:t7", 10)).toBe(1);
+    expect(pageOfKey(rows, "triage:t7", 6)).toBe(2);
+    expect(pageOfKey(rows, "triage:t7", 7)).toBe(1);
+    expect(pageOfKey(rows, "triage:t12", 6)).toBe(2);
+    expect(pageOfKey(rows, "triage:t12")).toBe(2);
+    for (const per of [6, 7, 8, 9, 10]) {
+      for (const r of rows) {
+        const p = pageOfKey(rows, r.key, per)!;
+        expect(paginate(rows, p, per).rows.map((x) => x.key)).toContain(r.key);
+      }
+    }
+  });
+  it("I1: after a refusal's refresh, focus moves again only when the refused row was still selected or focus fell to the body", () => {
+    expect(shouldRefocusAfterRefresh("triage:t1", "triage:t1", false)).toBe(true);
+    expect(shouldRefocusAfterRefresh("triage:t1", "triage:t2", false)).toBe(false);
+    expect(shouldRefocusAfterRefresh("triage:t1", "triage:t2", true)).toBe(true);
+    expect(shouldRefocusAfterRefresh(null, "triage:t2", true)).toBe(false);
   });
 });

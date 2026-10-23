@@ -755,7 +755,8 @@ const countStat = (label: string, n: number, tone?: WorkStat["tone"]): WorkStat 
  */
 export function sectionStats(g: WorkGroup<WorkItem>): WorkStat[] {
   const items: WorkStat = { label: "Items", value: `${g.total}${g.capped ? "+" : ""}` };
-  const oldest: WorkStat = { label: "Oldest", value: g.rows.length ? `${g.oldestDays} d` : "—" };
+  // final review M5: from the rows passed (the page's live rows), so a decided oldest row stops counting at once
+  const oldest: WorkStat = { label: "Oldest", value: g.rows.length ? `${Math.max(0, ...g.rows.map((r) => r.ageDays ?? 0))} d` : "—" };
   switch (g.section.id) {
     case "triage": {
       const c = colsOf(g.rows, "triage");

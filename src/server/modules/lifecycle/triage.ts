@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/guards";
 import { writeAudit } from "@/server/audit";
-import { isDeadlock } from "@/server/prisma-errors";
+import { isDeadlock, warnDeadlock } from "@/server/prisma-errors";
 import { openApprovalForAsset } from "@/server/modules/approvals/create";
 import { conflict, forbidden, ok, validationError, type ActionResult } from "@/server/action-result";
 import type { AuditDiff } from "@/lib/audit-diff";
@@ -100,7 +100,10 @@ export async function triageCore(user: SessionUser, d: TriageInput, now: Date = 
   } catch (err) {
     if (err instanceof DirectRefusal) return conflict(err.message);
     // fix round 2: met another change head-on — rolled back whole, the claim with it
-    if (isDeadlock(err)) return conflict(CHANGED_TRY_AGAIN);
+    if (isDeadlock(err)) {
+      warnDeadlock("lifecycle.triage", d.assetId);
+      return conflict(CHANGED_TRY_AGAIN);
+    }
     throw err;
   }
   if (failure) return failure;
@@ -179,7 +182,10 @@ export async function undoTriageCore(user: SessionUser, auditId: string, now: Da
     });
   } catch (err) {
     // the row lock met another change head-on: rolled back whole, nothing written
-    if (isDeadlock(err)) return changed;
+    if (isDeadlock(err)) {
+      warnDeadlock("lifecycle.triage.undone", original.entityId);
+      return changed;
+    }
     throw err;
   }
 }
@@ -201,7 +207,11 @@ export async function eachAlone<T>(
       r = await run(id);
     } catch (err) {
       // that item's transaction rolled back whole; the rest of the batch, and the report of what landed, go on
-      if (isDeadlock(err)) r = conflict(TRIAGE_CHANGED_SINCE);
+      // final review M6: a bulk item reads like a decision that can be repeated, whichever core threw
+      if (isDeadlock(err)) {
+        warnDeadlock("lifecycle.bulk", id);
+        r = conflict(CHANGED_TRY_AGAIN);
+      }
       else {
         console.error("[worklist bulk] item failed", id, err);
         r = conflict(BULK_ITEM_FAILED);

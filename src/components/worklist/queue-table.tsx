@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Th, Tr } from "@/components/ui/table";
 import { cn } from "@/lib/cn";
@@ -19,10 +20,12 @@ import {
  * action. The selected row is the one tab stop (a roving tabindex).
  */
 export function QueueTable({
-  label, columns, rows, sort, onSort, selected, onSelect, onMove, onOpen, ticks, checked, onCheck, onCheckAll, empty,
+  label, boxRef, columns, rows, sort, onSort, selected, onSelect, onMove, onOpen, ticks, checked, onCheck, onCheckAll, empty,
 }: {
   /** the queue's name: the table's accessible name */
   label: string;
+  /** the scroll box, measured for rows per page (worklist-view) */
+  boxRef?: React.Ref<HTMLDivElement>;
   columns: WorkColumn[];
   rows: WorkItem[];
   sort: WorkSort | null;
@@ -59,16 +62,18 @@ export function QueueTable({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto max-sm:overflow-visible">
-      <table aria-label={label} className="w-full table-fixed border-collapse text-[12.5px] max-sm:block">
+    <div ref={boxRef} className="min-h-0 flex-1 overflow-y-auto max-sm:overflow-visible">
+      {/* explicit roles (final review M2): below 640 px the table, rows and cells are display:block/flex, and WebKit
+          drops the implicit table semantics then; the explicit roles mirror them, so VoiceOver keeps the rows */}
+      <table role="table" aria-label={label} className="w-full table-fixed border-collapse text-[12.5px] max-sm:block">
         <colgroup className="max-sm:hidden">
           {ticks && <col style={{ width: 44 }} />}
           {columns.map((c) => <col key={c.key} style={{ width: c.width }} />)}
         </colgroup>
-        <thead className="sticky top-0 z-10 bg-surface max-sm:hidden">
-          <tr className="h-[34px]">
+        <thead role="rowgroup" className="sticky top-0 z-10 bg-surface max-sm:hidden">
+          <tr role="row" className="h-[34px]">
             {ticks && (
-              <th scope="col" className="border-b border-border pl-2">
+              <th role="columnheader" scope="col" className="border-b border-border pl-2">
                 <label className="inline-flex size-8 cursor-pointer items-center justify-center">
                   <Checkbox
                     aria-label="Select all on this page" checked={allOn} indeterminate={someOn && !allOn}
@@ -88,15 +93,16 @@ export function QueueTable({
             ))}
           </tr>
         </thead>
-        <tbody onKeyDown={onKeyDown} className="max-sm:block">
+        <tbody role="rowgroup" onKeyDown={onKeyDown} className="max-sm:block">
           {rows.length === 0 && empty ? (
-            <tr className="max-sm:block"><td colSpan={span} className="px-4 py-12 text-center text-[13px] text-fg-muted max-sm:block">
+            <tr role="row" className="max-sm:block"><td role="cell" colSpan={span} className="px-4 py-12 text-center text-[13px] text-fg-muted max-sm:block">
               {/* where focus lands when the last row is decided (fix round 1, I1) */}
               <div tabIndex={-1} data-worklist-empty="" className="outline-offset-2">{empty}</div>
             </td></tr>
           ) : rows.map((r) => (
             <Tr
               key={r.key}
+              role="row"
               data-row-key={r.key}
               selected={r.key === selected}
               tabIndex={r.key === tabStop ? 0 : -1}
@@ -108,7 +114,7 @@ export function QueueTable({
               style={{ height: "var(--wl-row)" }}
             >
               {ticks && (
-                <td className="pl-2 max-sm:hidden" onClick={(e) => e.stopPropagation()}>
+                <td role="cell" className="pl-2 max-sm:hidden" onClick={(e) => e.stopPropagation()}>
                   <label className="inline-flex size-8 cursor-pointer items-center justify-center">
                     <Checkbox aria-label={`Select ${r.entity?.label ?? r.title}`} checked={checked.has(r.key)} onChange={(e) => onCheck(r.key, e.target.checked)} />
                   </label>
@@ -208,7 +214,7 @@ function Cells({ item, selected, columns }: { item: WorkItem; selected: boolean;
   return (
     <>
       {cellsOf(item, selected).map((cell, i) => (
-        <td key={columns[i]?.key ?? i} className={cn(TD, cell.first && FIRST, cell.cls)}>
+        <td role="cell" key={columns[i]?.key ?? i} className={cn(TD, cell.first && FIRST, cell.cls)}>
           <span className={cn("sm:hidden", cell.first ? "sr-only" : "mr-1 text-[11px] text-fg-muted")}>
             {columns[i]?.label}
             {/* read as "Waiting: 200 days", never "Waiting200 days" */}
@@ -225,9 +231,11 @@ function Cells({ item, selected, columns }: { item: WorkItem; selected: boolean;
  * The pager under the table (plan call 11): "1–10 of 16", the cap note on a capped queue's last page, and
  * Previous / Next (44 px hit areas).
  */
-export function QueuePager({ label, note, page, pageCount, onPage, extra }: {
+export function QueuePager({ label, note, seeAll, page, pageCount, onPage, extra }: {
   label: string;
   note: string | null;
+  /** where the rest of a capped queue lives: "See all →" beside the cap note (final review M4) */
+  seeAll?: string;
   page: number;
   pageCount: number;
   onPage: (p: number) => void;
@@ -239,6 +247,9 @@ export function QueuePager({ label, note, page, pageCount, onPage, extra }: {
       <span className="flex min-w-0 flex-wrap items-center gap-x-3">
         <span className="tabular-nums">{label}</span>
         {note && <span className="text-fg-muted">{note}</span>}
+        {note && seeAll && (
+          <Link href={seeAll} className="relative after:absolute after:inset-x-0 after:-inset-y-3 after:content-[''] font-medium text-accent hover:underline">See all →</Link>
+        )}
         {extra}
       </span>
       <span className="flex gap-1.5">

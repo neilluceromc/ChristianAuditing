@@ -389,11 +389,19 @@ describe("triageMany", () => {
     expect(h.audits).toHaveLength(1);
   });
 
-  it("a viewer's items are each refused, writing nothing; no session is refused outright", async () => {
+  it("a role that can never triage IT is refused up front, before any lock or rate check (final review M1); so is no session", async () => {
     seed("0001");
-    h.user = { id: "u-vic", name: "Vic Ong", role: "viewer" };
-    expect(await triageMany({ assetIds: ["0001"], outcome: "SPARE" }))
-      .toEqual({ ok: true, data: { done: [], failed: [{ id: "0001", reason: "You don't have permission to do that." }], auditIds: [] } });
+    for (const role of ["viewer", "finance_staff", "purchasing_staff"]) {
+      h.user = { id: "u-vic", name: "Vic Ong", role };
+      h.rateCalls = 0;
+      expect(await triageMany({ assetIds: ["0001"], outcome: "SPARE" })).toMatchObject({ ok: false, kind: "forbidden" });
+      expect(await triageAsset({ assetId: "0001", outcome: "SPARE" })).toMatchObject({ ok: false, kind: "forbidden" });
+      expect(await undoTriage({ auditId: "aud-x" })).toMatchObject({ ok: false, kind: "forbidden" });
+      expect(await undoTriageMany({ auditIds: ["aud-x"] })).toMatchObject({ ok: false, kind: "forbidden" });
+      expect(h.rateCalls).toBe(0);
+    }
+    expect(h.audits).toHaveLength(0);
+    expect(h.assets.get("0001")?.returnedAt).not.toBeNull();
     h.user = null;
     expect(await triageMany({ assetIds: ["0001"], outcome: "SPARE" })).toMatchObject({ ok: false, kind: "forbidden" });
   });
@@ -403,17 +411,23 @@ describe("a bulk item that throws (Task 2 fix round 1, review M2 and M4)", () =>
   const known = (code: string, meta?: Record<string, unknown>) =>
     new Prisma.PrismaClientKnownRequestError("boom", { code, clientVersion: "6", meta });
 
-  it("a deadlock (P2034, or P2010 with 40P01) fails that item as changed since; the batch goes on", async () => {
+  it("a deadlock (P2034, or P2010 with 40P01) fails that item as changed since — try again, logged; the batch goes on", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const run = async (id: string) => {
       if (id === "b") throw known("P2034");
       if (id === "c") throw known("P2010", { code: "40P01" });
       return { ok: true as const, data: { auditId: `aud-${id}` } };
     };
+    // final review M6: every bulk item's changed-since reads CHANGED_TRY_AGAIN, whichever core threw
     expect(await eachAlone(["a", "b", "c", "d"], run)).toEqual({
       done: ["a", "d"],
-      failed: [{ id: "b", reason: TRIAGE_CHANGED_SINCE }, { id: "c", reason: TRIAGE_CHANGED_SINCE }],
+      failed: [{ id: "b", reason: CHANGED_TRY_AGAIN }, { id: "c", reason: CHANGED_TRY_AGAIN }],
       results: [{ auditId: "aud-a" }, { auditId: "aud-d" }],
     });
+    // final review M7: each swallowed deadlock leaves a trace naming the action and the asset
+    expect(warn).toHaveBeenCalledWith("[lifecycle] deadlock read as changed-since", { action: "lifecycle.bulk", assetId: "b" });
+    expect(warn).toHaveBeenCalledWith("[lifecycle] deadlock read as changed-since", { action: "lifecycle.bulk", assetId: "c" });
+    warn.mockRestore();
   });
 
   it("any other error is logged and reported as couldn't save; the items that landed keep their report", async () => {

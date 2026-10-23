@@ -61,9 +61,9 @@ describe("ToastCard", () => {
 });
 
 describe("ToastProvider", () => {
-  it("the toasts' live region is a status (Worklist H4): polite, each toast announced on its own", () => {
+  it("the toasts' live region is a status named Notifications (Worklist H4): polite, each toast announced on its own", () => {
     const html = renderToStaticMarkup(<ToastProvider><p>page</p></ToastProvider>);
-    expect(html).toMatch(/<div role="status" aria-live="polite" aria-atomic="false" class="pointer-events-none fixed/);
+    expect(html).toMatch(/<div role="status" aria-label="Notifications" aria-live="polite" aria-atomic="false" class="pointer-events-none fixed/);
   });
 });
 

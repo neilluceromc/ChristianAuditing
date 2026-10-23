@@ -9,7 +9,7 @@ import { checkRate } from "@/server/rate-limit";
 import { writeAudit } from "@/server/audit";
 import { openApprovalForAsset } from "@/server/modules/approvals/create";
 import { lockAsset } from "@/server/modules/lifecycle/direct";
-import { isDeadlock } from "@/server/prisma-errors";
+import { isDeadlock, warnDeadlock } from "@/server/prisma-errors";
 import { CHANGED_TRY_AGAIN } from "@/lib/lifecycle";
 import { conflict, forbidden, ok, rateLimited, validationError, zodFieldErrors, type ActionResult } from "@/server/action-result";
 import { isAssignable } from "@/lib/asset-class";
@@ -89,7 +89,10 @@ export async function reserveAsset(input: unknown): Promise<ActionResult<{ id: s
     // lost. Say it in the pre-check's words — re-read from the winner's row —
     // instead of letting the throw escape the action.
     // fix round 2: the row lock met another change head-on; rolled back whole, nothing written
-    if (isDeadlock(err)) return conflict(CHANGED_TRY_AGAIN);
+    if (isDeadlock(err)) {
+      warnDeadlock("reservation.create", d.assetId);
+      return conflict(CHANGED_TRY_AGAIN);
+    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       const [asset, winner] = await Promise.all([
         prisma.asset.findUnique({ where: { id: d.assetId }, select: { tag: true } }),

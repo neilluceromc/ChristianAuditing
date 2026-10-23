@@ -388,9 +388,38 @@ describe("fix round 1", () => {
 describe("Task 4: the one screen leaves Cris's corner clear without scrolling the document", () => {
   it("the screen and its rows give up Cris's clearance (--cris-clear), so #main's extra room never adds a scroll", () => {
     expect(SCREEN_HEIGHT).toBe("sm:h-[calc(100dvh-100px-var(--cris-clear,0px))]");
-    expect(ROW_HEIGHT).toContain("calc((100dvh-404px-var(--cris-clear,0px))/10)");
+    // final review ruling: rows are a constant 52 px; how many a page shows is measured (rowsThatFit)
+    expect(ROW_HEIGHT).toBe("[--wl-row:auto] sm:[--wl-row:52px]");
     const html = page([triage("t1", 3)]);
     expect(html).toContain(SCREEN_HEIGHT);
-    expect(html).toContain("sm:[--wl-row:clamp(32px,calc((100dvh-404px-var(--cris-clear,0px))/10),52px)]");
+    expect(html).toContain("sm:[--wl-row:52px]");
+    // before the measurement, a page is ten rows
+    expect(html).toContain('data-per-page="10"');
+  });
+});
+
+describe("final review fix wave", () => {
+  it("M4: a capped queue's last page links See all → to where the rest lives", () => {
+    const html = renderToStaticMarkup(
+      <QueuePager label="41–50 of 50" note="Showing the first 50 — clear some to see more" seeAll="/inventory?status=DEFECTIVE" page={5} pageCount={5} onPage={vi.fn()} />,
+    );
+    expect(html).toMatch(/<a [^>]*href="\/inventory\?status=DEFECTIVE"[^>]*>See all →<\/a>/);
+    const first = renderToStaticMarkup(<QueuePager label="1–10 of 50" note={null} seeAll="/inventory?status=DEFECTIVE" page={1} pageCount={5} onPage={vi.fn()} />);
+    expect(first).not.toContain("See all");
+  });
+  it("M4: Purchase reviews links to Purchase orders beside its title; other queues don't", () => {
+    expect(links(page(allRows(), { q: "purchases" }))).toContain("Open in Purchase orders →");
+    expect(page(allRows(), { q: "purchases" })).toContain('href="/purchases?state=WITH_IT"');
+    expect(links(page(allRows(), { q: "triage" }))).not.toContain("Open in Purchase orders →");
+  });
+  it("M2: the table carries explicit table, rowgroup, row and cell roles (WebKit drops them when stacked)", () => {
+    const html = renderToStaticMarkup(
+      <QueueTable label="Triage" columns={COLUMNS.triage} rows={[triage("t1", 3)]} sort={null} onSort={vi.fn()} selected={null}
+        onSelect={vi.fn()} onMove={vi.fn()} onOpen={vi.fn()} ticks checked={new Set()} onCheck={vi.fn()} onCheckAll={vi.fn()} empty={null} />,
+    );
+    expect(html).toContain('<table role="table" aria-label="Triage"');
+    expect(html.match(/role="rowgroup"/g)).toHaveLength(2);
+    expect(html.match(/<tr [^>]*role="row"/g)).toHaveLength(2);
+    expect(html.match(/<td role="cell"/g)).toHaveLength(5);
   });
 });
