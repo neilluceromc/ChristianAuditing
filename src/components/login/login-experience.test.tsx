@@ -16,7 +16,6 @@ const base: Card = {
   domain: "thebackroomop.com",
   microsoftAction: null,
   quick: null,
-  viewerLanding: "/",
 };
 
 function render(initialStep: Step, card: Partial<Card> = {}): string {

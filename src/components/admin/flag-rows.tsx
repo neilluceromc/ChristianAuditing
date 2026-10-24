@@ -42,11 +42,11 @@ export function FlagRows({ rows }: { rows: FlagRow[] }) {
   // the confirm dialog). Storing "when it ends" and computing the remaining
   // seconds fresh at render, instead of a `retryAfterSec` captured once, is
   // what keeps crossing that boundary from restarting the clock (Task 3's
-  // bug, in user-table.tsx:41-53 — copied here rather than re-solved).
+  // bug, in the old user-table.tsx, since retired — copied here rather than re-solved).
   const [retryDeadline, setRetryDeadline] = useState<number | null>(null);
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
   // Scoped to the one control actually in flight (`${row.key}:toggle` or
-  // `${row.key}:save`) — the precedent is user-table.tsx's `acting`. Without
+  // `${row.key}:save`) — the precedent was the old user-table.tsx's `acting`. Without
   // this, a single shared `pending` flag puts a spinner on every row's Save
   // button while a different row's switch confirmation is still in flight.
   const [acting, setActing] = useState<string | null>(null);

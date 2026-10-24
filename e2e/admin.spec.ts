@@ -36,30 +36,55 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-test.describe.serial("users & roles", () => {
+/**
+ * Users & access (Task 5): rewritten for the new page. Roles change through the details panel's radio cards and its
+ * Save bar, accounts turn off through the "Account active" switch and its inline confirm, and the permanent admin's
+ * panel offers nothing that would be refused. The old table's comboboxes, Disable buttons, "is already" toasts and
+ * "Change your own role?" dialog are gone (the setUserRole action with them). The flows themselves are
+ * e2e/access-management.spec.ts; this keeps what this file always proved, on the new controls.
+ */
+async function openUserPanel(page: Page, name: string) {
+  await page.goto("/admin/users");
+  await expect(page.getByRole("heading", { name: "Users & access", level: 1 })).toBeVisible({ timeout: 20_000 });
+  const row = page.locator("tr[data-user-row]").filter({ hasText: name });
+  await waitForHydration(row);
+  await row.click();
+  const panel = page.getByRole("complementary", { name: `${name}'s details` });
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  return panel;
+}
+
+test.describe.serial("users & access", () => {
+  test.beforeEach(async ({ page }) => {
+    // Side by side (1180 px and wider): the details sit beside the list as a complementary region.
+    await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
   test("the permanent admin is locked before the click, not on save", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
     await page.goto("/admin/users");
     // First hit of this route in the suite — give the cold JIT compile headroom.
-    await expect(page.getByRole("heading", { name: "Users & roles" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Users & access", level: 1 })).toBeVisible({ timeout: 20_000 });
     await expectNoSeriousAxe(page);
 
-    const permanent = page.getByRole("row", { name: /System Admin/ });
-    await expect(permanent).toContainText("LOCKED");
-    await expect(permanent).toContainText("permanent");
-    // The affordance is ABSENT, which is the whole point of the card.
-    await expect(permanent.getByRole("combobox")).toHaveCount(0);
-    await expect(permanent.getByRole("button", { name: /Disable/ })).toHaveCount(0);
-    // The full reason lives in the caption BELOW the table, not squeezed into
-    // a 170px cell (user-table.tsx's own comment on permanentLockCaption).
-    await expect(page.getByText(/permanent admin account/)).toBeVisible();
+    const permanent = page.locator("tr[data-user-row]").filter({ hasText: "System Admin" });
+    await expect(permanent).toContainText("Permanent");
+    const panel = await openUserPanel(page, "System Admin");
+    // The reason is in the panel, and the affordances are ABSENT or disabled: nothing is refused on save.
+    await expect(panel.getByRole("paragraph").filter({ hasText: "The permanent admin's account can only be changed by its owner." }))
+      .toBeVisible();
+    for (const radio of await panel.getByRole("radio").all()) await expect(radio).toBeDisabled();
+    await expect(panel.getByRole("switch", { name: "Account active" })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "Reset password…" })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "Edit name and email" })).toHaveCount(0);
   });
 
   test("an ordinary role change is audited by name", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/admin/users");
-    await page.getByRole("combobox", { name: "Role for V. Cruz" }).selectOption("it_staff");
-    await expect(page.getByText(/V. Cruz is now IT staff/)).toBeVisible({ timeout: 20_000 });
+    const panel = await openUserPanel(page, "V. Cruz");
+    await panel.getByRole("radio", { name: /^IT staff/ }).check();
+    await panel.getByRole("region", { name: "Unsaved changes" }).getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("V. Cruz is now IT staff · signed out")).toBeVisible({ timeout: 20_000 });
 
     await page.goto("/audit");
     const row = page.getByRole("row", { name: /role-change/ }).first();
@@ -67,66 +92,62 @@ test.describe.serial("users & roles", () => {
     await expect(row).toContainText("V. Cruz");
   });
 
-  test("disabling a user blocks sign-in", async ({ page }) => {
+  test("turning an account off blocks sign-in", async ({ page }) => {
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/admin/users");
-    await page.getByRole("row", { name: /V. Cruz/ }).getByRole("button", { name: "Disable" }).click();
-    await expect(page.getByText(/V. Cruz is disabled/)).toBeVisible({ timeout: 20_000 });
+    const panel = await openUserPanel(page, "V. Cruz");
+    await panel.getByRole("switch", { name: "Account active" }).click();
+    await panel.getByRole("button", { name: "Turn off account", exact: true }).click();
+    await expect(page.getByText("V. Cruz's account is off · signed out")).toBeVisible({ timeout: 20_000 });
 
     await page.goto("/logout");
     await submitSignIn(page, "viewer@thebackroomop.com");
-    // Still on /login: authorize() refuses a disabled user.
+    // Still on /login: a turned-off account is refused, with the same words as a wrong password.
+    await expect(page.getByLabel("Password", { exact: true })).toHaveAccessibleDescription(
+      /Wrong email or password — or the account is disabled\./,
+      { timeout: 20_000 },
+    );
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("the no-op save writes no audit entry", async ({ page }) => {
-    // `changed: false` is a claim about the action with no unit-test coverage
-    // for this exact path (the pure rules are covered in admin-users.test.ts;
-    // setUserRole is thin wiring over them) — proven here against the one
-    // place a written audit entry would actually show up, rather than
-    // trusting the "already ..." toast wording alone. Counting the /audit
-    // page's own rows (filtered to entity=user, matching V. Cruz by name)
-    // avoids reaching around the app into the database from the spec, and
-    // the audit list is a faithful, unfiltered projection of AuditEntry for
-    // this query — there's no narrower or more direct way to see the same
-    // fact through the UI.
+  test("an unchanged draft offers no Save and writes no audit entry", async ({ page }) => {
+    // The old table's no-op path ("is already IT staff") is gone: Save shows only while a field differs. Proven
+    // against the one place a written audit entry would show up, the /audit page's rows for V. Cruz.
     await login(page, "admin@thebackroomop.com");
     await page.goto("/audit?entity=user");
     const before = await page.getByRole("row", { name: /V\. Cruz/ }).count();
 
-    await page.goto("/admin/users");
-    // V. Cruz is already `it_staff` (set two tests ago) — re-selecting the
-    // same option still fires Playwright's change event, which is exactly
-    // the "re-select an existing role" the no-op path needs to exercise.
-    await page.getByRole("combobox", { name: "Role for V. Cruz" }).selectOption("it_staff");
-    await expect(page.getByText(/V\. Cruz is already IT staff/)).toBeVisible({ timeout: 20_000 });
+    const panel = await openUserPanel(page, "V. Cruz");
+    const bar = panel.getByRole("region", { name: "Unsaved changes" });
+    await expect(bar).toHaveCount(0);
+    // V. Cruz is IT staff (two tests ago): pick another role, then the same one back.
+    await panel.getByRole("radio", { name: /^Finance staff/ }).check();
+    await expect(bar).toBeVisible();
+    await panel.getByRole("radio", { name: /^IT staff/ }).check();
+    await expect(bar).toHaveCount(0);
 
     await page.goto("/audit?entity=user");
     await expect(page.getByRole("row", { name: /V\. Cruz/ })).toHaveCount(before);
   });
 
   test("a self role change is warned about before it happens, and signs the actor out", async ({ page }) => {
-    // The seeded `admin@` account is the permanent admin — roleChange refuses
-    // ANY change to it outright, so it cannot exercise this path. Promote
-    // `it@` to admin first (itself a setUserRole call worth asserting), then
-    // act as that ordinary admin for the self-change.
+    // The seeded `admin@` account is the permanent admin, whose panel is locked, so it cannot exercise this path.
+    // Promote `it@` to admin first, then act as that ordinary admin for the self-change.
     await login(page, "admin@thebackroomop.com");
-    await page.goto("/admin/users");
-    await page.getByRole("combobox", { name: "Role for J. Sarmiento" }).selectOption("admin");
-    await expect(page.getByText(/J\. Sarmiento is now Admin/)).toBeVisible({ timeout: 20_000 });
+    let panel = await openUserPanel(page, "J. Sarmiento");
+    await panel.getByRole("radio", { name: /^Admin/ }).check();
+    await panel.getByRole("region", { name: "Unsaved changes" }).getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("J. Sarmiento is now Admin · signed out")).toBeVisible({ timeout: 20_000 });
 
     await login(page, "it@thebackroomop.com");
-    await page.goto("/admin/users");
-    await page.getByRole("combobox", { name: "Role for J. Sarmiento" }).selectOption("it_staff");
+    panel = await openUserPanel(page, "J. Sarmiento");
+    await panel.getByRole("radio", { name: /^IT staff/ }).check();
+    // The warning is inline, under the role cards, before Save.
+    await expect(panel.getByText("You're changing your own role — you'll be signed out and will need to sign back in as IT staff."))
+      .toBeVisible();
+    await panel.getByRole("region", { name: "Unsaved changes" }).getByRole("button", { name: "Save", exact: true }).click();
 
-    const dialog = page.getByRole("dialog", { name: "Change your own role?" });
-    await expect(dialog).toContainText("IT staff");
-    await dialog.getByRole("button", { name: "Change role" }).click();
-
-    // No toast survives this click: router.refresh() re-runs requireUser,
-    // which finds the JWT's frozen role no longer matches the DB and
-    // redirects the document to /logout — the one path in this phase where a
-    // mutation ends the actor's own session.
+    // The refresh re-runs requireUser, which finds the JWT's frozen role no longer matches the DB and sends the
+    // document to /logout — the one path where a change to your own account ends your own session.
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
 
     await submitSignIn(page, "it@thebackroomop.com");

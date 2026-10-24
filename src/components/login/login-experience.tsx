@@ -31,7 +31,7 @@ export type LoginExperienceProps = {
   initialStep: Step;
   /** Open with the email field focused (`/login?step=login`). */
   autoFocus?: boolean;
-  card: Pick<SignInCardProps, "domain" | "next" | "microsoftAction" | "viewerLanding"> & { quick: QuickSignInData };
+  card: Pick<SignInCardProps, "domain" | "next" | "microsoftAction"> & { quick: QuickSignInData };
 };
 
 // One element for the page's life.
@@ -420,7 +420,6 @@ export function LoginExperience({ initialStep, autoFocus, card }: LoginExperienc
         domain={card.domain}
         next={card.next}
         microsoftAction={card.microsoftAction}
-        viewerLanding={card.viewerLanding}
         step={step}
         autoFocus={autoFocus}
         onStep={onStep}

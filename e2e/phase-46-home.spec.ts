@@ -150,7 +150,8 @@ async function pageCount(page: Page): Promise<number> {
     case "/admin/webhooks/deliveries":
       return read(main.getByText(/· \d[\d,]* attempts$/), /· ([\d,]+) attempts$/, main.getByText("Nothing in this tab", { exact: true }));
     case "/admin/users":
-      return rows(main.getByText(/^No (disabled|active) accounts$/));
+      // Users & access: a filtered empty list reads "No one matches"
+      return rows(main.getByText(/^(No one matches|No accounts yet)$/));
     case "/purchases/suppliers":
       return rows(main.getByText("No vendors match", { exact: true }));
     case "/admin/flags": {
@@ -429,7 +430,8 @@ test.describe("the new views count what their pages list", () => {
       await login(page, ADMIN);
       await setCookie(page, "br.dept", "admin");
       await page.goto("/admin/users");
-      const disabled = await expectViewMatchesPage(page, /^Disabled\b/, "/admin/users?disabled=1");
+      // Users & access: the view is the Disabled status (approved accounts turned off), no longer ?disabled=1.
+      const disabled = await expectViewMatchesPage(page, /^Disabled\b/, "/admin/users?status=DISABLED");
       expect(disabled, "the fixture account").toBeGreaterThan(0);
       await page.goto("/admin/webhooks");
       const dead = await expectViewMatchesPage(page, /^Failed deliveries\b/, "/admin/webhooks/deliveries?state=DEAD");

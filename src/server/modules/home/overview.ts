@@ -490,7 +490,7 @@ const ADMIN_KEYS = ["admin.activeUsers", "admin.deadDeliveries", "admin.disabled
 
 /**
  * Spec §3.2, the Admin row, with the builder-check rulings:
- * - Active accounts → /admin/users?disabled=0 and Disabled accounts → ?disabled=1 (the filters arrive in Task 6);
+ * - Active accounts → /admin/users?disabled=0 and Disabled accounts → ?status=DISABLED (Users & access Task 4);
  * - Webhook deliveries failed is the Dead-lettered tab's count (every DEAD delivery);
  * - Approvals open is the Approvals page's Open tab in the role's classes (admin: all), as on IT;
  * - Direct changes (the last 7 Manila days) and Flags on ("x of y", no sparkline) are plain cards.
@@ -518,7 +518,7 @@ export async function adminOverview(user: Viewer, now: Date = new Date()): Promi
   const kpis: KpiTile[] = [
     historyTile(
       { key: "admin.activeUsers", label: "Active accounts", hint: "Can sign in", upIs: "neutral", href: "/admin/users?disabled=0" },
-      admin.users.total - admin.users.disabled, history["admin.activeUsers"],
+      admin.users.active, history["admin.activeUsers"],
     ),
     historyTile(
       {
@@ -538,7 +538,8 @@ export async function adminOverview(user: Viewer, now: Date = new Date()): Promi
     },
     approvalsTile(approvals, openKeys.map((k) => history[k])),
     historyTile(
-      { key: "admin.disabled", label: "Disabled accounts", hint: "Blocked from signing in", upIs: "neutral", href: "/admin/users?disabled=1" },
+      // Users & access Task 4 fix round 1: the Disabled status, counted the same way (approved, turned off)
+      { key: "admin.disabled", label: "Disabled accounts", hint: "Blocked from signing in", upIs: "neutral", href: "/admin/users?status=DISABLED" },
       admin.users.disabled, history["admin.disabled"],
     ),
   ];

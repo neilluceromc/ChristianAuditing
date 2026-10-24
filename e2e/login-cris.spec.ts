@@ -10,7 +10,7 @@ import { submitSignIn } from "./fixtures/login";
  *  1b. held in flight for ~2 s, the sign-in shows the sequence (with the typed email) and still lands on Home;
  *   2. a `next` link still wins;
  *   3. a wrong password errors under Password with the email kept, and the card comes back;
- *   4. Sign up: reachable from the form; a duplicate email bounces to step 1 (fields kept); a new one signs in;
+ *   4. Sign up: reachable from the form; a duplicate email bounces to step 1 (fields kept); a new one waits for approval;
  *   5. Back from Sign up 1 returns to the sign-in form, focus mode off;
  *   6. focusing the form turns focus mode on and Cris greets; leaving it untouched turns it off;
  *   7. Pause stops the motion (the blob and the day), and reduced motion never starts it;
@@ -30,6 +30,8 @@ import { submitSignIn } from "./fixtures/login";
 const IT = "it@thebackroomop.com";
 const VIEWER = "viewer@thebackroomop.com";
 const ALLOWED_DOMAIN = "thebackroomop.com";
+// Users & access: a sign-up password needs letters and at least one number.
+const SIGNUP_PASSWORD = "a-long-enough-pw9";
 const GREETING = "Hi again! What's your work email?";
 const ENTER_LINES = [
   "Checking your badge…",
@@ -233,14 +235,14 @@ test.describe("login page", () => {
     await expect(bubble(page)).toHaveText(/^Hmm\. Wrong email or password/);
   });
 
-  test("4. Sign up: a duplicate email returns to step 1 with fields kept; a new one signs in", async ({ page }) => {
+  test("4. Sign up: a duplicate email returns to step 1 with fields kept; a new one waits for approval", async ({ page }) => {
     await toSignup(page);
     await expect(page).toHaveURL(/\/login/); // changed in place, no navigation
     await page.getByLabel("Full name").fill("Casey Tester");
     await workEmail(page).fill(VIEWER);
     await cont(page).click();
     await expect(page.getByRole("heading", { name: "Choose a password" })).toBeVisible();
-    await password(page).fill("a-long-enough-pw");
+    await password(page).fill(SIGNUP_PASSWORD);
     await page.getByRole("button", { name: "Create account", exact: true }).click();
 
     // The server's `field` routes the message back to Sign up 1, under Work email; nothing typed is lost.
@@ -254,14 +256,18 @@ test.describe("login page", () => {
     await workEmail(page).fill(fresh);
     await cont(page).click();
     await expect(page.getByRole("heading", { name: "Choose a password" })).toBeVisible();
-    await password(page).fill("a-long-enough-pw");
+    await password(page).fill(SIGNUP_PASSWORD);
     await page.getByRole("button", { name: "Create account", exact: true }).click();
 
-    await expect(page.getByRole("heading", { name: "You're in, Casey" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("You'll start on Home.")).toBeVisible();
-    // The session cookie is already set, so the link lands signed in on Home (Finance follow-up, spec §7.1).
-    await page.getByRole("link", { name: "Go to Cris" }).click();
-    await expect(page).toHaveURL((u) => u.pathname === "/", { timeout: 30_000 });
+    // Users & access (spec §4.6): every sign-up waits for an admin — the two lines are verbatim, and no session is made.
+    await expect(page.getByRole("heading", { name: "Wait for an admin to approve your account." })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("You can sign in once it's approved.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /You're in/ })).toHaveCount(0);
+    await page.getByRole("link", { name: "Back to sign in" }).click();
+    await expect(page.getByRole("heading", { name: "Welcome back", level: 1 })).toBeVisible();
+    await submitSignIn(page, fresh, SIGNUP_PASSWORD);
+    await expect(password(page)).toHaveAccessibleDescription(/Your account is waiting for an admin to approve it\./, { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/login/);
   });
 
   test("5. Back from Sign up 1 returns to the sign-in form with focus mode off", async ({ page }) => {

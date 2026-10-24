@@ -161,15 +161,15 @@ Functions run in Singapore (`sin1`, set in `vercel.json`), next to the database.
 | `SUPABASE_URL` | the project URL, `https://<ref>.supabase.co` | Supabase → Project Settings → **Data API** (Project URL), or **Connect** → App frameworks. |
 | `SUPABASE_SERVICE_ROLE_KEY` | the **secret key** (`sb_secret_…`), recommended; or the legacy `service_role` key | Supabase → Project Settings → **API Keys** → **Secret keys** → Reveal and copy (create one if none is listed). The legacy `service_role` key (the **Legacy API keys** tab, a long `eyJ…` value) also works. Server-only: never in a `NEXT_PUBLIC_` variable. |
 | `CRON_SECRET` | a new random value, also stored in Supabase Vault | Make one in your terminal: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The same value goes into Vault in step 6. |
-| `SIGNUP_REQUIRES_APPROVAL` | `1` | Fixed value; see [Sign-up](#sign-up-on-the-public-internet). |
 | `QUICK_LOGIN_EMAILS` | only for presentations: the accounts that get a "Continue as" button, comma-separated | One-click sign-in with no password; anyone with the link can use it. Works on Vercel only together with `QUICK_LOGIN_PUBLIC`. |
 | `QUICK_LOGIN_PUBLIC` | `1` only while presenting | The deliberate switch for the line above. Delete it and Redeploy to turn quick login off. |
 | `ANTHROPIC_API_KEY` | only if Cris should work on cloud staging | Your Anthropic console. Without it Cris runs in preview mode. |
 | `AUTH_MICROSOFT_ENTRA_ID_*` | only if Entra sign-in is used | The Entra app registration. Its redirect URIs must then also list `https://<project>.vercel.app/api/auth/callback/microsoft-entra-id`. |
 
-The five names new for cloud staging are `DIRECT_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`CRON_SECRET` and `SIGNUP_REQUIRES_APPROVAL`. Locally and on the laptop all five stay unset, and the
-app behaves exactly as before.
+The four names new for cloud staging are `DIRECT_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+and `CRON_SECRET`. Locally and on the laptop all four stay unset, and the app behaves exactly as before.
+An older `SIGNUP_REQUIRES_APPROVAL` variable is retired (see [Sign-up](#sign-up-on-the-public-internet)):
+if it is still set on Vercel, it is ignored and can be deleted.
 
 ### 6. Schedule the worker
 
@@ -239,11 +239,11 @@ local, because it seeds.
 
 ## Sign-up on the public internet
 
-With `SIGNUP_REQUIRES_APPROVAL=1`, a self sign-up creates a **disabled** account and the page says an
-admin must approve it. To approve: **Admin → Users**, the **Disabled** view
-(`/admin/users?disabled=1`) lists the waiting accounts; enable the account with the usual control.
-Signing in with a disabled account is refused. Locally and on the laptop the variable is unset and
-sign-up works as before.
+Every self sign-up, everywhere, waits for an admin (Users & access, 2026-10-24); no variable is
+needed. The page says "Wait for an admin to approve your account." and signing in says the account
+is waiting. To decide: **Admin → Users & access**, the **Waiting for approval** chip or nav view
+(`/admin/users?status=PENDING`); pick the person, choose a role (and their employee record), then
+**Approve**, or **Decline**. A declined sign-up can still be approved later from the Declined status.
 
 ## Backups: the dump rule
 

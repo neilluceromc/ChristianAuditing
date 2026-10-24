@@ -6,41 +6,80 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { auth, signIn, signOut } from "./index";
 import { requireUser } from "./guards";
+import { passwordMatches } from "./password-check";
+import { clearSignInFailures, releaseSignInAttempt, reserveSignInAttempt } from "./sign-in-limit";
 import { prisma } from "../db/client";
 import { flagDomain, normalizeEmail, safeNextPath } from "@/lib/auth-shared";
 import { isQuickLoginEmail } from "@/lib/quick-login";
+import { passwordProblem } from "@/lib/password-rules";
+import { SIGN_IN_COPY } from "@/lib/sign-in-copy";
 import { signUpProblem, type SignUpField } from "@/lib/signup-rules";
-import { ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
+import { PASSWORD_PAGE, ROLE_LANDING, ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "@/lib/workspaces";
 import { saveUiPref } from "@/server/ui-prefs";
+import { isUniqueViolation } from "@/server/prisma-errors";
 
 export interface AuthFormState {
   error?: string;
   field?: SignUpField;
+  /** Sign-up made an account that waits for an admin to approve it; nobody was signed in. */
   created?: boolean;
-  /** Sign-up made a disabled account that an admin must approve; nobody was signed in. */
-  pendingApproval?: boolean;
 }
 
 function safeNext(raw: FormDataEntryValue | null): string | undefined {
   return safeNextPath(raw);
 }
 
+/**
+ * Users & access (spec §4.6). In order:
+ * - under a per-email lock, a paused email is refused before its password is checked, and otherwise this attempt is
+ *   recorded up front as a failure (fix round 1, I-1: a parallel burst gets 3 tries, not one per request);
+ * - the password is checked once (bcrypt, the dummy hash for an unknown email); a wrong one keeps its record;
+ * - a right one for an account still waiting, or declined, gets its own copy, checked before `disabled` (a waiting
+ *   sign-up is also disabled, I-2), and its record is taken back;
+ * - a right one for a turned-off account keeps its record, so the reply matches a wrong password (M-2);
+ * - a right one for an active account clears the count, stamps lastSignInAt and signs in.
+ * Auth.js's signIn then runs the provider's authorize(), which checks the password again: that second compare is the
+ * provider's own gate and happens only on success.
+ */
 export async function signInWithCredentials(
   _prev: AuthFormState,
   formData: FormData,
 ): Promise<AuthFormState> {
+  const email = normalizeEmail(String(formData.get("email") ?? "")).slice(0, 320);
+  const password = String(formData.get("password") ?? "");
+  if (!email || !password) return { error: SIGN_IN_COPY.wrong };
+  const attempt = await reserveSignInAttempt(email);
+  if (attempt.paused) return { error: SIGN_IN_COPY.paused };
+
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, passwordHash: true, disabled: true, approvalState: true, mustChangePassword: true },
+  });
+  // One compare, against the dummy hash for an unknown email. A wrong password: the reserved attempt stays as the failure.
+  const matches = await passwordMatches(password, user?.passwordHash);
+  if (!user || !matches) return { error: SIGN_IN_COPY.wrong };
+  // The right password from here on: only now may the copy say the account exists.
+  if (user.approvalState !== "APPROVED") {
+    await releaseSignInAttempt(attempt.attemptId);
+    return { error: user.approvalState === "PENDING" ? SIGN_IN_COPY.pending : SIGN_IN_COPY.declined };
+  }
+  if (user.disabled) return { error: SIGN_IN_COPY.wrong }; // counted, like a wrong password
+
+  // Cleared BEFORE signIn: the provider's authorize() reserves an attempt of its own, and must not find this
+  // email's earlier failures and pause the right password.
+  await clearSignInFailures(email);
   try {
-    await signIn("credentials", {
-      email: String(formData.get("email") ?? ""),
-      password: String(formData.get("password") ?? ""),
-      redirect: false,
-    });
+    await signIn("credentials", { email, password, redirect: false });
   } catch (err) {
-    if (err instanceof AuthError) {
-      return { error: "Wrong email or password — or the account is disabled." };
-    }
+    if (err instanceof AuthError) return { error: SIGN_IN_COPY.wrong };
     throw err;
   }
+  // Final review M-7: stamped only once the session is issued (a reset or turn-off landing between the compare and
+  // authorize() makes signIn refuse), as quickSignIn does.
+  await prisma.user.update({ where: { id: user.id }, data: { lastSignInAt: new Date() } });
+  // Users & access (Task 5, found by e2e): someone who owes a password goes to the first-sign-in page by its own
+  // address. Sent to Home, the guards render that page with "/" left in the address bar.
+  if (user.mustChangePassword) redirect(PASSWORD_PAGE);
   // Follow-up spec §7.1: every sign-in lands on Home unless a safe `next` link brought the person here. The role's
   // old landing (ROLE_LANDING) now lives only in the page guards.
   redirect(safeNext(formData.get("next")) ?? "/");
@@ -56,6 +95,8 @@ export async function quickSignIn(formData: FormData): Promise<void> {
     if (err instanceof AuthError) redirect("/login?quick=refused");
     throw err;
   }
+  // Users & access (spec §4.1): every successful sign-in, by any provider, stamps lastSignInAt.
+  await prisma.user.update({ where: { email }, data: { lastSignInAt: new Date() } });
   redirect(safeNext(formData.get("next")) ?? "/"); // Home, like every sign-in (spec §7.1)
 }
 
@@ -84,6 +125,13 @@ async function clearCrisChats(): Promise<void> {
   }
 }
 
+const EMAIL_EXISTS: AuthFormState = { error: "An account with that email already exists.", field: "email" };
+
+/**
+ * Users & access (spec §4.6): every sign-up waits for an admin. The account is created PENDING, as a Viewer, and
+ * turned off as well (so code that only knows `disabled` refuses it too); Approve turns it on. Nobody is signed in.
+ * The person keeps the password they chose, so nothing is owed at their first sign-in.
+ */
 export async function signUp(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
   const name = String(formData.get("name") ?? "").trim();
   const email = normalizeEmail(String(formData.get("email") ?? ""));
@@ -96,16 +144,23 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   // Exact lookup on the normalized email — NOT mode:"insensitive" (ILIKE),
   // which treats %/_ in the input as wildcards: an unauthenticated enumeration
   // oracle on this public form. Same fix as the login path (commit dc33830).
+  // Review Focus #4: the email is trimmed and lower-cased first, so " Ana.Lim@X.com " meets "ana.lim@x.com" here.
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return { error: "An account with that email already exists.", field: "email" };
+  if (existing) return EMAIL_EXISTS;
 
-  // Cloud staging: the app is on the open internet, so a new account waits, disabled, until an admin enables it.
-  const needsApproval = process.env.SIGNUP_REQUIRES_APPROVAL === "1";
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    // Least privilege: every signup is a viewer; admins promote via /admin/users.
-    data: { name, email, passwordHash, role: "viewer", ...(needsApproval ? { disabled: true } : {}) },
-  });
+  let user: { id: string; name: string };
+  try {
+    user = await prisma.user.create({
+      // Least privilege: every sign-up is a viewer; the admin picks the role when approving it.
+      data: { name, email, passwordHash, role: "viewer", approvalState: "PENDING", disabled: true },
+      select: { id: true, name: true },
+    });
+  } catch (err) {
+    // A row that differs only in case (User_email_lower_key), or a sign-up racing this one.
+    if (isUniqueViolation(err)) return EMAIL_EXISTS;
+    throw err;
+  }
   await prisma.auditEntry.create({
     data: {
       actorId: user.id,
@@ -115,19 +170,12 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
       action: "signup",
       diff: {
         role: { from: null, to: "viewer" },
-        ...(needsApproval ? { disabled: { from: null, to: true } } : {}),
+        approvalState: { from: null, to: "PENDING" },
+        disabled: { from: null, to: true },
       },
     },
   });
-
-  // No session for an account that is waiting: sign-in would refuse it anyway (authorize() rejects disabled users).
-  if (needsApproval) return { created: true, pendingApproval: true };
-
-  try {
-    await signIn("credentials", { email, password, redirect: false });
-  } catch {
-    redirect("/login"); // account exists; worst case they sign in manually
-  }
+  // No session: sign-in refuses an account that is waiting, with its own copy.
   return { created: true };
 }
 
@@ -142,7 +190,9 @@ export async function createBootstrapAdmin(
 
   if (name.length < 2) return { error: "Enter your name." };
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email." };
-  if (password.length < 10) return { error: "Password must be at least 10 characters." };
+  // Final review M-8: the same rules as every new password (length, then letters and a number).
+  const problem = passwordProblem(password, {});
+  if (problem) return { error: problem };
 
   const passwordHash = await bcrypt.hash(password, 10);
   try {

@@ -63,6 +63,7 @@ import { buildStockItemWhere, STOCK_LIST_CONFIG } from "@/lib/stock-list";
 import { buildSupplierWhere, SUPPLIER_LIST_CONFIG } from "@/lib/supplier-list";
 import { finWhere } from "@/lib/registration";
 import { FLAG_SPECS } from "@/lib/admin-flags";
+import { parseUsersFilter, usersListWhere } from "@/lib/admin-lists";
 import { financeListWhere } from "@/server/modules/finance/queries";
 import { REVIEW_GROUP_WHERE } from "@/server/modules/finance/groups";
 import { stocktakesOverdueWhere } from "@/server/modules/stock/queries";
@@ -275,8 +276,20 @@ describe("readNavCounts: the Phase 46 counts (spec §4.3), each the page's own p
     expect(await readNavCounts(["usersDisabled", "deadDeliveries", "flagsUnavailable"], admin)).toEqual({
       usersDisabled: 4, deadDeliveries: 7, flagsUnavailable: FLAG_SPECS.filter((f) => f.unavailable).length,
     });
-    expect(h.user).toHaveBeenCalledWith({ where: { disabled: true } });
+    // Task 4: the Disabled view is ?status=DISABLED, counted with the list's own where (approved and turned off).
+    expect(h.user).toHaveBeenCalledWith({
+      where: usersListWhere(parseUsersFilter(new URL(NAV_COUNT_HREF.usersDisabled, "http://nav.local").searchParams)),
+    });
+    expect(h.user).toHaveBeenCalledWith({ where: { AND: [{ approvalState: "APPROVED", disabled: true }] } });
     expect(h.delivery).toHaveBeenCalledWith({ where: { status: { in: ["DEAD"] } } });
+  });
+
+  it("pendingSignups is the Waiting for approval view's count: the list's own where (Users & access §4.4)", async () => {
+    h.user.mockResolvedValue(3);
+    expect(await readNavCounts(["pendingSignups"], admin)).toEqual({ pendingSignups: 3 });
+    const params = new URL(NAV_COUNT_HREF.pendingSignups, "http://nav.local").searchParams;
+    expect(h.user).toHaveBeenCalledWith({ where: usersListWhere(parseUsersFilter(params)) });
+    expect(h.user).toHaveBeenCalledWith({ where: { AND: [{ approvalState: "PENDING" }] } });
   });
 
   it("each fails to 0 on its own", async () => {
@@ -497,8 +510,8 @@ describe("NAV_COUNT_HREF", () => {
     }
     // itSpare, itDefective, itMissing, leaving, poWithIt, poSentBack, poReady; Phase 46: stockLow,
     // suppliersRenewing, finToConfirmIt, finToConfirmPurchasing, usersDisabled, deadDeliveries, flagsUnavailable;
-    // Task 6: finGroupsToReview; Task 7: itSentBack, poToRegister, assetsSentBackPurchasing
-    expect(checked).toBe(18);
+    // Task 6: finGroupsToReview; Task 7: itSentBack, poToRegister, assetsSentBackPurchasing; Users & access: pendingSignups
+    expect(checked).toBe(19);
   });
 
   it("accounts for every counted view: a list count (equal to its page), an exempt one, or a work count", () => {

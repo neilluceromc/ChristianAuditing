@@ -5,6 +5,7 @@ import { REPAIR_STAGES } from "./repairs";
 import {
   filterSectionsForRole,
   PAGE_DEFAULTS,
+  PASSWORD_PAGE,
   pathAllowedForRole,
   resolveWorkspace,
   ROLE_LANDING,
@@ -271,7 +272,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
       ["Reports"],
       ["Activity"],
     ]);
-    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & roles"], ["Webhooks", "Feature flags"], ["Audit log"]]);
+    expect(labels("admin", "admin")).toEqual([["Home"], ["Users & access"], ["Webhooks", "Feature flags"], ["Audit log"]]);
   });
   it("an admin sees the same links as each workspace's own staff", () => {
     expect(labels("it", "admin")).toEqual(labels("it", "it_staff"));
@@ -340,7 +341,7 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(counts("purchasing", "Approvals")).toEqual({ Open: "approvals" });
     expect(counts("finance", "Assets")).toEqual({ "To confirm · IT": "finToConfirmIt", "To confirm · Purchasing": "finToConfirmPurchasing" });
     expect(counts("finance", "Approvals")).toEqual({ Open: "approvals" });
-    expect(counts("admin", "Users & roles")).toEqual({ Disabled: "usersDisabled" });
+    expect(counts("admin", "Users & access")).toEqual({ "Waiting for approval": "pendingSignups", Disabled: "usersDisabled" });
     expect(counts("admin", "Webhooks")).toEqual({ "Failed deliveries": "deadDeliveries" });
     expect(counts("admin", "Feature flags")).toEqual({ Unavailable: "flagsUnavailable" });
   });
@@ -362,6 +363,8 @@ describe("WORKSPACE_NAV (Phase 42 spec §3: icon links, views under the current 
     expect(item("purchasing", "purchasing_staff", "Assets").badge).toEqual(["assetsSentBackPurchasing"]);
     // Phase 46: failed deliveries are waiting work (a replay), so the closed Webhooks link keeps their red count.
     expect(item("admin", "admin", "Webhooks").badge).toEqual(["deadDeliveries"]);
+    // Users & access (spec §4.4): the closed link keeps the waiting sign-ups' count.
+    expect(item("admin", "admin", "Users & access").badge).toEqual(["pendingSignups"]);
   });
   it("icons: Inventory and the Assets links reuse inventory, Employees employee, Approvals approval", () => {
     expect(item("it", "it_staff", "Inventory").icon).toBe("inventory");
@@ -525,9 +528,10 @@ describe("Phase 46 spec §4.3: the same style everywhere", () => {
     });
   });
 
-  it("Admin: Users & roles, Webhooks and Feature flags views, and Audit log under records", () => {
-    expect(views("admin", "admin", "Users & roles")).toEqual([
-      ["All users", "/admin/users"], ["Disabled", "/admin/users?disabled=1"],
+  it("Admin: Users & access, Webhooks and Feature flags views, and Audit log under records", () => {
+    expect(views("admin", "admin", "Users & access")).toEqual([
+      ["All users", "/admin/users"], ["Waiting for approval", "/admin/users?status=PENDING"],
+      ["Disabled", "/admin/users?status=DISABLED"],
     ]);
     expect(views("admin", "admin", "Webhooks")).toEqual([
       ["Endpoints", "/admin/webhooks"], ["Failed deliveries", "/admin/webhooks/deliveries?state=DEAD"],
@@ -646,5 +650,28 @@ describe("Phase 41 Settings › Cris (spec §2, §9: admin and it_staff only)", 
   it("matches the path exactly, not a lookalike prefix", () => {
     expect(pathAllowedForRole("/settings/crisp", "it_staff")).toBe(false);
     expect(pathAllowedForRole("/settings", "it_staff")).toBe(false);
+  });
+});
+
+describe("Users & access: Account settings and the first-sign-in page (spec §4.3, §4.5: every role)", () => {
+  const ROLES = ["admin", "it_staff", "purchasing_staff", "finance_staff", "viewer"] as const;
+  it("every role reaches /settings/account", () => {
+    for (const r of ROLES) expect(pathAllowedForRole("/settings/account", r)).toBe(true);
+  });
+  it("every signed-in role reaches /welcome/password", () => {
+    for (const r of ROLES) expect(pathAllowedForRole("/welcome/password", r)).toBe(true);
+  });
+  it("the shared PASSWORD_PAGE constant is the ungated path (fix round 1, M6)", () => {
+    expect(PASSWORD_PAGE).toBe("/welcome/password");
+    expect(pathAllowedForRole(PASSWORD_PAGE, "viewer")).toBe(true);
+  });
+  it("matches the paths exactly, not a lookalike or a wider prefix", () => {
+    expect(pathAllowedForRole("/settings/accounts", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/welcome", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/welcome/passwordx", "viewer")).toBe(false);
+    expect(pathAllowedForRole("/welcome/other", "viewer")).toBe(false);
+  });
+  it("Settings › Cris keeps its own narrower rule", () => {
+    expect(pathAllowedForRole("/settings/cris", "viewer")).toBe(false);
   });
 });

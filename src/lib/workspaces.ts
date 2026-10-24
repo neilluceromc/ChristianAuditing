@@ -13,6 +13,12 @@ export const ROLE_WORKSPACES: Record<Role, WorkspaceId[]> = {
   viewer: ["it"],
 };
 
+/**
+ * Users & access (spec §4.3): the "Choose your own password" page, the one page open while a new password is owed.
+ * Here (edge-safe) so middleware and the guards share one literal.
+ */
+export const PASSWORD_PAGE = "/welcome/password";
+
 export const ROLE_LANDING: Record<Role, string> = {
   admin: "/",
   it_staff: "/inventory",
@@ -42,7 +48,9 @@ export type CountKey =
   | "finToConfirmIt" | "finToConfirmPurchasing"
   // Task 6 (spec §5): Finance's To review queue, one per registration group
   | "finGroupsToReview"
-  | "usersDisabled" | "deadDeliveries" | "flagsUnavailable";
+  | "usersDisabled" | "deadDeliveries" | "flagsUnavailable"
+  // Users & access (spec §4.4): sign-ups waiting for an admin
+  | "pendingSignups";
 
 /**
  * What a view matches on, param by param: a string is the param's exact value; a list matches when any of the
@@ -466,12 +474,22 @@ export const WORKSPACE_NAV: Record<WorkspaceId, NavSection[]> = {
       heading: "access",
       items: [
         {
-          label: "Users & roles",
+          // Users & access (spec §4.4): renamed from "Users & roles"; the palette still finds it by the old name. The
+          // closed link keeps the waiting sign-ups' count, as Webhooks keeps its failed deliveries'.
+          label: "Users & access",
           href: "/admin/users",
           icon: "users",
+          also: ["Users & roles"],
+          badge: ["pendingSignups"],
           views: [
             { label: "All users", href: "/admin/users" },
-            { label: "Disabled", href: "/admin/users?disabled=1", count: "usersDisabled" },
+            { label: "Waiting for approval", href: "/admin/users?status=PENDING", count: "pendingSignups" },
+            // Task 4: the Disabled status (approved and turned off). The old ?disabled=1 is its alias: the page
+            // redirects it here.
+            {
+              label: "Disabled", href: "/admin/users?status=DISABLED", count: "usersDisabled",
+              match: [{ status: "DISABLED" }, { disabled: "1" }],
+            },
           ],
         },
       ],
@@ -555,7 +573,9 @@ export function resolveWorkspace(role: Role, cookie: string | undefined): Worksp
  */
 // Paths intentionally NOT workspace-gated — reachable by any authenticated
 // user. Everything else MUST match a PATH_RULE or it is denied (default-deny).
-const UNGATED: RegExp[] = [/^\/$/, /^\/dev(\/|$)/];
+// Users & access (spec §4.3): "Choose your own password" is open to every signed-in role; its page admits only
+// someone who owes a new password and sends anyone else Home. Exact path, so nothing else under /welcome opens.
+const UNGATED: RegExp[] = [/^\/$/, /^\/dev(\/|$)/, /^\/welcome\/password$/];
 
 const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[] }> = [
   { test: /^\/admin\/(users|webhooks|flags)(\/|$)/, workspaces: ["admin"] },
@@ -656,6 +676,9 @@ const PATH_RULES: Array<{ test: RegExp; workspaces: WorkspaceId[]; roles?: Role[
   // Phase 41 (spec §2, §9): Settings › Cris is for the two roles that have Cris. `roles` keeps viewer out of the
   // IT workspace it otherwise shares with it_staff; the page's own requireRole says the same.
   { test: /^\/settings\/cris(\/|$)/, workspaces: ["it", "admin"], roles: ["admin", "it_staff"] },
+  // Users & access (spec §4.5): Account settings is every role's own page. All four workspaces and no `roles` key,
+  // so every role passes (viewer through the IT workspace it shares).
+  { test: /^\/settings\/account(\/|$)/, workspaces: ["it", "purchasing", "finance", "admin"] },
   // Task 7 (purchase-orders spec §7): the bell's full page, for every team and for admins (any team's); a viewer
   // has no team, so no notifications and no bell.
   {

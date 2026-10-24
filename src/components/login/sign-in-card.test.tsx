@@ -6,7 +6,7 @@ import type { Step } from "./login-steps";
 const h = vi.hoisted(() => ({
   signUp: async () => ({}),
   /** When set, the sign-up form reports this state, standing in for a finished server action (static render runs no effects). */
-  signupState: null as null | { created?: boolean; pendingApproval?: boolean },
+  signupState: null as null | { created?: boolean },
 }));
 vi.mock("@/server/auth/actions", () => ({
   signInWithCredentials: async () => ({}),
@@ -35,7 +35,6 @@ function render(step: Step, overrides: Partial<Props> = {}): string {
       domain="thebackroomop.com"
       next="/employees"
       microsoftAction={null}
-      viewerLanding="/inventory"
       {...overrides}
     />,
   );
@@ -122,29 +121,14 @@ describe("SignInCard", () => {
     for (const name of ["name", "email", "password"]) expect(two).toContain(`name="${name}"`);
   });
 
-  it("Sign up 3: You're in, Viewer, Go to Cris links to the viewer landing", () => {
+  it("Sign up 3 (Users & access spec §4.6): wait for an admin, in the two verbatim lines, then back to sign in", () => {
     const html = render("signup-done");
     expect(html).toContain("Sign up · 3 of 3");
-    expect(html).toContain("You&#x27;re in");
-    expect(html).toContain("Viewer");
-    expect(html).toContain("An admin assigns your role, which decides the workspaces you can open. You&#x27;ll start on Home.");
-    expect(html).not.toContain("land in"); // every sign-in lands on Home now (final review M7)
-    expect(html).toMatch(/<a[^>]* href="\/inventory"[^>]*>Go to Cris<\/a>/);
-  });
-
-  it("Sign up 3 with pendingApproval: Account created, admin approval copy, back to sign in, no You're in", () => {
-    h.signupState = { created: true, pendingApproval: true };
-    try {
-      const html = render("signup-done");
-      expect(html).toContain("Sign up · 3 of 3");
-      expect(html).toContain("Account created");
-      expect(html).toContain("An admin needs to approve it before you can sign in.");
-      expect(html).not.toContain("You&#x27;re in");
-      expect(html).not.toContain("Go to Cris");
-      expect(html).not.toContain("Viewer");
-      expect(html).toMatch(/<a[^>]* href="\/login\?step=login&amp;next=%2Femployees"[^>]*>Back to sign in<\/a>/);
-    } finally {
-      h.signupState = null;
-    }
+    expect(html).toMatch(/<h1[^>]*>Wait for an admin to approve your account\.<\/h1>/);
+    expect(html).toContain("You can sign in once it&#x27;s approved.");
+    expect(html).not.toContain("You&#x27;re in");
+    expect(html).not.toContain("Go to Cris");
+    expect(html).not.toContain("Viewer");
+    expect(html).toMatch(/<a[^>]* href="\/login\?step=login&amp;next=%2Femployees"[^>]*>Back to sign in<\/a>/);
   });
 });

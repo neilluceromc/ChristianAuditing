@@ -36,6 +36,12 @@ export const NOTIFICATION_DAYS = 90;
 export function notificationCutoff(now: Date): Date {
   return new Date(now.getTime() - NOTIFICATION_DAYS * DAY_MS);
 }
+/** Users & access (spec §4.6): failed sign-ins only matter for 15 minutes; the worker drops them after a day. */
+export const SIGN_IN_ATTEMPT_HOURS = 24;
+
+export function signInAttemptCutoff(now: Date): Date {
+  return new Date(now.getTime() - SIGN_IN_ATTEMPT_HOURS * 3_600_000);
+}
 export function pruneDue(lastPruneAt: Date | null, now: Date): boolean {
   return lastPruneAt === null || now.getTime() - lastPruneAt.getTime() >= PRUNE_INTERVAL_MS;
 }

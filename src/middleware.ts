@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfigEdge } from "@/server/auth/config.edge";
-import { pathAllowedForRole, ROLE_LANDING } from "@/lib/workspaces";
+import { PASSWORD_PAGE, pathAllowedForRole, ROLE_LANDING } from "@/lib/workspaces";
 
 const { auth } = NextAuth(authConfigEdge);
 
@@ -27,6 +27,15 @@ export default auth((req) => {
     return NextResponse.redirect(login);
   }
 
+  // Users & access (spec §4.3, Review Focus #2): signed in with a temporary password, every page (a deep link such as
+  // /finance/assets included) goes to "Choose your own password" until one is chosen. /logout passed above; the auth
+  // API and static assets never reach middleware (see `matcher`). A server action from a stale tab is a POST with
+  // the Next-Action header: it goes on to the action, whose guard refuses it with "Choose your own password first"
+  // (a redirect here would hand the action's fetch a page instead of its result).
+  if (user.mustChangePassword && pathname !== PASSWORD_PAGE && !isServerAction(req)) {
+    return NextResponse.redirect(new URL(PASSWORD_PAGE, req.nextUrl));
+  }
+
   // Signed-in users don't see login/signup; /bootstrap 404s server-side on its own. They go to Home (spec §7.1).
   if (AUTH_PATHS.test(pathname) && !pathname.startsWith("/bootstrap")) {
     return NextResponse.redirect(new URL("/", req.nextUrl));
@@ -38,6 +47,10 @@ export default auth((req) => {
     return NextResponse.redirect(new URL(ROLE_LANDING[user.role], req.nextUrl));
   }
 });
+
+function isServerAction(req: { method?: string; headers?: Headers }): boolean {
+  return req.method === "POST" && !!req.headers?.get("next-action");
+}
 
 export const config = {
   matcher: [

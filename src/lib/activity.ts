@@ -62,6 +62,9 @@ export const ACTION_LABELS: Record<string, string> = {
   "supplier.bank.added": "Bank details added", "supplier.bank.removed": "Bank details removed", "supplier.bank.revealed": "Bank details viewed",
   signup: "Signed up", bootstrap: "First admin set up", "role-change": "Role changed",
   disable: "Account disabled", enable: "Account enabled",
+  // Users & access (spec §4.4, §4.5)
+  "user.create": "Account created", "user.approve": "Sign-up approved", "user.decline": "Sign-up declined",
+  "user.update": "Account updated", "password.reset": "Password reset", "password.change": "Password changed",
   "flag-enable": "Flag turned on", "flag-disable": "Flag turned off", "flag-value": "Flag value changed",
   "cris-settings": "Cris settings changed",
   "endpoint-enable": "Webhook turned on", "endpoint-disable": "Webhook turned off", "endpoint-delete": "Webhook removed",
@@ -684,6 +687,20 @@ function sentenceBody(entry: ActivityEntryLike, opts?: { omitActor?: boolean; om
       const what = `a purchase of ${n} item${n === 1 ? "" : "s"}`;
       return omitEntity ? `${actor}recorded ${what}` : `${actor}recorded ${what} (${entry.entityLabel})`;
     }
+    // Users & access (spec §4.4, §4.5): entityLabel is the account's name. A temporary password never reaches a diff,
+    // so password.reset and password.change read from the action alone.
+    case "user.create":
+      return omitEntity ? `${actor}created the account` : `${actor}created ${entry.entityLabel}'s account`;
+    case "user.approve":
+      return omitEntity ? `${actor}approved the sign-up` : `${actor}approved ${entry.entityLabel}'s sign-up`;
+    case "user.decline":
+      return omitEntity ? `${actor}declined the sign-up` : `${actor}declined ${entry.entityLabel}'s sign-up`;
+    case "user.update":
+      return omitEntity ? `${actor}updated ${fieldList(diff)}` : `${actor}updated ${fieldList(diff)} on ${entry.entityLabel}'s account`;
+    case "password.reset":
+      return omitEntity ? `${actor}reset the password` : `${actor}reset ${entry.entityLabel}'s password`;
+    case "password.change":
+      return `${actor}changed their password`;
     // Phase 41 (spec §9): written on the `cris` feature flag; the flag's key adds nothing to the sentence
     case "cris-settings":
       return `${actor}changed the Cris settings`;

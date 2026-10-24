@@ -89,7 +89,7 @@ export async function collectSnapshot(now: Date): Promise<Record<SnapshotKey, bi
     "fin.toConfirm.it": toConfirmIt,
     "fin.toConfirm.purchasing": toConfirmPurchasing,
     "fin.bookC": book.bookC,
-    "admin.activeUsers": admin.users.total - admin.users.disabled,
+    "admin.activeUsers": admin.users.active,
     "admin.disabled": admin.users.disabled,
     "admin.deadDeliveries": admin.webhooks.dead,
   };

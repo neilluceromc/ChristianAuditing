@@ -1,6 +1,7 @@
 import { prisma } from "../server/db/client";
 import {
   PRUNE_BATCH, crisConversationCutoff, crisPendingCutoff, metricSnapshotCutoff, notificationCutoff, retentionCutoff,
+  signInAttemptCutoff,
 } from "../lib/retention";
 
 export interface PruneResult {
@@ -10,13 +11,14 @@ export interface PruneResult {
   crisPending: number;
   metricSnapshots: number;
   notifications: number;
+  signInAttempts: number;
 }
 
 /**
  * One full pass, in id batches: finished deliveries and jobs older than the cutoff, and (Phase 41, spec §7) Cris
  * chats untouched for 30 days (their messages cascade) and Cris pending actions older than a day; and (Phase 46,
  * spec §2.3) MetricSnapshot days older than 400 days; and (Task 7, purchase-orders spec §7) bell notifications older
- * than 90 days.
+ * than 90 days; and (Users & access, spec §4.6) failed sign-in attempts older than a day.
  */
 export async function pruneRetention(now: Date = new Date()): Promise<PruneResult> {
   const cutoff = retentionCutoff(now);
@@ -49,7 +51,9 @@ export async function pruneRetention(now: Date = new Date()): Promise<PruneResul
     () => prisma.notification.findMany({ where: { createdAt: { lt: noteCutoff } }, select: { id: true }, take: PRUNE_BATCH }),
     (ids) => prisma.notification.deleteMany({ where: { id: { in: ids }, createdAt: { lt: noteCutoff } } }),
   );
-  return { deliveries, jobs, crisConversations, crisPending, metricSnapshots, notifications };
+  // Users & access (spec §4.6): a row only counts for 15 minutes; nothing revives an old one, so one statement.
+  const signInAttempts = (await prisma.signInAttempt.deleteMany({ where: { createdAt: { lt: signInAttemptCutoff(now) } } })).count;
+  return { deliveries, jobs, crisConversations, crisPending, metricSnapshots, notifications, signInAttempts };
 }
 
 async function pruneTable(pick: () => Promise<{ id: string }[]>, drop: (ids: string[]) => Promise<{ count: number }>): Promise<number> {

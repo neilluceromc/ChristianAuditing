@@ -51,7 +51,7 @@ async function main() {
       "EquipmentPolicy", "EmployeeTransfer", "Employee", "AssetType", "AssetCategory", "Vendor",
       "Department", "FeatureFlag", "User",
       "StocktakeLine", "Stocktake", "StockMovement", "StockLotDocument", "StockAllocation", "StockLot",
-      "StockItem", "StockCategory", "MetricSnapshot" CASCADE`);
+      "StockItem", "StockCategory", "MetricSnapshot", "SignInAttempt" CASCADE`);
 
   const hash = await bcrypt.hash(SEED_PASSWORD, 10);
 
@@ -62,6 +62,16 @@ async function main() {
     prisma.user.create({ data: { email: "finance@thebackroomop.com", name: "L. Domingo", role: "finance_staff", passwordHash: hash } }),
   ]);
   await prisma.user.create({ data: { email: "viewer@thebackroomop.com", name: "V. Cruz", role: "viewer", passwordHash: hash } });
+  // Users & access: the five accounts above are APPROVED by the column's default (approvalState @default(APPROVED)),
+  // and keep the shared seed password (the owner's choice). One sign-up waits for approval, as a self sign-up does
+  // (PENDING and turned off), so the Waiting for approval chip and the Approve panel have something to show. The
+  // sign-in pause's failures (SignInAttempt) are truncated above with the rest, so no spec inherits a paused email.
+  await prisma.user.create({
+    data: {
+      email: "pending@thebackroomop.com", name: "P. Navarro", role: "viewer", passwordHash: hash,
+      approvalState: "PENDING", disabled: true,
+    },
+  });
 
   await prisma.featureFlag.createMany({
     data: [

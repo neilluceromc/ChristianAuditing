@@ -22,10 +22,17 @@ vi.mock("next-auth", () => ({ AuthError: class AuthError extends Error {} }));
 vi.mock("./index", () => ({ signIn: h.signIn, signOut: vi.fn(), auth: vi.fn() }));
 vi.mock("./guards", () => ({ requireUser: vi.fn() }));
 vi.mock("@/server/ui-prefs", () => ({ saveUiPref: vi.fn() }));
+// Users & access: the pause and the password check have their own tests (sign-in-limit, actions); here they pass.
+vi.mock("./sign-in-limit", () => ({
+  reserveSignInAttempt: async () => ({ paused: false, attemptId: "a1" }),
+  releaseSignInAttempt: async () => {},
+  clearSignInFailures: async () => {},
+}));
+vi.mock("./password-check", () => ({ passwordMatches: async () => true }));
 vi.mock("../db/client", () => ({
   prisma: {
     featureFlag: { findUnique: async () => null },
-    user: { findUnique: h.userFindUnique, count: async () => 0, create: vi.fn() },
+    user: { findUnique: h.userFindUnique, count: async () => 0, create: vi.fn(), update: vi.fn() },
     auditEntry: { create: vi.fn() },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
@@ -60,7 +67,9 @@ beforeEach(() => {
   h.signIn.mockResolvedValue(undefined);
   h.cookieSet.mockReset();
   h.userFindUnique.mockReset();
-  h.userFindUnique.mockResolvedValue({ role: "finance_staff" });
+  h.userFindUnique.mockResolvedValue({
+    id: "u1", role: "finance_staff", passwordHash: "hash", disabled: false, approvalState: "APPROVED",
+  });
   vi.stubEnv("QUICK_LOGIN_EMAILS", "fin@thebackroomop.com");
   vi.stubEnv("VERCEL", "");
 });
@@ -96,8 +105,19 @@ describe("quickSignIn", () => {
 
 describe("createBootstrapAdmin", () => {
   it("opens Home", async () => {
-    const f = form({ name: "Admin One", email: "admin@thebackroomop.com", password: "long enough password", domain: "" });
+    const f = form({ name: "Admin One", email: "admin@thebackroomop.com", password: "long enough password 7", domain: "" });
     expect(await destination(() => createBootstrapAdmin({}, f))).toBe("/");
     expect(h.cookieSet).toHaveBeenCalledWith("br.dept", "it", expect.any(Object));
+  });
+
+  // Final review M-8: the first admin's password follows the same rules as every new password.
+  it("refuses a password that breaks the shared rules, with their copy", async () => {
+    const base = { name: "Admin One", email: "admin@thebackroomop.com", domain: "" };
+    expect(await createBootstrapAdmin({}, form({ ...base, password: "short1" }))).toEqual({
+      error: "Password must be at least 10 characters.",
+    });
+    expect(await createBootstrapAdmin({}, form({ ...base, password: "long enough password" }))).toEqual({
+      error: "Password must use letters and at least one number.",
+    });
   });
 });

@@ -64,7 +64,7 @@ vi.mock("@/server/modules/finance/depreciation-queries", async (orig) => ({
   bookValueTotals: async () => ({ costC: 0, accumulatedC: 0, bookC: 123_456_789, asOf: 0 }),
 }));
 vi.mock("@/server/modules/admin/queries", () => ({
-  adminHome: async () => ({ users: { total: 40, disabled: 4, byRole: [] }, flags: [], webhooks: { endpoints: 0, inactive: 0, dead: 7, delivered: 0 } }),
+  adminHome: async () => ({ users: { total: 40, active: 34, disabled: 4, byRole: [] }, flags: [], webhooks: { endpoints: 0, inactive: 0, dead: 7, delivered: 0 } }),
 }));
 vi.mock("@/server/modules/home/queries", async (orig) => ({
   ...(await orig<object>()),
@@ -101,7 +101,7 @@ describe("collectSnapshot", () => {
       // ₱2,000.20 + ₱0.90 = ₱2,001.10
       "fin.waitingC": 200_110n, "fin.waitingCount": 2n,
       "fin.toConfirm.it": 5n, "fin.toConfirm.purchasing": 6n, "fin.bookC": 123_456_789n,
-      "admin.activeUsers": 36n, "admin.disabled": 4n, "admin.deadDeliveries": 7n,
+      "admin.activeUsers": 34n, "admin.disabled": 4n, "admin.deadDeliveries": 7n,
     });
     expect(h.stockToday).toBe("2026-10-21"); // the Manila day of NOW
   });

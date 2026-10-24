@@ -35,6 +35,7 @@ describe("countBadge", () => {
     expect(countBadge("finToConfirmIt", 5, b)?.label).toBe("5 IT registrations to confirm");
     expect(countBadge("finToConfirmPurchasing", 6, b)?.label).toBe("6 Purchasing registrations to confirm");
     expect(countBadge("usersDisabled", 4, b)?.label).toBe("4 disabled");
+    expect(countBadge("pendingSignups", 1, b)?.label).toBe("1 waiting for approval");
     expect(countBadge("flagsUnavailable", 1, b)?.label).toBe("1 unavailable");
   });
 
@@ -99,6 +100,6 @@ describe("navCountKeys", () => {
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.finance, "finance_staff")).sort())
       .toEqual(["approvals", "finGroupsToReview", "finToConfirmIt", "finToConfirmPurchasing", "poReady"]);
     expect(navCountKeys(filterSectionsForRole(WORKSPACE_NAV.admin, "admin")).sort())
-      .toEqual(["deadDeliveries", "flagsUnavailable", "usersDisabled"]);
+      .toEqual(["deadDeliveries", "flagsUnavailable", "pendingSignups", "usersDisabled"]);
   });
 });

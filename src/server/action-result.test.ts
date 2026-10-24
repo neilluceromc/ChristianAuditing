@@ -1,5 +1,25 @@
-import { describe, expect, it } from "vitest";
-import { rateLimited } from "./action-result";
+import { afterEach, describe, expect, it } from "vitest";
+import { forbidden, PASSWORD_OWED_COPY, rateLimited, setForbiddenReasonProbe } from "./action-result";
+
+describe("forbidden (Users & access spec §4.3)", () => {
+  afterEach(() => setForbiddenReasonProbe(() => null));
+
+  it("keeps the default sentence and carries no reason", () => {
+    expect(forbidden()).toEqual({ ok: false, kind: "forbidden", message: "You don't have permission to do that." });
+  });
+
+  it("a password still owed reads \"Choose your own password first\"", () => {
+    expect(PASSWORD_OWED_COPY).toBe("Choose your own password first");
+    expect(forbidden("password_owed")).toEqual({
+      ok: false, kind: "forbidden", reason: "password_owed", message: "Choose your own password first",
+    });
+  });
+
+  it("an existing bare forbidden() call takes the request's reason from the probe the guards install", () => {
+    setForbiddenReasonProbe(() => "password_owed");
+    expect(forbidden()).toMatchObject({ reason: "password_owed", message: PASSWORD_OWED_COPY });
+  });
+});
 
 describe("rateLimited", () => {
   it("keeps the default 60/min message for every caller that doesn't override it", () => {

@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useId, useState } from "react";
+import { cn } from "@/lib/cn";
 import { useFocusTrap } from "./use-focus-trap";
 
 export function Dialog({
@@ -13,6 +14,7 @@ export function Dialog({
   size = "default",
   description,
   headerActions,
+  bottomOnPhone = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +31,8 @@ export function Dialog({
   description?: React.ReactNode;
   /** Viewer only: the buttons at the header's end (they wrap under the title on a phone). */
   headerActions?: React.ReactNode;
+  /** Users & access (Task 4): below 700 px the dialog sits on the bottom edge, full width (Reset password). */
+  bottomOnPhone?: boolean;
 }) {
   const viewer = size === "viewer";
   const setTrapRef = useFocusTrap(open, onClose, viewer ? { initialFocus: "container" } : undefined);
@@ -77,7 +81,12 @@ export function Dialog({
 
   return createPortal(
     // print:hidden — a dialog is never part of a printout (iOS Safari returns from print() before it renders)
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 print:hidden">
+    <div
+      className={cn(
+        "fixed inset-0 z-50 grid place-items-center p-4 print:hidden",
+        bottomOnPhone && "max-[700px]:place-items-end max-[700px]:p-0",
+      )}
+    >
       <div
         aria-hidden
         onClick={onClose}
@@ -91,7 +100,11 @@ export function Dialog({
         aria-labelledby={titleId}
         aria-describedby={descId}
         tabIndex={-1}
-        className="relative max-h-[calc(100vh-2rem)] w-[352px] max-w-full overflow-y-auto rounded-(--radius-card) border border-border bg-surface-raised p-4 shadow-dialog"
+        className={cn(
+          "relative max-h-[calc(100vh-2rem)] w-[352px] max-w-full overflow-y-auto rounded-(--radius-card) border border-border bg-surface-raised p-4 shadow-dialog",
+          bottomOnPhone &&
+            "max-[700px]:w-full max-[700px]:rounded-b-none max-[700px]:pb-[max(1rem,env(safe-area-inset-bottom))]",
+        )}
         style={{ animation: "pop var(--dur-4) var(--ease-std)" }}
       >
         <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>

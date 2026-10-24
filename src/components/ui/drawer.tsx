@@ -11,6 +11,8 @@ export function Drawer({
   title,
   width = 376,
   side = "right",
+  bare = false,
+  className,
   children,
 }: {
   open: boolean;
@@ -18,6 +20,13 @@ export function Drawer({
   title: string;
   width?: number;
   side?: "left" | "right";
+  /**
+   * Users & access (Task 4): no title bar and no padding — the children draw their own header (with its own Close)
+   * and footer. The drawer is then named by `title` through aria-label.
+   */
+  bare?: boolean;
+  /** Extra classes on the panel, e.g. `max-[700px]:w-full!` for a full-screen sheet on a phone. */
+  className?: string;
   children: React.ReactNode;
 }) {
   // Initial focus goes to the panel itself, not the ✕ Close button — a
@@ -40,30 +49,38 @@ export function Drawer({
         ref={setTrapRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-labelledby={bare ? undefined : titleId}
+        aria-label={bare ? title : undefined}
         tabIndex={-1}
         className={cn(
           "absolute inset-y-0 flex max-w-full flex-col bg-surface-raised",
           side === "right" ? "right-0 border-l shadow-drawer" : "left-0 border-r",
           "border-border",
+          className,
         )}
         style={{
           width,
           animation: `${side === "right" ? "sheet" : "sheetLeft"} var(--dur-4) var(--ease-std)`,
         }}
       >
-        <div className="flex items-center justify-between border-b border-border-faint px-4 py-3">
-          <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-(--radius-ctl) px-2 py-1 text-fg-muted hover:bg-surface-subtle"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        {bare ? (
+          children
+        ) : (
+          <>
+            <div className="flex items-center justify-between border-b border-border-faint px-4 py-3">
+              <h2 id={titleId} className="text-[15px] font-semibold text-fg">{title}</h2>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="rounded-(--radius-ctl) px-2 py-1 text-fg-muted hover:bg-surface-subtle"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3">{children}</div>
+          </>
+        )}
       </div>
     </div>,
     document.body,

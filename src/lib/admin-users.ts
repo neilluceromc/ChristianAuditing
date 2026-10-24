@@ -1,4 +1,6 @@
-import type { Role } from "@prisma/client";
+import type { AccountApprovalState, GroupKind, Role } from "@prisma/client";
+import { isAllowedDomain, normalizeEmail } from "./auth-shared";
+import { localDateISO } from "./format";
 import { ROLE_WORKSPACES, WORKSPACE_META, type WorkspaceId } from "./workspaces";
 
 /** Admin first: the select reads as a privilege ladder, most-privileged at the top. */
@@ -22,8 +24,12 @@ export interface TargetUser {
 
 export type RuleResult = { allowed: true } | { allowed: false; reason: string };
 
-const PERMANENT_LOCK =
-  "This is the permanent admin account — its role and access can't be changed, so the system can never be locked out of itself.";
+/**
+ * Users & access (spec §4.4, owner 2026-10-24): the permanent admin's account is locked against EVERY admin action
+ * on Users & access (role, turning it off, password reset, name, email, employee link, approve, decline). Its owner
+ * changes their own password in Account settings; a forgotten one is recovered with `npm run admin:recover`.
+ */
+export const PERMANENT_LOCK = "The permanent admin's account can only be changed by its owner.";
 
 /**
  * Why this row cannot be edited at all, or null when it can. The page prints
@@ -68,16 +74,185 @@ export function roleChange(target: TargetUser, next: Role, actorId: string): Rul
  * apart from the lock branch above — see the note in the test file.
  */
 export function disableChange(target: TargetUser, next: boolean, actorId: string): RuleResult {
+  if (next) return canTurnOff({ id: actorId }, target);
+  const locked = lockReason(target);
+  return locked ? { allowed: false, reason: locked } : { allowed: true };
+}
+
+/**
+ * Users & access (spec §4.4): may `actor` turn `target`'s account off? Never the permanent admin (the lock), never
+ * your own account (you'd be signed out with no way back in). The panel greys its switch out with this reason, and
+ * setUserDisabled refuses on the same grounds.
+ */
+export function canTurnOff(actor: { id: string }, target: TargetUser): RuleResult {
   const locked = lockReason(target);
   if (locked) return { allowed: false, reason: locked };
-  if (next && target.id === actorId) {
+  if (target.id === actor.id) {
     return {
       allowed: false,
       reason:
-        "You can't disable your own account — you'd be signed out with no way back in. Another admin can do it for you.",
+        "You can't turn off your own account — you'd be signed out with no way back in. Another admin can do it for you.",
     };
   }
   return { allowed: true };
+}
+
+/**
+ * Users & access (spec §4.4): the email field's problem, or null. In order: the shape, the allowed domain (null =
+ * unrestricted), then whether another account already uses it (the caller looks that up on the normalized email).
+ */
+export function emailProblem(email: string, domain: string | null, takenByOther: boolean): string | null {
+  const normalized = normalizeEmail(email);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)) return "Enter a valid email.";
+  if (!isAllowedDomain(normalized, domain)) return `Use an @${domain} address.`;
+  if (takenByOther) return "Another account already uses that email.";
+  return null;
+}
+
+/** What a role opens, as the role-change note says it: "all four workspaces" for admin, else roleWorkspaces. */
+function opensPhrase(role: Role): string {
+  return role === "admin" ? "all four workspaces" : roleWorkspaces(role);
+}
+
+/**
+ * Users & access (spec §4.4, verbatim): the note under the role cards when a different role is picked, or null when
+ * the role isn't changing. "Moves {first name} from {old} to {new}: opens {new} instead of {old}. They're signed out
+ * when you save."
+ */
+export function roleChangeNote(name: string, from: Role, to: Role): string | null {
+  if (from === to) return null;
+  const first = name.trim().split(/\s+/)[0] || name;
+  return (
+    `Moves ${first} from ${ROLE_LABELS[from]} to ${ROLE_LABELS[to]}: ` +
+    `opens ${opensPhrase(to)} instead of ${opensPhrase(from)}. They're signed out when you save.`
+  );
+}
+
+/** Users & access (spec §4.4): the five statuses, in the status filter's order. */
+export const USER_STATUSES = ["PENDING", "ACTIVE", "MUST_SET_PASSWORD", "DISABLED", "DECLINED"] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+export const USER_STATUS_LABEL: Record<UserStatus, string> = {
+  PENDING: "Waiting for approval",
+  ACTIVE: "Active",
+  MUST_SET_PASSWORD: "Must set password",
+  DISABLED: "Disabled",
+  DECLINED: "Declined",
+};
+
+/**
+ * An account's status. The approval state comes first: a waiting or declined sign-up is also turned off (so older
+ * code refuses it too), but it reads as waiting or declined, never as "Disabled". `userStatusWhere`
+ * (admin-lists.ts) is the same mapping as a query.
+ */
+export function userStatus(row: {
+  approvalState: AccountApprovalState;
+  disabled: boolean;
+  mustChangePassword: boolean;
+}): UserStatus {
+  if (row.approvalState === "PENDING") return "PENDING";
+  if (row.approvalState === "DECLINED") return "DECLINED";
+  if (row.disabled) return "DISABLED";
+  if (row.mustChangePassword) return "MUST_SET_PASSWORD";
+  return "ACTIVE";
+}
+
+/*
+ * Users & access page (spec §4.4, Task 4; the V2 boards). The page's words live here, pure, so the components and
+ * their tests share one copy.
+ */
+
+/** The role tabs (a select on a phone): All, then each role by its short name. */
+export const ROLE_TABS: ReadonlyArray<{ role: Role | null; label: string }> = [
+  { role: null, label: "All" },
+  { role: "admin", label: "Admin" },
+  { role: "it_staff", label: "IT" },
+  { role: "purchasing_staff", label: "Purchasing" },
+  { role: "finance_staff", label: "Finance" },
+  { role: "viewer", label: "Viewer" },
+];
+
+/** What each role card says the role opens (ROLE_WORKSPACES in words). */
+export const ROLE_CARD_OPENS: Record<Role, string> = {
+  admin: "Every workspace, plus Users & access and Setup",
+  it_staff: "IT: inventory, people, worklist, offboarding",
+  purchasing_staff: "Purchasing: purchase orders, vendors, stock",
+  finance_staff: "Finance: asset register, reviews, depreciation",
+  viewer: "IT workspace, read-only",
+};
+
+const DAY_MS = 86_400_000;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "14 Sep" / "14 Sep 2026" on the Manila calendar. Built by hand: some ICU builds write September "Sept". */
+function manilaDay(value: string | Date, withYear: boolean): string {
+  const [y, m, d] = localDateISO(typeof value === "string" ? new Date(value) : value).split("-");
+  return `${Number(d)} ${MONTHS[Number(m) - 1]}${withYear ? ` ${y}` : ""}`;
+}
+
+const manilaTime = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Manila",
+});
+
+/** Last sign-in, on the Manila calendar: "Never", "Today 09:12", "Yesterday", "3 days ago", then "14 Sep 2026". */
+export function lastSignInLabel(iso: string | null, now: Date): string {
+  if (!iso) return "Never";
+  const at = new Date(iso);
+  const days = Math.round(
+    (Date.parse(`${localDateISO(now)}T00:00:00Z`) - Date.parse(`${localDateISO(at)}T00:00:00Z`)) / DAY_MS,
+  );
+  if (days <= 0) return `Today ${manilaTime.format(at)}`;
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return manilaDay(at, true);
+}
+
+/** The Sign-in section's Password line: a temporary one with the day it was given, one they set, or none (SSO). */
+export function passwordLabel(row: {
+  signIn: "credentials" | "SSO only";
+  mustChangePassword: boolean;
+  passwordChangedAt: string | null;
+}): string {
+  if (row.signIn === "SSO only") return "None — signs in with SSO";
+  const day = row.passwordChangedAt ? `, ${row.mustChangePassword ? "given " : ""}${manilaDay(row.passwordChangedAt, false)}` : "";
+  return row.mustChangePassword ? `Temporary${day}` : `Set by them${day}`;
+}
+
+/** "1 Sep 2026 by M. Cruz", or the date alone when no admin created it (a sign-up, or an account from before). */
+export function createdLabel(createdAt: string, createdByName: string | null): string {
+  const day = manilaDay(createdAt, true);
+  return createdByName ? `${day} by ${createdByName}` : day;
+}
+
+/** Verbatim (plan Global Constraints): the inline confirm before an account is turned off. */
+export function turnOffConfirm(name: string): string {
+  return `Turn off ${name}'s account? They're signed out now and can't sign in. Their history stays.`;
+}
+
+/** Verbatim: Add user's done line. */
+export function accountCreated(name: string): string {
+  return `Account created for ${name} — give them the temporary password`;
+}
+
+/** Verbatim: the chip above the list while sign-ups wait. */
+export function waitingChip(n: number): string {
+  return `Waiting for approval · ${n}`;
+}
+
+/** Verbatim: the amber note beside a linked employee who is offboarding or offboarded. */
+export const OFFBOARDED_NOTE = "Employee offboarded";
+
+/**
+ * "See this person's access history →": the Activity page (/audit) on user entries, searched by the account's id.
+ * The page's search matches an entry's entity id, so this lists exactly that account's entries.
+ */
+export function accessHistoryHref(userId: string): string {
+  return `/audit?${new URLSearchParams({ entity: "user", q: userId }).toString()}`;
+}
+
+/** An employee's group as the list shows it: the department's name, or "Client: X" for a client. */
+export function groupLabel(group: { name: string; kind: GroupKind }): string {
+  return group.kind === "CLIENT" ? `Client: ${group.name}` : group.name;
 }
 
 /**

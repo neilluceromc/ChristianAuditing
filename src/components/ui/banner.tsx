@@ -17,13 +17,16 @@ export function Banner({
   /**
    * The live-region role. By default a fault or attention banner is an alert (it interrupts), and anything else a
    * status. A banner that is simply part of the page on load (say, "No SI number yet") passes "status", so a screen
-   * reader isn't interrupted every time the page opens.
+   * reader isn't interrupted every time the page opens. "off" gives it no role, for a banner placed inside a live
+   * region the page always renders.
    */
-  live?: "alert" | "status";
+  live?: "alert" | "status" | "off";
 }) {
   return (
     <div
-      role={live ?? (tone === "fault" || tone === "attention" ? "alert" : "status")}
+      // "off": the banner sits inside a live region its page keeps rendered (so the message is announced when it
+      // appears); a second status role inside it would be redundant.
+      role={live === "off" ? undefined : (live ?? (tone === "fault" || tone === "attention" ? "alert" : "status"))}
       className={cn("rounded-(--radius-card) border px-4 py-3", className)}
       style={{
         background: `var(--st-${tone}-bg)`,
